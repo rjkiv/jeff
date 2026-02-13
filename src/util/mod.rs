@@ -1,6 +1,5 @@
 use std::{borrow::Cow, ops::Deref};
 
-pub mod alf;
 pub mod asm;
 pub mod bin2c;
 pub mod comment;
@@ -8,12 +7,8 @@ pub mod config;
 pub mod crypto;
 pub mod dep;
 pub mod diff;
-pub mod dol;
-pub mod dwarf;
 pub mod elf;
-pub mod extab;
 pub mod file;
-pub mod lcf;
 pub mod map;
 pub mod map_exe;
 pub mod ncompress;
