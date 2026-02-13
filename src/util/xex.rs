@@ -30,11 +30,11 @@ use crate::{
 };
 
 // quick and ez ways to read data from a block of bytes
-pub fn read_halfword(data: &Vec<u8>, index: usize) -> u16 {
+pub fn read_halfword(data: &[u8], index: usize) -> u16 {
     u16::from_be_bytes([data[index], data[index + 1]])
 }
 
-pub fn read_word(data: &Vec<u8>, index: usize) -> u32 {
+pub fn read_word(data: &[u8], index: usize) -> u32 {
     u32::from_be_bytes([data[index], data[index + 1], data[index + 2], data[index + 3]])
 }
 
@@ -77,7 +77,7 @@ pub struct BaseFileFormat {
 }
 
 impl BaseFileFormat {
-    fn parse(data: &Vec<u8>) -> Result<Self> {
+    fn parse(data: &[u8]) -> Result<Self> {
         let encryption = XexEncryption::try_from(read_halfword(data, 0))?;
         let compression = XexCompression::try_from(read_halfword(data, 2))?;
         let mut basics: Vec<BasicCompression> = vec![];
@@ -126,7 +126,7 @@ pub struct ImportLibrary {
 }
 
 impl ImportLibraries {
-    fn parse(data: &Vec<u8>) -> Result<Self> {
+    fn parse(data: &[u8]) -> Result<Self> {
         let string_size = read_word(data, 0);
         let lib_count = read_word(data, 4);
 
@@ -189,7 +189,7 @@ pub struct ResourceInfo {
 }
 
 impl ResourceInfos {
-    pub fn parse(data: &Vec<u8>) -> Result<Self> {
+    pub fn parse(data: &[u8]) -> Result<Self> {
         ensure!(
             data.len() % 16 == 0,
             "Resource info has unexpected length! (expected a multiple of 16)"
@@ -220,7 +220,7 @@ pub struct XexHeader {
 }
 
 impl XexHeader {
-    fn parse(data: &Vec<u8>) -> Result<Self> {
+    fn parse(data: &[u8]) -> Result<Self> {
         let magic = read_word(data, 0);
         ensure!(magic == 0x58455832, "XEX2 magic header not found!");
         let module_flags = read_word(data, 4);
@@ -262,7 +262,7 @@ pub struct XexOptionalHeaderData {
 }
 
 impl XexOptionalHeaderData {
-    fn parse(data: &Vec<u8>) -> Result<Self> {
+    fn parse(data: &[u8]) -> Result<Self> {
         // read in the optional headers
         let num_optional_headers = read_word(data, 20);
         let mut opt_headers: Vec<XexOptionalHeader> = vec![];
@@ -398,7 +398,7 @@ pub struct XexOptionalHeader {
 }
 
 impl XexOptionalHeader {
-    pub fn new(data: &Vec<u8>, index: usize) -> Self {
+    pub fn new(data: &[u8], index: usize) -> Self {
         let mut hdr = Self {
             id: XexOptionalHeaderID::try_from(read_word(data, index)).unwrap(),
             value: read_word(data, index + 4),
@@ -450,7 +450,7 @@ pub struct XexLoaderInfo {
 }
 
 impl XexLoaderInfo {
-    fn parse(data: &Vec<u8>, security_offset: u32) -> Result<Self> {
+    fn parse(data: &[u8], security_offset: u32) -> Result<Self> {
         let mut pos = security_offset as usize;
         let header_size = read_word(data, pos);
         let image_size = read_word(data, pos + 4);
@@ -605,21 +605,15 @@ impl XexInfo {
     }
 
     pub fn try_get_exe(
-        exe_data: &Vec<u8>,
+        exe_data: &[u8],
         session_key: &[u8; 16],
         bff: &BaseFileFormat,
         img_size: u32,
     ) -> Result<Vec<u8>> {
-        let compressed: Cow<[u8]>;
-
-        match bff.encryption {
-            XexEncryption::No => {
-                compressed = Cow::Borrowed(exe_data);
-            }
-            XexEncryption::Yes => {
-                compressed = Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, exe_data)?);
-            }
-        }
+        let compressed: Cow<[u8]> = match bff.encryption {
+            XexEncryption::No => Cow::Borrowed(exe_data),
+            XexEncryption::Yes => Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, exe_data)?),
+        };
 
         let mut pe_image: Vec<u8> = vec![0; img_size as usize];
         let mut pos_in: usize = 0;
@@ -958,10 +952,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
         // for SOME reason, microsoft can have imports/thunks that aren't referenced in the import libraries
         // but can be referenced in xidata later on
         // so, this block of code serves to search for and capture them
-        if min_imp_addr.is_some() && max_imp_addr.is_some() {
-            let min_addr = min_imp_addr.unwrap();
-            let max_addr = max_imp_addr.unwrap();
-
+        if let (Some(min_addr), Some(max_addr)) = (min_imp_addr, max_imp_addr) {
             // i had to write things this way because of how rust handles borrowing...thank you rust, very cool
             let (import_idx, offset_within_sec) = {
                 let (idx, sec) = obj.sections.at_address(min_addr)?;
@@ -1002,10 +993,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
                 i += 4;
             }
         }
-        if min_api_addr.is_some() && max_api_addr.is_some() {
-            let min_addr = min_api_addr.unwrap();
-            let max_addr = max_api_addr.unwrap();
-
+        if let (Some(min_addr), Some(max_addr)) = (min_api_addr, max_api_addr) {
             // i had to write things this way because of how rust handles borrowing...thank you rust, very cool
             let (thunk_idx, offset_within_sec) = {
                 let (idx, sec) = obj.sections.at_address(min_addr)?;
@@ -1037,13 +1025,13 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
                             (cur_thunk & 0xFFFF) as usize,
                         );
                         // println!("Found missing thunk {} at 0x{:08X}", sym_name, i);
-                        let imp_name = format!("__imp_{}", sym_name);
-                        let maybe_imp_sym = obj.symbols.by_name(&imp_name)?;
-                        if maybe_imp_sym.is_some() {
+                        if let Some((_, imp_sym)) =
+                            obj.symbols.by_name(&format!("__imp_{}", sym_name))?
+                        {
                             // println!("found sym {}", maybe_imp_sym.unwrap().1.name);
                             unstrip_thunk(
                                 &mut obj.sections[thunk_idx].data[data_idx..data_idx + 8],
-                                maybe_imp_sym.unwrap().1.address as u32,
+                                imp_sym.address as u32,
                             );
                         }
                         add_thunk(&mut obj, sym_name, cur_addr)?;

@@ -9,7 +9,7 @@ publish = false
 repository = "https://github.com/encounter/decomp-toolkit"
 readme = "README.md"
 categories = ["command-line-utilities"]
-rust-version = "1.81"
+rust-version = "1.82"
 
 [[bin]]
 name = "dtk"

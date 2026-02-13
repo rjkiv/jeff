@@ -48,35 +48,27 @@ pub fn try_parse_pdb(
 
     // churn through actual symbols
     while let Some(symbol) = iter.next()? {
-        match symbol.parse() {
-            // Public is all the shit available to everyone
-            Ok(pdb::SymbolData::Public(data)) => {
-                let symoffset: SectionOffset =
-                    data.offset.to_section_offset(&pdbmap).unwrap_or_default();
-                addr_vec.push(ObjSymbol {
-                    name: data.name.to_string().into(),
-                    demangled_name: None,
-                    address: symoffset.offset as u64
-                        + section_addrs
-                            .get(pdb2dtk_section_table[symoffset.section as usize] as u32)
-                            .unwrap_or(&ObjSection::default())
-                            .address,
-                    section: Some(symoffset.section as u32),
-                    size: 0,
-                    size_known: false,
-                    flags: ObjSymbolFlagSet::default(),
-                    kind: if data.function {
-                        ObjSymbolKind::Function
-                    } else {
-                        ObjSymbolKind::Object
-                    },
-                    align: None,
-                    data_kind: ObjDataKind::Unknown,
-                    name_hash: None,
-                    demangled_name_hash: None,
-                });
-            }
-            _ => {}
+        if let Ok(pdb::SymbolData::Public(data)) = symbol.parse() {
+            let symoffset: SectionOffset =
+                data.offset.to_section_offset(&pdbmap).unwrap_or_default();
+            addr_vec.push(ObjSymbol {
+                name: data.name.to_string().into(),
+                demangled_name: None,
+                address: symoffset.offset as u64
+                    + section_addrs
+                        .get(pdb2dtk_section_table[symoffset.section as usize] as u32)
+                        .unwrap_or(&ObjSection::default())
+                        .address,
+                section: Some(symoffset.section as u32),
+                size: 0,
+                size_known: false,
+                flags: ObjSymbolFlagSet::default(),
+                kind: if data.function { ObjSymbolKind::Function } else { ObjSymbolKind::Object },
+                align: None,
+                data_kind: ObjDataKind::Unknown,
+                name_hash: None,
+                demangled_name_hash: None,
+            });
         }
     }
 

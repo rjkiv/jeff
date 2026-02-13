@@ -1146,16 +1146,13 @@ pub fn end_for_section(obj: &ObjInfo, section_index: SectionIndex) -> Result<Sec
         section_end -= 4;
     }
     loop {
-        let last_symbol = obj
-            .symbols
-            .for_section_range(section_index, ..section_end)
-            .filter(|(_, s)| {
+        let last_symbol =
+            obj.symbols.for_section_range(section_index, ..section_end).rfind(|(_, s)| {
                 s.kind == ObjSymbolKind::Object
                     && s.size_known
                     && s.size > 0
                     && !s.flags.is_stripped()
-            })
-            .next_back();
+            });
         match last_symbol {
             Some((_, symbol)) if is_linker_generated_object(&symbol.name) => {
                 log::debug!(

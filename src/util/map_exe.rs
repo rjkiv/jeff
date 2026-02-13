@@ -86,12 +86,10 @@ impl ExeMapInfo {
 
     fn get_section_idx(&self, idx: u32, offset: u32) -> Result<usize> {
         for (sec_idx, sec) in self.sections.iter().enumerate() {
-            if sec.index == idx {
-                if offset >= sec.offset && offset < (sec.offset + sec.size) {
-                    return Ok(sec_idx);
-                } else if offset >= sec.offset && sec.size == 0 && sec.name == ".xedata" {
-                    return Ok(sec_idx);
-                }
+            if sec.index == idx && (offset >= sec.offset && offset < (sec.offset + sec.size))
+                || (offset >= sec.offset && sec.size == 0 && sec.name == ".xedata")
+            {
+                return Ok(sec_idx);
             }
         }
         bail!("index {}:{:#X} not found", idx, offset);
@@ -199,7 +197,7 @@ pub fn apply_map_file_exe(path: &Utf8NativePathBuf, obj: &mut ObjInfo) -> Result
     apply_map_exe(map_info, obj)
 }
 
-pub fn is_reg_intrinsic(name: &String) -> bool {
+pub fn is_reg_intrinsic(name: &str) -> bool {
     (name.contains("__save") || name.contains("__rest"))
         && (name.contains("gpr") || name.contains("fpr") || name.contains("vmx"))
 }
@@ -215,7 +213,6 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             {
                 match obj.sections.at_address(sym.addr) {
                     Ok((sec_idx, sec)) => {
-                        let sym_to_add: ObjSymbol;
                         let sym_name = if result.merged_addrs.contains(&sym.addr) {
                             format!("merged_{:08X}", sym.addr)
                         } else {
@@ -223,8 +220,8 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         };
                         // if func came from pdata, DO NOT override the size
                         let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
-                        if obj.pdata_funcs.contains(&the_sec_addr) {
-                            sym_to_add = ObjSymbol {
+                        let sym_to_add: ObjSymbol = if obj.pdata_funcs.contains(&the_sec_addr) {
+                            ObjSymbol {
                                 name: sym_name,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
@@ -241,9 +238,9 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                     ObjSymbolKind::Object
                                 },
                                 ..Default::default()
-                            };
+                            }
                         } else {
-                            sym_to_add = ObjSymbol {
+                            ObjSymbol {
                                 name: sym_name,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
@@ -259,8 +256,8 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                     ObjSymbolKind::Object
                                 },
                                 ..Default::default()
-                            };
-                        }
+                            }
+                        };
                         obj.add_symbol(sym_to_add, true)?;
                     }
                     // if we couldn't find the section (like maybe it was stripped), just continue on
