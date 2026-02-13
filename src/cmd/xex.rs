@@ -50,7 +50,6 @@ use crate::{
         },
         xpdb::try_parse_pdb,
     },
-    vfs::open_file,
 };
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -161,11 +160,7 @@ struct ExeModuleInfo<'a> {
 // look at dol split for this
 fn split(args: SplitArgs) -> Result<()> {
     info!("Loading {}", args.config);
-    let config: ProjectConfig = {
-        // TODO: open the config.yml without making a VfsFile out of it, because we need to remove VFS from this codebase
-        let mut config_file = open_file(&args.config, true)?;
-        serde_yaml::from_reader(config_file.as_mut())?
-    };
+    let config: ProjectConfig = { serde_yaml::from_reader(File::open(&args.config)?)? };
     // println!("{:?}", config);
 
     // config.base.object: the path to the xex as a Utf8UnixPathBuf

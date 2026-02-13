@@ -396,7 +396,6 @@ dependencies = [
  "owo-colors",
  "pdb",
  "powerpc",
- "rayon",
  "regex",
  "serde",
  "serde_json",
