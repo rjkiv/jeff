@@ -23,9 +23,7 @@ pub use symbols::{
 };
 
 use crate::{
-    analysis::cfa::SectionAddress,
-    obj::addresses::AddressRanges,
-    util::{comment::MWComment, rel::RelReloc},
+    analysis::cfa::SectionAddress, obj::addresses::AddressRanges, util::comment::MWComment,
 };
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -85,7 +83,6 @@ pub struct ObjInfo {
     // REL
     /// Module ID (0 for main)
     pub module_id: u32,
-    pub unresolved_relocations: Vec<RelReloc>,
 }
 
 impl ObjInfo {
@@ -118,7 +115,6 @@ impl ObjInfo {
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
             module_id: 0,
-            unresolved_relocations: vec![],
         }
     }
 
