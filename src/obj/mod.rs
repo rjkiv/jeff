@@ -22,9 +22,7 @@ pub use symbols::{
     ObjSymbolScope, ObjSymbols, SymbolIndex,
 };
 
-use crate::{
-    analysis::cfa::SectionAddress, obj::addresses::AddressRanges, util::comment::MWComment,
-};
+use crate::{analysis::cfa::SectionAddress, obj::addresses::AddressRanges};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum ObjKind {
@@ -59,7 +57,6 @@ pub struct ObjInfo {
     pub symbols: ObjSymbols,
     pub sections: ObjSections,
     pub entry: Option<u64>,
-    pub mw_comment: Option<MWComment>,
     pub split_meta: Option<SplitMeta>,
 
     // Linker generated
@@ -100,7 +97,6 @@ impl ObjInfo {
             symbols: ObjSymbols::new(kind, symbols),
             sections: ObjSections::new(kind, sections),
             entry: None,
-            mw_comment: Default::default(),
             split_meta: None,
             sda2_base: None,
             sda_base: None,

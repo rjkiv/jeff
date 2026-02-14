@@ -1,17 +1,12 @@
-use std::collections::BTreeMap;
-
 use anyhow::{bail, Result};
 use cwdemangle::demangle;
 use serde::{Deserialize, Serialize};
-use typed_path::{Utf8NativePath, Utf8UnixPathBuf};
+use typed_path::Utf8UnixPathBuf;
 
 use crate::{
-    analysis::cfa::{AnalyzerState, SectionAddress},
-    obj::{ObjInfo, ObjReloc, ObjRelocKind, ObjSectionKind, ObjSymbol, ObjSymbolKind},
-    util::{
-        config::{signed_hex_serde, SectionAddressRef},
-        elf::process_elf,
-    },
+    analysis::cfa::SectionAddress,
+    obj::{ObjInfo, ObjReloc, ObjRelocKind, ObjSymbol},
+    util::config::{signed_hex_serde, SectionAddressRef},
 };
 
 #[inline]
@@ -282,156 +277,6 @@ pub struct OutputConfig {
     pub base: OutputModule,
     pub modules: Vec<OutputModule>,
     pub links: Vec<OutputLink>,
-}
-
-#[allow(dead_code)]
-fn validate(obj: &ObjInfo, elf_file: &Utf8NativePath, state: &AnalyzerState) -> Result<()> {
-    let real_obj = process_elf(elf_file)?;
-    for (section_index, real_section) in real_obj.sections.iter() {
-        let obj_section = match obj.sections.get(section_index) {
-            Some(v) => v,
-            None => {
-                log::error!("Section {} {} doesn't exist in DOL", section_index, real_section.name);
-                continue;
-            }
-        };
-        if obj_section.kind != real_section.kind || obj_section.name != real_section.name {
-            log::warn!(
-                "Section mismatch: {} {:?} ({}) should be {} {:?}",
-                obj_section.name,
-                obj_section.kind,
-                section_index,
-                real_section.name,
-                real_section.kind
-            );
-        }
-    }
-    let mut real_functions = BTreeMap::<SectionAddress, String>::new();
-    for (section_index, _section) in real_obj.sections.by_kind(ObjSectionKind::Code) {
-        for (_symbol_idx, symbol) in real_obj.symbols.for_section(section_index) {
-            let symbol_addr = SectionAddress::new(section_index, symbol.address as u32);
-            real_functions.insert(symbol_addr, symbol.name.clone());
-            match state.functions.get(&symbol_addr) {
-                Some(info) => {
-                    if let Some(end) = info.end {
-                        if symbol.size > 0 && end != (symbol_addr + symbol.size as u32) {
-                            log::warn!(
-                                "Function {:#010X} ({}) ends at {:#010X}, expected {:#010X}",
-                                symbol.address,
-                                symbol.name,
-                                end,
-                                symbol.address + symbol.size
-                            );
-                        }
-                    } else {
-                        log::warn!(
-                            "Function {:#010X} ({}) has no end",
-                            symbol.address,
-                            symbol.name
-                        );
-                    }
-                }
-                None => {
-                    log::warn!(
-                        "Function {:#010X} ({}) not discovered!",
-                        symbol.address,
-                        symbol.name
-                    );
-                }
-            }
-        }
-    }
-    for (&start, info) in &state.functions {
-        let Some(end) = info.end else {
-            continue;
-        };
-        if !real_functions.contains_key(&start) {
-            let (real_addr, real_name) = real_functions.range(..start).next_back().unwrap();
-            log::warn!(
-                "Function {:#010X}..{:#010X} not real (actually a part of {} @ {:#010X})",
-                start,
-                end,
-                real_name,
-                real_addr
-            );
-        }
-    }
-    // return Ok(()); // TODO
-
-    for (real_section_index, real_section) in real_obj.sections.iter() {
-        let obj_section = match obj.sections.get(real_section_index) {
-            Some(v) => v,
-            None => continue,
-        };
-        for (real_addr, real_reloc) in real_section.relocations.iter() {
-            let real_symbol = &real_obj.symbols[real_reloc.target_symbol];
-            let obj_reloc = match obj_section.relocations.at(real_addr) {
-                Some(v) => v,
-                None => {
-                    // Ignore GCC local jump branches
-                    if real_symbol.kind == ObjSymbolKind::Section
-                        && real_section.kind == ObjSectionKind::Code
-                        && real_reloc.addend != 0
-                        && matches!(
-                            real_reloc.kind,
-                            ObjRelocKind::PpcRel14 | ObjRelocKind::PpcRel24
-                        )
-                    {
-                        continue;
-                    }
-                    log::warn!(
-                        "Relocation not found @ {:#010X} {:?} to {:#010X}+{:X} ({})",
-                        real_addr,
-                        real_reloc.kind,
-                        real_symbol.address,
-                        real_reloc.addend,
-                        real_symbol.demangled_name.as_ref().unwrap_or(&real_symbol.name)
-                    );
-                    continue;
-                }
-            };
-            let obj_symbol = &obj.symbols[obj_reloc.target_symbol];
-            if real_reloc.kind != obj_reloc.kind {
-                log::warn!(
-                    "Relocation type mismatch @ {:#010X}: {:?} != {:?}",
-                    real_addr,
-                    obj_reloc.kind,
-                    real_reloc.kind
-                );
-                continue;
-            }
-            if real_symbol.address as i64 + real_reloc.addend
-                != obj_symbol.address as i64 + obj_reloc.addend
-            {
-                log::warn!(
-                    "Relocation target mismatch @ {:#010X} {:?}: {:#010X}+{:X} != {:#010X}+{:X} ({})",
-                    real_addr,
-                    real_reloc.kind,
-                    obj_symbol.address,
-                    obj_reloc.addend,
-                    real_symbol.address,
-                    real_reloc.addend,
-                    real_symbol.demangled_name.as_ref().unwrap_or(&real_symbol.name)
-                );
-                continue;
-            }
-        }
-        for (obj_addr, obj_reloc) in obj_section.relocations.iter() {
-            let obj_symbol = &obj.symbols[obj_reloc.target_symbol];
-            if !real_section.relocations.contains(obj_addr) {
-                log::warn!(
-                    "Relocation not real @ {:#010X} {:?} to {:#010X}+{:X} ({})",
-                    obj_addr,
-                    obj_reloc.kind,
-                    obj_symbol.address,
-                    obj_reloc.addend,
-                    obj_symbol.demangled_name.as_ref().unwrap_or(&obj_symbol.name)
-                );
-                continue;
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Applies the blocked relocation ranges from module config `blocked_relocations`

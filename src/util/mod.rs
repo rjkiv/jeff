@@ -1,13 +1,10 @@
 use std::{borrow::Cow, ops::Deref};
 
 pub mod asm;
-pub mod bin2c;
-pub mod comment;
 pub mod config;
 pub mod crypto;
 pub mod dep;
 pub mod diff;
-pub mod elf;
 pub mod file;
 pub mod map;
 pub mod map_exe;
@@ -16,7 +13,6 @@ pub mod nlzss;
 pub mod path;
 pub mod read;
 pub mod reader;
-pub mod rel;
 pub mod split;
 pub mod take_seek;
 pub mod toposort;
