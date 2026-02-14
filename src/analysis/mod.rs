@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod cfa;
+pub mod cfa_tests;
 pub mod executor;
 pub mod objects;
 pub mod pass;

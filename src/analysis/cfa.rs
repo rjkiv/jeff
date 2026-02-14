@@ -558,3 +558,7 @@ impl AnalyzerState {
         Ok(found_new)
     }
 }
+
+#[cfg(test)]
+#[path = "cfa_tests.rs"]
+mod cfa_tests;
