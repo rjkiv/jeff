@@ -43,6 +43,10 @@ struct TestConfig {
     function_start: u32,
     #[serde(deserialize_with = "bytestr_to_bytes")]
     function_bytes: Vec<u8>,
+    #[serde(deserialize_with = "get_fn_start")]
+    jump_table_start: u32,
+    #[serde(deserialize_with = "bytestr_to_bytes")]
+    jump_table_bytes: Vec<u8>,
 }
 
 // helper func to create an ObjInfo
@@ -58,11 +62,24 @@ fn make_code_section(base_addr: u32, instructions: &[u8]) -> ObjSection {
     }
 }
 
-// fn make_data_section
+fn make_data_section(base_addr: u32, instructions: &[u8]) -> ObjSection {
+    ObjSection {
+        name: ".rdata".into(),
+        kind: ObjSectionKind::ReadOnlyData,
+        address: base_addr as u64,
+        size: instructions.len() as u64,
+        data: Vec::from(instructions),
+        align: 0x10000,
+        ..Default::default()
+    }
+}
 
-fn create_dummy_obj(section: ObjSection) -> ObjInfo {
+fn create_dummy_obj(code_section: ObjSection, rdata_section: Option<ObjSection>) -> ObjInfo {
     let mut sections: Vec<ObjSection> = vec![];
-    sections.push(section);
+    if let Some(rdata_section) = rdata_section {
+        sections.push(rdata_section);
+    }
+    sections.push(code_section);
     ObjInfo::new(ObjKind::Executable, ObjArchitecture::PowerPc, "test.exe".into(), vec![], sections)
 }
 
@@ -80,8 +97,10 @@ fn test_super_basic_cfa() -> Result<()> {
         serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
     let cur_test = &test_cfg[0];
     assert_eq!(cur_test.test_id, 0);
-    let obj =
-        create_dummy_obj(make_code_section(cur_test.function_start, &cur_test.function_bytes));
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        None,
+    );
     let mut state = AnalyzerState::default();
     let start_addr = SectionAddress::new(0, cur_test.function_start);
     state.functions.insert(start_addr, FunctionInfo { analyzed: false, end: None, slices: None });
@@ -124,8 +143,10 @@ fn test_jump_table_absolute_1() -> Result<()> {
         serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
     let cur_test = &test_cfg[1];
     assert_eq!(cur_test.test_id, 1);
-    let obj =
-        create_dummy_obj(make_code_section(cur_test.function_start, &cur_test.function_bytes));
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        None,
+    );
     let mut state = AnalyzerState::default();
     let start_addr = SectionAddress::new(0, cur_test.function_start);
     // CFA completed with no errors
@@ -159,8 +180,10 @@ fn test_jump_table_absolute_2() -> Result<()> {
         serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
     let cur_test = &test_cfg[2];
     assert_eq!(cur_test.test_id, 2);
-    let obj =
-        create_dummy_obj(make_code_section(cur_test.function_start, &cur_test.function_bytes));
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        None,
+    );
     let mut state = AnalyzerState::default();
     let start_addr = SectionAddress::new(0, cur_test.function_start);
     // CFA completed with no errors
@@ -195,8 +218,10 @@ fn test_jump_table_absolute_3() -> Result<()> {
         serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
     let cur_test = &test_cfg[3];
     assert_eq!(cur_test.test_id, 3);
-    let obj =
-        create_dummy_obj(make_code_section(cur_test.function_start, &cur_test.function_bytes));
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        None,
+    );
     let mut state = AnalyzerState::default();
     let start_addr = SectionAddress::new(0, cur_test.function_start);
     // CFA completed with no errors
@@ -221,5 +246,250 @@ fn test_jump_table_absolute_3() -> Result<()> {
     assert!(func.slices.is_some());
     let slices = func.slices.as_ref().unwrap();
     assert!(slices.blocks.len() > 5); // idk the exact number but i know it's more than 5
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_1() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[4];
+    assert_eq!(cur_test.test_id, 4);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_2() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[5];
+    assert_eq!(cur_test.test_id, 5);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_3() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[6];
+    assert_eq!(cur_test.test_id, 6);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_4() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[7];
+    assert_eq!(cur_test.test_id, 7);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_5() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[8];
+    assert_eq!(cur_test.test_id, 8);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_6() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[9];
+    assert_eq!(cur_test.test_id, 9);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
+    Ok(())
+}
+
+#[test]
+fn test_jump_table_relative_bytes_7() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[10];
+    assert_eq!(cur_test.test_id, 10);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        Some(make_data_section(cur_test.jump_table_start, &cur_test.jump_table_bytes)),
+    );
+    let mut state = AnalyzerState::default();
+    // section 1 is .text now that we have a relative jump table in .rdata
+    let start_addr = SectionAddress::new(1, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // TODO: verify number of jump table entries and basic block count
+    let jump_table_entry =
+        state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x69); // nice
     Ok(())
 }
