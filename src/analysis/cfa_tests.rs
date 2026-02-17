@@ -778,3 +778,43 @@ fn test_jump_table_relative_shorts_8() -> Result<()> {
     // TODO: verify basic block count
     Ok(())
 }
+
+// this one has an absolute jump table,
+// except different registers are used when rlwinm'ing - it stores R4 to 0x50(R1), and then loads from 0x50(R1) into R3, and R3 is then used to index.
+// to get this to pass, we need some sort of mechanism that keeps track of what's in the stack at any given time
+#[test]
+fn test_jump_table_absolute_stack_meme() -> Result<()> {
+    let test_cfg: Vec<TestConfig> =
+        serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;
+    let cur_test = &test_cfg[19];
+    assert_eq!(cur_test.test_id, 19);
+    let obj = create_dummy_obj(
+        make_code_section(cur_test.function_start, &cur_test.function_bytes),
+        None,
+    );
+    let mut state = AnalyzerState::default();
+    let start_addr = SectionAddress::new(0, cur_test.function_start);
+    // CFA completed with no errors
+    let res = state.process_function_at(&obj, start_addr).unwrap_or_else(|e| panic!("{:?}", e));
+    // we have one more function
+    assert!(res);
+    assert_eq!(state.functions.len(), 1);
+    let func = state.functions.get(&start_addr);
+    assert!(func.is_some());
+    let func = func.unwrap();
+    assert!(func.is_function());
+    // does the detected function end match our expected end?
+    assert_eq!(func.end, Some(start_addr + cur_test.function_bytes.len() as u32));
+    // for this func, we should have 1 jump table
+    assert_eq!(state.jump_tables.is_empty(), false);
+    assert_eq!(state.jump_tables.len(), 1);
+    // and there should be 4 entries in it
+    let jump_table_entry = state.jump_tables.get(&SectionAddress::new(0, 0x82185be8));
+    assert!(jump_table_entry.is_some());
+    assert_eq!(*jump_table_entry.unwrap(), 0x169);
+    // we should also have a lotta basic blocks
+    assert!(func.slices.is_some());
+    let slices = func.slices.as_ref().unwrap();
+    assert!(slices.blocks.len() > 5); // idk the exact number but i know it's more than 5
+    Ok(())
+}
