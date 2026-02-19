@@ -122,19 +122,36 @@ fn test_super_basic_cfa() -> Result<()> {
     Ok(())
 }
 
-// would prefer 2-3 test functions that cover each JumpTableType
 // pub enum JumpTableType {
 //     // the table came from an lwzx, contains absolute addresses
 //     Absolute,
-//     // the table came from an lbzx, contains relative byte offsets (no rlwinm before the bctr)
-//     RelativeBytes(Option<RelocationTarget>),
-//     // the table came from an lbzx, contains relative byte offsets that we must multiply by 4
-//     RelativeBytesTimes4(Option<RelocationTarget>),
-//     // the table came from an lhzx, contains relative short offsets (no rlwinm before the bctr)
-//     RelativeShorts(Option<RelocationTarget>),
-//     // the table came from an lhzx, contains relative short offsets that we must multiply by 2
-//     RelativeShortsTimes2(Option<RelocationTarget>),
+//     // the table came from an lbzx, contains relative byte offsets
+//     // if there is a rlwinm before the bctr, you must multiply the jump table entries by 4
+//     // otherwise, the multiple is 1 - no offset math needed
+//     RelativeBytes { target: Option<RelocationTarget>, multiplier: usize },
+//     // the table came from an lhzx, contains relative byte offsets
+//     // if there is a rlwinm before the bctr, you must multiply the jump table entries by 4
+//     // otherwise, the multiple is 1 - no offset math needed
+//     RelativeShorts { target: Option<RelocationTarget>, multiplier: usize },
 // }
+
+// TODO: go back to dtk's CFA and jump table analysis, start fresh
+
+// THE PLAN:
+// for absolute jump tables: i think you can ignore whether there is a bgt/blt, seeing as absolute_2 doesn't even have that.
+// absolute jump tables will always be smack dab in the middle of the function, and will always contain absolute addresses.
+// using this logic, i think you can hack it by stepping through the jump table, and stopping when you find not-an-address.
+// a suitable address would be >= the function's start address, and < the start of the next section.
+// to be extra extra sure we're dealing with an absolute jump table, we could even look at the address for the bctr,
+// and verify that the addr of the bctr + 4 == the start of the jump table
+
+// for relative jump tables:
+// i wanna say you can start with the vanilla jump table detection routine from dtk, except swap out with lbzx/lhzx.
+// but, be careful, because rlwinm can come before OR after a lbzx/lhzx. both cases are possible in MSVC (lovely).
+// in addition, if there is no rlwinm at all, then you do NOT multiply the jump table entry by 4 or 2, respectively.
+// there will be a bgt (haven't seen a blt yet) that will give you the size of the table.
+// if there is no bgt, we can safely assume we're probably not dealing with a jump table.
+// whatever the case, there has to be an rlwinm either in between the bgt/l*zx, or in between the l*zx/bctr.
 
 #[test]
 fn test_jump_table_absolute_1() -> Result<()> {
@@ -165,7 +182,8 @@ fn test_jump_table_absolute_1() -> Result<()> {
     // and there should be 4 entries in it
     let jump_table_entry = state.jump_tables.get(&SectionAddress::new(0, 0x820869fc));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 4);
+    // 4 entries * 4 bytes per entry
+    assert_eq!(*jump_table_entry.unwrap(), 4 * 4);
     // we should also have a lotta basic blocks
     assert!(func.slices.is_some());
     let slices = func.slices.as_ref().unwrap();
@@ -202,7 +220,8 @@ fn test_jump_table_absolute_2() -> Result<()> {
     // and there should be 4 entries in it
     let jump_table_entry = state.jump_tables.get(&SectionAddress::new(0, 0x827f9434));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 4);
+    // 4 entries * 4 bytes per entry
+    assert_eq!(*jump_table_entry.unwrap(), 4 * 4);
     // we should also have a lotta basic blocks
     assert!(func.slices.is_some());
     let slices = func.slices.as_ref().unwrap();
@@ -240,7 +259,8 @@ fn test_jump_table_absolute_3() -> Result<()> {
     // and there should be 4 entries in it
     let jump_table_entry = state.jump_tables.get(&SectionAddress::new(0, 0x82fbb464));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 4);
+    // 4 entries * 4 bytes per entry
+    assert_eq!(*jump_table_entry.unwrap(), 4 * 4);
     // we should also have a lotta basic blocks
     assert!(func.slices.is_some());
     let slices = func.slices.as_ref().unwrap();
@@ -782,6 +802,8 @@ fn test_jump_table_relative_shorts_8() -> Result<()> {
 // this one has an absolute jump table,
 // except different registers are used when rlwinm'ing - it stores R4 to 0x50(R1), and then loads from 0x50(R1) into R3, and R3 is then used to index.
 // to get this to pass, we need some sort of mechanism that keeps track of what's in the stack at any given time
+// or: since this is an absolute jump table, and i haven't seen this for any relative jump tables,
+// we can ignore the indexing and just iterate through the jump table normally (keep going until you find not-an-address)
 #[test]
 fn test_jump_table_absolute_stack_meme() -> Result<()> {
     let test_cfg: Vec<TestConfig> =
@@ -811,7 +833,8 @@ fn test_jump_table_absolute_stack_meme() -> Result<()> {
     // and there should be 4 entries in it
     let jump_table_entry = state.jump_tables.get(&SectionAddress::new(0, 0x82185be8));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 0x169);
+    // 0x169 entries * 4 bytes per entry
+    assert_eq!(*jump_table_entry.unwrap(), 0x169 * 4);
     // we should also have a lotta basic blocks
     assert!(func.slices.is_some());
     let slices = func.slices.as_ref().unwrap();

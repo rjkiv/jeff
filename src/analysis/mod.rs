@@ -57,18 +57,11 @@ fn is_valid_jump_table_addr(
     jump_table_type: JumpTableType,
 ) -> bool {
     match jump_table_type {
-        // if absolute, jump table is in .text, in the middle of the func actually
         JumpTableType::Absolute => {
             let kind = obj.sections[addr.section].kind;
             kind == ObjSectionKind::Code && kind != ObjSectionKind::Bss
         }
-        // else, addr must not be in code or bss
-        JumpTableType::RelativeBytes(_)
-        | JumpTableType::RelativeBytesTimes4(_)
-        | JumpTableType::RelativeShorts(_)
-        | JumpTableType::RelativeShortsTimes2(_) => {
-            !matches!(obj.sections[addr.section].kind, ObjSectionKind::Code | ObjSectionKind::Bss)
-        }
+        _ => !matches!(obj.sections[addr.section].kind, ObjSectionKind::Code | ObjSectionKind::Bss),
     }
 }
 
@@ -97,10 +90,55 @@ fn get_jump_table_entries(
     function_start: SectionAddress,
     function_end: Option<SectionAddress>,
 ) -> Result<(Vec<SectionAddress>, u32)> {
-    assert!(!matches!(jump_table_type, JumpTableType::RelativeShortsTimes2(_)),
-            "Somehow, we found a jump table type lhzx that needs its offsets multiplied at addr {} from {}", addr, from);
-
     let section = &obj.sections[addr.section];
+    match jump_table_type {
+        JumpTableType::Absolute => {
+            // the start of the jump table should be IMMEDIATELY after the bctr
+            assert_eq!(
+                from + 4,
+                addr,
+                "Absolute jump table did not start immediately after the bctr at {}!",
+                from
+            );
+            let mut entries: Vec<SectionAddress> = Vec::new();
+            // now, step through, line by line, until you find not-an-address
+            let mut data =
+                section.data_range(addr.address, (section.address + section.size) as u32)?;
+            let mut cur_addr = addr;
+            loop {
+                let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
+                if entry_addr >= function_start.address && section.contains(entry_addr) {
+                    let (section_index, _) =
+                        obj.sections.at_address(entry_addr).with_context(|| {
+                            format!(
+                                "Invalid jump table entry {entry_addr:#010X} at {cur_addr:#010X}"
+                            )
+                        })?;
+                    entries.push(SectionAddress::new(section_index, entry_addr));
+                } else {
+                    break;
+                }
+                data = &data[4..];
+                cur_addr += 4;
+            }
+            let size = cur_addr.address - addr.address;
+            log::debug!(
+                "Inferred absolute jump table @ {:#010X} with entry count {} (from {:#010X})",
+                addr,
+                size / 4,
+                from
+            );
+            return Ok((entries, size));
+        }
+        JumpTableType::RelativeBytes { target, multiplier } => {
+            todo!("Not covered yet!");
+        }
+        JumpTableType::RelativeShorts { target, multiplier } => {
+            todo!("Not covered yet!");
+        }
+    }
+
+    unreachable!();
     // Check for an existing symbol with a known size, and use that if available.
     // Allows overriding jump table size analysis.
     let known_size = obj
@@ -111,57 +149,21 @@ fn get_jump_table_entries(
         .and_then(|(_, s)| if s.size_known { NonZeroU32::new(s.size as u32) } else { None });
 
     if let Some(size) = known_size.or(size).map(|n| n.get()) {
-        let num_entries = match jump_table_type {
-            JumpTableType::Absolute => size / 4,
-            JumpTableType::RelativeBytes(_) | JumpTableType::RelativeBytesTimes4(_) => size,
-            JumpTableType::RelativeShorts(_) | JumpTableType::RelativeShortsTimes2(_) => size / 2,
-        };
-        log::debug!(
+        log::trace!(
             "Located jump table @ {:#010X} with entry count {} (from {:#010X})",
             addr,
-            num_entries,
+            size / 4,
             from
         );
-        let mut entries = Vec::with_capacity(num_entries as usize);
+        let mut entries = Vec::with_capacity(size as usize / 4);
         let mut data = section.data_range(addr.address, addr.address + size)?;
-        let relative_addr = match jump_table_type {
-            JumpTableType::Absolute => None,
-            JumpTableType::RelativeBytes(addr)
-            | JumpTableType::RelativeBytesTimes4(addr)
-            | JumpTableType::RelativeShorts(addr)
-            | JumpTableType::RelativeShortsTimes2(addr) => {
-                match addr.context("No relative address to apply jump table offsets to!")? {
-                    RelocationTarget::Address(addr) => Some(addr),
-                    _ => bail!("No relative address to apply jump table offsets to! (RelocationTarget is type External)"),
-                }
-            }
-        };
-        let mut cur_addr = addr; // cur_addr == the address of the current jump table entry we're analyzing
-        let increment = match jump_table_type {
-            JumpTableType::Absolute => 4,
-            JumpTableType::RelativeBytes(_) | JumpTableType::RelativeBytesTimes4(_) => 1,
-            JumpTableType::RelativeShorts(_) | JumpTableType::RelativeShortsTimes2(_) => 2,
-        };
+        let mut cur_addr = addr;
         loop {
             if data.is_empty() {
                 break;
             }
-            let reloc_address = match jump_table_type {
-                JumpTableType::Absolute => cur_addr,
-                JumpTableType::RelativeBytes(_) => relative_addr.unwrap() + data[0] as u32,
-                JumpTableType::RelativeBytesTimes4(_) => {
-                    relative_addr.unwrap() + (data[0] as u32 * 4)
-                }
-                JumpTableType::RelativeShorts(_) => {
-                    relative_addr.unwrap() + u16::from_be_bytes(*array_ref!(data, 0, 2)) as u32
-                }
-                JumpTableType::RelativeShortsTimes2(_) => {
-                    relative_addr.unwrap()
-                        + (u16::from_be_bytes(*array_ref!(data, 0, 2)) as u32 * 2)
-                }
-            };
             if let Some(target) =
-                relocation_target_for(obj, reloc_address, Some(ObjRelocKind::Absolute))?
+                relocation_target_for(obj, cur_addr, Some(ObjRelocKind::Absolute))?
             {
                 match target {
                     RelocationTarget::Address(addr) => entries.push(addr),
@@ -170,13 +172,7 @@ fn get_jump_table_entries(
                     }
                 }
             } else {
-                let entry_addr = match jump_table_type {
-                    JumpTableType::Absolute => u32::from_be_bytes(*array_ref!(data, 0, 4)),
-                    JumpTableType::RelativeBytes(_)
-                    | JumpTableType::RelativeBytesTimes4(_)
-                    | JumpTableType::RelativeShorts(_)
-                    | JumpTableType::RelativeShortsTimes2(_) => reloc_address.address,
-                };
+                let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
                 if entry_addr > 0 {
                     let (section_index, _) =
                         obj.sections.at_address(entry_addr).with_context(|| {
@@ -187,14 +183,11 @@ fn get_jump_table_entries(
                     entries.push(SectionAddress::new(section_index, entry_addr));
                 }
             }
-            data = &data[increment..];
-            cur_addr += increment as u32;
+            data = &data[4..];
+            cur_addr += 4;
         }
         Ok((entries, size))
-    }
-    // FIXME: this guessing routine only works for absolute jump tables
-    // make one for relative jump tables!
-    else {
+    } else {
         let mut entries = Vec::new();
         let mut cur_addr = addr;
         loop {
@@ -223,7 +216,7 @@ fn get_jump_table_entries(
             cur_addr += 4;
         }
         let size = cur_addr.address - addr.address;
-        log::info!(
+        log::debug!(
             "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
             addr,
             size / 4,

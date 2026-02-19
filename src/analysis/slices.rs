@@ -12,7 +12,7 @@ use crate::{
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
         uniq_jump_table_entries,
-        vm::{section_address_for, BranchTarget, JumpTableType, StepResult, VM},
+        vm::{section_address_for, BranchTarget, StepResult, VM},
         RelocationTarget,
     },
     obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
@@ -368,24 +368,11 @@ impl FunctionSlices {
                     jump_table_address: RelocationTarget::Address(address),
                     size,
                 } => {
-                    let next_addr_size = match jt {
-                        JumpTableType::Absolute => match size {
-                            Some(num) => num.get(),
-                            None => 0,
-                        },
-                        _ => 0,
-                    };
-
                     // End of block
-                    let next_address = ins_addr + 4 + next_addr_size;
+                    let next_address = ins_addr + 4;
                     self.blocks.insert(block_start, Some(next_address));
 
-                    log::debug!(
-                        "Fetching {} jump table entries @ {} with size {:?}",
-                        if jt == JumpTableType::Absolute { "absolute" } else { "relative" },
-                        address,
-                        size
-                    );
+                    log::debug!("Fetching jump table entries @ {} with size {:?}", address, size);
                     let (entries, size) = uniq_jump_table_entries(
                         obj,
                         address,
@@ -396,23 +383,14 @@ impl FunctionSlices {
                         function_end.or_else(|| self.end()),
                     )?;
                     log::debug!("-> size {}: {:?}", size, entries);
-
-                    // if this function has a known end, check that every jump table entry is within function bounds
-                    let within_func_bounds = match function_end {
-                        Some(end) => {
-                            !entries.iter().any(|&addr| addr < function_start || addr >= end)
-                        }
-                        None => false,
-                    };
-
-                    // this if statements is true if:
-                    // the next_address is in our jump table entries OR next_address marks the start of one our established blocks
-                    // OR we're within known func bounds
-                    // AND
-                    // none of our jump table entries are known function starts
-                    if (entries.contains(&next_address)
-                        || self.blocks.contains_key(&next_address)
-                        || within_func_bounds)
+                    let max_block = self
+                        .blocks
+                        .keys()
+                        .next_back()
+                        .copied()
+                        .unwrap_or(next_address)
+                        .max(next_address);
+                    if entries.iter().any(|&addr| addr > function_start && addr <= max_block)
                         && !entries.iter().any(|&addr| {
                             self.is_known_function(known_functions, addr)
                                 .is_some_and(|fn_addr| fn_addr != function_start)
