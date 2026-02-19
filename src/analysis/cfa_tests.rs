@@ -549,7 +549,7 @@ fn test_jump_table_relative_shorts_1() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 14);
+    assert_eq!(*jump_table_entry.unwrap(), 14 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -584,7 +584,7 @@ fn test_jump_table_relative_shorts_2() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 31);
+    assert_eq!(*jump_table_entry.unwrap(), 31 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -619,7 +619,7 @@ fn test_jump_table_relative_shorts_3() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 64);
+    assert_eq!(*jump_table_entry.unwrap(), 64 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -654,7 +654,7 @@ fn test_jump_table_relative_shorts_4() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 8);
+    assert_eq!(*jump_table_entry.unwrap(), 8 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -689,7 +689,7 @@ fn test_jump_table_relative_shorts_5() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 10);
+    assert_eq!(*jump_table_entry.unwrap(), 10 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -724,7 +724,7 @@ fn test_jump_table_relative_shorts_6() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 0x1c);
+    assert_eq!(*jump_table_entry.unwrap(), 0x1c * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -759,7 +759,7 @@ fn test_jump_table_relative_shorts_7() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 30);
+    assert_eq!(*jump_table_entry.unwrap(), 30 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -794,7 +794,7 @@ fn test_jump_table_relative_shorts_8() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 10);
+    assert_eq!(*jump_table_entry.unwrap(), 10 * 2);
     // TODO: verify basic block count
     Ok(())
 }
