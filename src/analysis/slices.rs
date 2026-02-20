@@ -676,6 +676,10 @@ impl FunctionSlices {
         // TODO: check if jump target is a reg intrinsic, as if it is, it might *not* be a tail call
         // you'd also have to check if there are visited addresses that go beyond the addr of the jump instruction
 
+        // If this function is in pdata, that means we know the bounds. Therefore, not a tail call
+        if obj.pdata_funcs.contains(&function_start) {
+            return TailCallResult::Not;
+        }
         // If jump target is already a known block or within known function bounds, not a tail call.
         if self.blocks.contains_key(&addr) {
             return TailCallResult::Not;

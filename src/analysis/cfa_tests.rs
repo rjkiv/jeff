@@ -153,6 +153,63 @@ fn test_super_basic_cfa() -> Result<()> {
 // if there is no bgt, we can safely assume we're probably not dealing with a jump table.
 // whatever the case, there has to be an rlwinm either in between the bgt/l*zx, or in between the l*zx/bctr.
 
+// Relative bytes (no rlwinm) general skeleton:
+// cmplwi crN, rX, <limit>
+// bgt crN, default
+// lis r12, <jump_table_addr-hi>
+// addi r12, r12, <jump_table_addr-lo>
+// lbzx r0, r12, rX
+// slwi r0, r0, 0x2
+// lis r12, <start_of_the_cases-hi>
+// nop
+// addi r12, r12, <start_of_the_cases-lo>
+// add r12, r12, r0
+// mtctr r12
+// bctr
+// <start_of_the_cases>
+// ...
+// <default>
+
+// Relative bytes (no rlwinm) alternate general skeleton:
+// cmplwi crN, rX, <limit>
+// bgt crN, default
+// lis r12, <jump_table_addr-hi>
+// addi r12, r12, <jump_table_addr-lo>
+// lbzx r0, r12, rX
+// lis r12, <start_of_the_cases-hi>
+// addi r12, r12, <start_of_the_cases-lo>
+// add r12, r12, r0
+// mtspr r12
+// nop
+// nop
+// bctr
+// <start_of_the_cases>
+// ...
+// <default>
+
+// DDR Universe: FUN_822671c0
+
+// Relative bytes (rlwinm after lbzx) general skeleton
+// (remember, the entries in the jump table need to be multiplied by 4):
+// cmplwi crN, rX, <limit>
+// bgt crN, default
+// lis r12, <jump_table_addr-hi>
+// addi r12, r12, <jump_table_addr-lo>
+// lbzx r0, r12, rX
+// rlwinm r0, r0, 0x2, 0x0, 0x1d
+// lis r12, <start_of_the_cases-hi>
+// nop
+// addi r12, r12, <start_of_the_cases-lo>
+// add r12, r12, r0
+// mtctr r12
+// bctr
+// <start_of_the_cases>
+// ...
+// <default>
+
+// TBRB: FUN_823349f8
+// halo 3: FUN_82588e08
+
 #[test]
 fn test_jump_table_absolute_1() -> Result<()> {
     let test_cfg: Vec<TestConfig> =
@@ -821,6 +878,11 @@ fn test_jump_table_absolute_stack_meme() -> Result<()> {
     // we have one more function
     assert!(res);
     assert_eq!(state.functions.len(), 1);
+    // NOTE: this func ends prematurely at a b it suspects is a tail call
+    // because of this, we have to run finalize_functions...but even so, it's claiming the end of the function is at the end of the block
+    // and not the actual end. furthermore, it doesn't seem to find a jump table...not sure what's going on in the context of this test.
+    // This works in the real thing because this func is in pdata, so there's a known end.
+    state.finalize_functions(&obj, true)?;
     let func = state.functions.get(&start_addr);
     assert!(func.is_some());
     let func = func.unwrap();
