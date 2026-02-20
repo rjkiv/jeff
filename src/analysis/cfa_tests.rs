@@ -145,6 +145,15 @@ fn test_super_basic_cfa() -> Result<()> {
 // to be extra extra sure we're dealing with an absolute jump table, we could even look at the address for the bctr,
 // and verify that the addr of the bctr + 4 == the start of the jump table
 
+// Absolute general skeleton:
+// lis r12, <jump_table_addr-hi>
+// addi r12, r12, <jump_table_addr-lo>
+// rlwinm r0, rX, 0x2, 0x0, 0x1d // NOTE: rX likely has the table bounds, but because it's absolute, and because there are funny stack memes, we can ignore it
+// lwzx r0, r12, r0
+// mtctr r0
+// bctr
+// <jump_table_addr>
+
 // for relative jump tables:
 // i wanna say you can start with the vanilla jump table detection routine from dtk, except swap out with lbzx/lhzx.
 // but, be careful, because rlwinm can come before OR after a lbzx/lhzx. both cases are possible in MSVC (lovely).
@@ -179,7 +188,7 @@ fn test_super_basic_cfa() -> Result<()> {
 // lis r12, <start_of_the_cases-hi>
 // addi r12, r12, <start_of_the_cases-lo>
 // add r12, r12, r0
-// mtspr r12
+// mtctr r12
 // nop
 // nop
 // bctr
@@ -209,6 +218,27 @@ fn test_super_basic_cfa() -> Result<()> {
 
 // TBRB: FUN_823349f8
 // halo 3: FUN_82588e08
+
+// Relative shorts (no rlwinm)
+// for the life of me i can't find one
+
+// Relative shorts (rlwinm before lhzx) general skeleton
+// (remember, the entries in the jump table need to be multiplied by 2):
+// cmplwi crN, rX, <limit>
+// bgt crN, default
+// lis r12, <jump_table_addr-hi>
+// addi r12, r12, <jump_table_addr-lo>
+// rlwinm r0, rX, 0x1, 0x0, 0x1e
+// lhzx r0, r12, r0
+// lis r12, <start_of_the_cases-hi>
+// addi r12, r12, <start_of_the_cases-lo>
+// add r12, r12, r0
+// mtctr r12
+// nop
+// bctr
+// <start_of_the_cases>
+// ...
+// <default>
 
 #[test]
 fn test_jump_table_absolute_1() -> Result<()> {
