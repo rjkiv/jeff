@@ -383,14 +383,23 @@ impl FunctionSlices {
                         function_end.or_else(|| self.end()),
                     )?;
                     log::debug!("-> size {}: {:?}", size, entries);
-                    let max_block = self
-                        .blocks
-                        .keys()
-                        .next_back()
-                        .copied()
-                        .unwrap_or(next_address)
-                        .max(next_address);
-                    if entries.iter().any(|&addr| addr > function_start && addr <= max_block)
+
+                    // if this function has a known end, check that every jump table entry is within function bounds
+                    let within_func_bounds = match function_end {
+                        Some(end) => {
+                            !entries.iter().any(|&addr| addr < function_start || addr >= end)
+                        }
+                        None => false,
+                    };
+
+                    // this if statements is true if:
+                    // the next_address is in our jump table entries OR next_address marks the start of one our established blocks
+                    // OR we're within known func bounds
+                    // AND
+                    // none of our jump table entries are known function starts
+                    if (entries.contains(&next_address)
+                        || self.blocks.contains_key(&next_address)
+                        || within_func_bounds)
                         && !entries.iter().any(|&addr| {
                             self.is_known_function(known_functions, addr)
                                 .is_some_and(|fn_addr| fn_addr != function_start)
