@@ -100,6 +100,10 @@ fn get_jump_table_entries(
                 "Absolute jump table did not start immediately after the bctr at {}!",
                 from
             );
+            assert!(
+                function_end.is_some(),
+                "Must know function end for absolute jump table, because pdata"
+            );
             let mut entries: Vec<SectionAddress> = Vec::new();
             // now, step through, line by line, until you find not-an-address
             let mut data =
@@ -107,7 +111,11 @@ fn get_jump_table_entries(
             let mut cur_addr = addr;
             loop {
                 let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
-                if entry_addr >= function_start.address && section.contains(entry_addr) {
+                // entry_addr must be within known function bounds
+                // if you have an absolute jump table, your func is in pdata - ergo, known bounds
+                if entry_addr >= function_start.address
+                    && entry_addr < function_end.unwrap().address
+                {
                     let (section_index, _) =
                         obj.sections.at_address(entry_addr).with_context(|| {
                             format!(
