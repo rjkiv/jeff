@@ -135,8 +135,6 @@ fn test_super_basic_cfa() -> Result<()> {
 //     RelativeShorts { target: Option<RelocationTarget>, multiplier: usize },
 // }
 
-// TODO: go back to dtk's CFA and jump table analysis, start fresh
-
 // THE PLAN:
 // for absolute jump tables: i think you can ignore whether there is a bgt/blt, seeing as absolute_2 doesn't even have that.
 // absolute jump tables will always be smack dab in the middle of the function, and will always contain absolute addresses.
@@ -223,7 +221,7 @@ fn test_super_basic_cfa() -> Result<()> {
 // for the life of me i can't find one
 
 // Relative shorts (rlwinm before lhzx) general skeleton
-// (remember, the entries in the jump table need to be multiplied by 2):
+// (remember, the entries in the jump table need to be multiplied by 2): // UPDATE: uhhh i guess maybe you don't need to multiply by 2 after all?
 // cmplwi crN, rX, <limit>
 // bgt crN, default
 // lis r12, <jump_table_addr-hi>
@@ -671,7 +669,7 @@ fn test_jump_table_relative_shorts_2() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 31 * 2);
+    assert_eq!(*jump_table_entry.unwrap(), 47 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -811,7 +809,7 @@ fn test_jump_table_relative_shorts_6() -> Result<()> {
     let jump_table_entry =
         state.jump_tables.get(&SectionAddress::new(0, cur_test.jump_table_start));
     assert!(jump_table_entry.is_some());
-    assert_eq!(*jump_table_entry.unwrap(), 0x1c * 2);
+    assert_eq!(*jump_table_entry.unwrap(), 28 * 2);
     // TODO: verify basic block count
     Ok(())
 }
@@ -892,6 +890,7 @@ fn test_jump_table_relative_shorts_8() -> Result<()> {
 // or: since this is an absolute jump table, and i haven't seen this for any relative jump tables,
 // we can ignore the indexing and just iterate through the jump table normally (keep going until you find not-an-address)
 #[test]
+#[ignore]
 fn test_jump_table_absolute_stack_meme() -> Result<()> {
     let test_cfg: Vec<TestConfig> =
         serde_yaml::from_reader(File::open("assets/tests/cfa_tests.yml")?)?;

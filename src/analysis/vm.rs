@@ -14,10 +14,14 @@ pub enum JumpTableType {
     // the table came from an lbzx, contains relative byte offsets
     // if there is a rlwinm before the bctr, you must multiply the jump table entries by 4
     // otherwise, the multiple is 1 - no offset math needed
+    // target: the address immediately after the bctr
+    // multiplier: 1 or 4, depending on above
     RelativeBytes { target: Option<RelocationTarget>, multiplier: usize },
     // the table came from an lhzx, contains relative byte offsets
     // if there is a rlwinm before the bctr, you must multiply the jump table entries by 4
     // otherwise, the multiple is 1 - no offset math needed
+    // target: the address immediately after the bctr
+    // multiplier: 1 or 2, depending on above
     RelativeShorts { target: Option<RelocationTarget>, multiplier: usize },
 }
 
@@ -239,6 +243,37 @@ impl VM {
                     ) => GprValue::Address(RelocationTarget::Address(
                         right.wrapping_add(left as u32),
                     )),
+                    // if left == Constant and right == LoadIndexed { jump_table_type must be relativeshorts }
+                    // left should also be R12, right should be R0
+                    (
+                        GprValue::Constant(left),
+                        GprValue::LoadIndexed {
+                            jump_table_type: jt,
+                            jump_table_address: jt_addr,
+                            max_offset: max,
+                        },
+                    ) => match jt {
+                        JumpTableType::RelativeShorts { target: addr, multiplier: mult } => {
+                            assert!(
+                                addr.is_none(),
+                                "Relative addr should not be known at this point!"
+                            );
+                            GprValue::LoadIndexed {
+                                jump_table_type: JumpTableType::RelativeShorts {
+                                    target: Some(RelocationTarget::Address(SectionAddress::new(
+                                        ins_addr.section,
+                                        left as u32,
+                                    ))),
+                                    multiplier: mult,
+                                },
+                                jump_table_address: jt_addr,
+                                max_offset: max,
+                            }
+                        }
+                        _ => {
+                            unreachable!();
+                        }
+                    },
                     _ => GprValue::Unknown,
                 };
                 self.gpr[ins.field_rd() as usize].set_direct(value);
@@ -338,7 +373,10 @@ impl VM {
             }
             // ori rA, rS, UIMM
             Opcode::Ori => {
-                if let Some(target) =
+                // evil hack to get through what are effectively nops (ori rX, rX, 0)
+                if ins.field_uimm() == 0 && ins.field_ra() == ins.field_rs() {
+                    // don't do anything
+                } else if let Some(target) =
                     relocation_target_for(obj, ins_addr, None /* TODO */).ok().flatten()
                 {
                     self.gpr[ins.field_ra() as usize].set_lo(
@@ -449,12 +487,17 @@ impl VM {
                                 } else {
                                     BranchTarget::Unknown
                                 }
-                            },
+                            }
                             GprValue::Address(target) => BranchTarget::Address(target),
                             GprValue::LoadIndexed { jump_table_type: jtype, jump_table_address: address, max_offset }
                             // FIXME: avoids treating bctrl indirect calls as jump tables
                             if !ins.field_lk() => {
-                                BranchTarget::JumpTable { jump_table_type: jtype, jump_table_address: address, size: max_offset.and_then(|n| n.checked_add(4)) }
+                                let add_increment = match jtype {
+                                    JumpTableType::Absolute => 4,
+                                    JumpTableType::RelativeBytes { target: _, multiplier: _ }  => 1,
+                                    JumpTableType::RelativeShorts { target: _, multiplier: _ } => 2,
+                                };
+                                BranchTarget::JumpTable { jump_table_type: jtype, jump_table_address: address, size: max_offset.and_then(|n| n.checked_add(add_increment)) }
                             }
                             _ => BranchTarget::Unknown,
                         }
@@ -550,6 +593,23 @@ impl VM {
             //     };
             //     self.gpr[ins.field_rd() as usize].set_direct(value);
             // }
+            // lhzx rD, rA, rB
+            Opcode::Lhzx => {
+                let left = self.gpr[ins.field_ra() as usize].address(obj, ins_addr);
+                let right = self.gpr[ins.field_rb() as usize].value;
+                let value = match (left, right) {
+                    (Some(address), GprValue::Range { min: _, max, .. })
+                    if /*min == 0 &&*/ max < u64::MAX - 4 && max & 1 == 0 =>
+                        {
+                            GprValue::LoadIndexed { jump_table_type: JumpTableType::RelativeShorts { target: None, multiplier: 2 }, jump_table_address: address, max_offset: NonZeroU32::new(max as u32) }
+                        }
+                    (Some(address), _) => {
+                        GprValue::LoadIndexed { jump_table_type: JumpTableType::RelativeShorts { target: None, multiplier: 1 }, jump_table_address: address, max_offset: None }
+                    }
+                    _ => GprValue::Unknown,
+                };
+                self.gpr[ins.field_rd() as usize].set_direct(value);
+            }
             // mtspr SPR, rS
             Opcode::Mtspr => match ins.field_spr() {
                 8 => self.lr = self.gpr[ins.field_rs() as usize].value,

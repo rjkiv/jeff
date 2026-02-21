@@ -134,7 +134,61 @@ fn get_jump_table_entries(
             todo!("Not covered yet!");
         }
         JumpTableType::RelativeShorts { target, multiplier } => {
-            todo!("Not covered yet!");
+            assert!(size.is_some(), "We should know the size for a RelativeShorts jump table!");
+            let size = size.unwrap().get();
+            log::trace!(
+                "Located jump table @ {:#010X} with entry count {} (from {:#010X})",
+                addr,
+                size / 2,
+                from
+            );
+            let mut entries = Vec::with_capacity(size as usize / 2);
+            let mut data = section.data_range(addr.address, addr.address + size)?;
+            let mut cur_addr = addr;
+            loop {
+                if data.is_empty() {
+                    break;
+                }
+                if let Some(target) =
+                    relocation_target_for(obj, cur_addr, Some(ObjRelocKind::Absolute))?
+                {
+                    match target {
+                        RelocationTarget::Address(addr) => entries.push(addr),
+                        RelocationTarget::External => {
+                            bail!(
+                                "Jump table entry at {:#010X} points to external symbol",
+                                cur_addr
+                            )
+                        }
+                    }
+                } else {
+                    assert!(target.is_some(), "We need a target address to apply offsets to!");
+                    let target = match target.unwrap() {
+                        RelocationTarget::Address(addr) => addr,
+                        _ => {
+                            panic!("We need a target address to apply offsets to!")
+                        }
+                    };
+                    let entry_addr =
+                        target.address + (u16::from_be_bytes(*array_ref!(data, 0, 2)) * 1) as u32;
+                    if entry_addr > 0 {
+                        let (section_index, _) =
+                            obj.sections.at_address(entry_addr).with_context(|| {
+                                format!(
+                                    "Invalid jump table entry {entry_addr:#010X} at {cur_addr:#010X}"
+                                )
+                            })?;
+                        entries.push(SectionAddress::new(section_index, entry_addr));
+                    }
+                }
+                data = &data[2..];
+                cur_addr += 4;
+            }
+            return Ok((entries, size));
+
+            // target = the first addr immediately after the bctr
+            // multiplier = how much to multiply each entry in the jump table by
+            // todo!("Not covered yet!");
         }
     }
 
