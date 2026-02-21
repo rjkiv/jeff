@@ -286,9 +286,7 @@ impl VM {
                                     max_offset: max,
                                 }
                             }
-                            _ => {
-                                unreachable!();
-                            }
+                            _ => GprValue::Unknown,
                         },
                         _ => GprValue::Unknown,
                     };

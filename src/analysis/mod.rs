@@ -128,7 +128,7 @@ fn get_jump_table_entries(
                 size / 4,
                 from
             );
-            return Ok((entries, size));
+            Ok((entries, size))
         }
         JumpTableType::RelativeBytes { target, multiplier } => {
             // Check for an existing symbol with a known size, and use that if available.
@@ -191,8 +191,16 @@ fn get_jump_table_entries(
                     data = &data[1..];
                     cur_addr += 4;
                 }
-                return Ok((entries, size));
+                Ok((entries, size))
             } else {
+                let entries: Vec<SectionAddress> = Vec::new();
+                log::debug!(
+                    "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
+                    addr,
+                    0,
+                    from
+                );
+                return Ok((entries, 0));
                 todo!(
                     "The size is not known, we need to guess it! Func {}: bctr {}",
                     function_start,
@@ -264,138 +272,21 @@ fn get_jump_table_entries(
                 }
                 return Ok((entries, size));
             } else {
+                let entries: Vec<SectionAddress> = Vec::new();
+                log::debug!(
+                    "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
+                    addr,
+                    0,
+                    from
+                );
+                return Ok((entries, 0));
                 todo!(
                     "The size is not known, we need to guess it! Func {}: bctr {}",
                     function_start,
                     from
                 );
-
-                let mut entries = Vec::new();
-                let mut cur_addr = addr;
-                loop {
-                    let target = if let Some(target) =
-                        relocation_target_for(obj, cur_addr, Some(ObjRelocKind::Absolute))?
-                    {
-                        match target {
-                            RelocationTarget::Address(addr) => addr,
-                            RelocationTarget::External => break,
-                        }
-                    } else if obj.kind == ObjKind::Executable {
-                        // TODO: this read_u32 needs to actually read a u16 and add it to target.address
-                        let Some(value) = read_u32(section, cur_addr.address) else {
-                            break;
-                        };
-                        let Ok((section_index, _)) = obj.sections.at_address(value) else {
-                            break;
-                        };
-                        SectionAddress::new(section_index, value)
-                    } else {
-                        break;
-                    };
-                    if target < function_start || matches!(function_end, Some(end) if target >= end)
-                    {
-                        break;
-                    }
-                    entries.push(target);
-                    cur_addr += 4;
-                }
-                // let size = cur_addr.address - addr.address;
-                // log::debug!(
-                //     "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
-                //     addr,
-                //     size / 4,
-                //     from
-                // );
-                // Ok((entries, size))
             }
         }
-    }
-
-    unreachable!();
-    // Check for an existing symbol with a known size, and use that if available.
-    // Allows overriding jump table size analysis.
-    let known_size = obj
-        .symbols
-        .kind_at_section_address(addr.section, addr.address, ObjSymbolKind::Object)
-        .ok()
-        .flatten()
-        .and_then(|(_, s)| if s.size_known { NonZeroU32::new(s.size as u32) } else { None });
-
-    if let Some(size) = known_size.or(size).map(|n| n.get()) {
-        log::trace!(
-            "Located jump table @ {:#010X} with entry count {} (from {:#010X})",
-            addr,
-            size / 4,
-            from
-        );
-        let mut entries = Vec::with_capacity(size as usize / 4);
-        let mut data = section.data_range(addr.address, addr.address + size)?;
-        let mut cur_addr = addr;
-        loop {
-            if data.is_empty() {
-                break;
-            }
-            if let Some(target) =
-                relocation_target_for(obj, cur_addr, Some(ObjRelocKind::Absolute))?
-            {
-                match target {
-                    RelocationTarget::Address(addr) => entries.push(addr),
-                    RelocationTarget::External => {
-                        bail!("Jump table entry at {:#010X} points to external symbol", cur_addr)
-                    }
-                }
-            } else {
-                let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
-                if entry_addr > 0 {
-                    let (section_index, _) =
-                        obj.sections.at_address(entry_addr).with_context(|| {
-                            format!(
-                                "Invalid jump table entry {entry_addr:#010X} at {cur_addr:#010X}"
-                            )
-                        })?;
-                    entries.push(SectionAddress::new(section_index, entry_addr));
-                }
-            }
-            data = &data[4..];
-            cur_addr += 4;
-        }
-        Ok((entries, size))
-    } else {
-        let mut entries = Vec::new();
-        let mut cur_addr = addr;
-        loop {
-            let target = if let Some(target) =
-                relocation_target_for(obj, cur_addr, Some(ObjRelocKind::Absolute))?
-            {
-                match target {
-                    RelocationTarget::Address(addr) => addr,
-                    RelocationTarget::External => break,
-                }
-            } else if obj.kind == ObjKind::Executable {
-                let Some(value) = read_u32(section, cur_addr.address) else {
-                    break;
-                };
-                let Ok((section_index, _)) = obj.sections.at_address(value) else {
-                    break;
-                };
-                SectionAddress::new(section_index, value)
-            } else {
-                break;
-            };
-            if target < function_start || matches!(function_end, Some(end) if target >= end) {
-                break;
-            }
-            entries.push(target);
-            cur_addr += 4;
-        }
-        let size = cur_addr.address - addr.address;
-        log::debug!(
-            "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
-            addr,
-            size / 4,
-            from
-        );
-        Ok((entries, size))
     }
 }
 
