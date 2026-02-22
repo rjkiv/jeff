@@ -6,7 +6,7 @@ use powerpc::{Extensions, Ins};
 use crate::{
     analysis::{cfa::SectionAddress, vm::JumpTableType},
     array_ref,
-    obj::{ObjInfo, ObjKind, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbolKind},
+    obj::{ObjInfo, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbolKind},
 };
 
 pub mod cfa;
@@ -201,6 +201,11 @@ fn get_jump_table_entries(
                 }
                 Ok((entries, size))
             } else {
+                // TODO: this is a hack courtesy of jeff 0.1.0
+                // Although the jump table code is a lot more robust, there are still cases where we don't definitively know the jump table size.
+                // When this happens, just set the jump table size to 0 and move on.
+                // While this does mean you miss out on CFA from the potential addresses in the jump table,
+                // the size will ultimately sort itself out when rebuilding relocs.
                 let entries: Vec<SectionAddress> = Vec::new();
                 log::debug!(
                     "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
@@ -208,17 +213,12 @@ fn get_jump_table_entries(
                     0,
                     from
                 );
-                return Ok((entries, 0));
-                todo!(
-                    "The size is not known, we need to guess it! Func {}: bctr {}",
-                    function_start,
-                    from
-                );
+                Ok((entries, 0))
             }
             // target = the first addr immediately after the bctr
             // multiplier = how much to multiply each entry in the jump table by
         }
-        JumpTableType::RelativeShorts { target, multiplier } => {
+        JumpTableType::RelativeShorts { target, multiplier: _ } => {
             // Check for an existing symbol with a known size, and use that if available.
             // Allows overriding jump table size analysis.
             let known_size = obj
@@ -263,8 +263,8 @@ fn get_jump_table_entries(
                                 panic!("We need a target address to apply offsets to!")
                             }
                         };
-                        let entry_addr = target.address
-                            + (u16::from_be_bytes(*array_ref!(data, 0, 2)) * 1) as u32;
+                        let entry_addr =
+                            target.address + u16::from_be_bytes(*array_ref!(data, 0, 2)) as u32;
                         if entry_addr > 0 {
                             let (section_index, _) =
                                 obj.sections.at_address(entry_addr).with_context(|| {
@@ -278,8 +278,13 @@ fn get_jump_table_entries(
                     data = &data[2..];
                     cur_addr += 4;
                 }
-                return Ok((entries, size));
+                Ok((entries, size))
             } else {
+                // TODO: this is a hack courtesy of jeff 0.1.0
+                // Although the jump table code is a lot more robust, there are still cases where we don't definitively know the jump table size.
+                // When this happens, just set the jump table size to 0 and move on.
+                // While this does mean you miss out on CFA from the potential addresses in the jump table,
+                // the size will ultimately sort itself out when rebuilding relocs.
                 let entries: Vec<SectionAddress> = Vec::new();
                 log::debug!(
                     "Guessed jump table @ {:#010X} with entry count {} (from {:#010X})",
@@ -287,12 +292,7 @@ fn get_jump_table_entries(
                     0,
                     from
                 );
-                return Ok((entries, 0));
-                todo!(
-                    "The size is not known, we need to guess it! Func {}: bctr {}",
-                    function_start,
-                    from
-                );
+                Ok((entries, 0))
             }
         }
     }

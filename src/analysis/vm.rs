@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use powerpc::{Argument, Ins, Opcode, GPR};
 
 use crate::{
-    analysis::{cfa::SectionAddress, disassemble, relocation_target_for, RelocationTarget},
+    analysis::{cfa::SectionAddress, relocation_target_for, RelocationTarget},
     obj::{ObjInfo, ObjKind},
 };
 
@@ -477,7 +477,7 @@ impl VM {
                             jump_table_address: addr,
                             max_offset: max,
                         } => match jt {
-                            JumpTableType::RelativeBytes { target, multiplier } => {
+                            JumpTableType::RelativeBytes { target, multiplier: _ } => {
                                 GprValue::LoadIndexed {
                                     jump_table_type: JumpTableType::RelativeBytes {
                                         target,
