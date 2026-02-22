@@ -473,25 +473,13 @@ impl VM {
                         // if we come across a RelativeBytes jump table here (because rlwinm can come after lbzx),
                         // it's still a RelativeBytes jump table, we just need the multiplier to be 4 now.
                         GprValue::LoadIndexed {
-                            jump_table_type: jt,
+                            jump_table_type: JumpTableType::RelativeBytes { target, multiplier: _ },
                             jump_table_address: addr,
                             max_offset: max,
-                        } => match jt {
-                            JumpTableType::RelativeBytes { target, multiplier: _ } => {
-                                GprValue::LoadIndexed {
-                                    jump_table_type: JumpTableType::RelativeBytes {
-                                        target,
-                                        multiplier: 4,
-                                    },
-                                    jump_table_address: addr,
-                                    max_offset: max,
-                                }
-                            }
-                            _ => GprValue::Range {
-                                min: 0,
-                                max: mask as u64,
-                                step: 1u64.rotate_left(shift),
-                            },
+                        } => GprValue::LoadIndexed {
+                            jump_table_type: JumpTableType::RelativeBytes { target, multiplier: 4 },
+                            jump_table_address: addr,
+                            max_offset: max,
                         },
                         _ => GprValue::Range {
                             min: 0,
