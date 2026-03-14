@@ -768,12 +768,18 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
 
     let mut sections: Vec<ObjSection> = vec![];
     let mut section_indexes: Vec<Option<usize>> = vec![None /* ELF null section */];
+    let mut embsec_counter = 0;
     for section in obj_file.sections() {
         if section.size() == 0 {
             section_indexes.push(None);
             continue;
         }
-        let section_name = section.name()?;
+        let section_name = if section.name()? == ".embsec_" {
+            embsec_counter += 1;
+            format!(".embsec{}", embsec_counter - 1).to_string()
+        } else {
+            section.name()?.to_string()
+        };
         let section_kind = match section.kind() {
             SectionKind::Text => ObjSectionKind::Code,
             SectionKind::Data => ObjSectionKind::Data,
@@ -791,7 +797,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
         section_data.resize(section.size() as usize, 0);
         // should we do anything with section.flags()? xex uses COFF
         sections.push(ObjSection {
-            name: section_name.to_string(),
+            name: section_name,
             kind: section_kind,
             address: section.address(),
             size: section.size(),
