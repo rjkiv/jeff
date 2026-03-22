@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
-    fs,
-    fs::{DirBuilder, File},
+    fs::{self, DirBuilder, File},
     io::{BufWriter, Write},
     time::UNIX_EPOCH,
 };
@@ -33,8 +32,7 @@ use crate::{
     },
     obj::{
         best_match_for_reloc, ObjInfo, ObjKind, ObjRelocKind, ObjSectionKind, ObjSections,
-        ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope, SectionIndex,
-        SymbolIndex,
+        ObjSymbolKind, ObjSymbolScope, SectionIndex, SymbolIndex,
     },
     util::{
         asm::write_asm,
@@ -475,45 +473,34 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     if let Some(pdb_path) = &config.base.pdb {
         let pdb_path: Utf8NativePathBuf = pdb_path.with_encoding();
         let pdb_syms = try_parse_pdb(&pdb_path, &obj.sections)?;
-        for sym in pdb_syms {
+        for mut sym in pdb_syms.into_iter() {
             if !is_reg_intrinsic(&sym.name) && sym.name != "__NLG_Return" {
                 match obj.sections.at_address(sym.address as u32).ok() {
-                    Some((sec_idx, sec)) => {
-                        // if func came from pdata, DO NOT override the size
+                    Some((sec_idx, _sec)) => {
                         let the_sec_addr = SectionAddress::new(sec_idx, sym.address as u32);
-                        let sym_to_add: ObjSymbol = if obj.pdata_funcs.contains(&the_sec_addr) {
-                            ObjSymbol {
-                                name: sym.name,
-                                address: sym.address,
-                                section: Some(sec_idx),
-                                size: obj.known_functions.get(&the_sec_addr).unwrap().unwrap()
-                                    as u64,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: if sec.kind == ObjSectionKind::Code {
-                                    ObjSymbolKind::Function
-                                } else {
-                                    ObjSymbolKind::Object
-                                },
-                                ..Default::default()
+                        if obj.pdata_funcs.contains(&the_sec_addr) {
+                            let pdata_sz =
+                                obj.known_functions.get(&the_sec_addr).unwrap().unwrap() as u64;
+                            let pdb_sz = sym.size;
+                            if pdata_sz != pdb_sz {
+                                log::debug!(
+                                    concat!(
+                                        "Size of {} according to .pdata is {}",
+                                        ", but according to pdb is {}. "
+                                    ),
+                                    &sym.name,
+                                    pdata_sz,
+                                    pdb_sz
+                                );
+                                // Defer to .pdata size for now. Empirically,
+                                // the sizes only differ for XDK functions.
+                                // Note that this approach results in extra
+                                // 'fn_XXXXXXXX' symbols for certain XDK labels.
+                                // TODO: Fix this without breaking CFA
+                                sym.size = pdata_sz;
                             }
-                        } else {
-                            ObjSymbol {
-                                name: sym.name,
-                                address: sym.address,
-                                section: Some(sec_idx),
-                                size: sym.size,
-                                size_known: sym.size_known,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: if sec.kind == ObjSectionKind::Code {
-                                    ObjSymbolKind::Function
-                                } else {
-                                    ObjSymbolKind::Object
-                                },
-                                ..Default::default()
-                            }
-                        };
-                        obj.add_symbol(sym_to_add, true)?;
+                        }
+                        obj.add_symbol(sym, true)?;
                     }
                     // if we couldn't find the section (like maybe it was stripped), just continue on
                     _ => continue,

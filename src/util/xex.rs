@@ -1053,6 +1053,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     }
 
     // add known function boundaries from pdata
+    // FIXME: Some of these are SEH-related labels, not function entrypoints
     let (pdata_addr, pdata_data) = match obj.sections.by_name(".pdata")? {
         Some((idx, pdata_section)) => {
             (SectionAddress::new(idx, pdata_section.address as u32), pdata_section.data.clone())
