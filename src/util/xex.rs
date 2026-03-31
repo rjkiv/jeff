@@ -767,13 +767,9 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     let obj_name = xex.opt_header_data.original_name;
 
     let mut sections: Vec<ObjSection> = vec![];
-    let mut section_indexes: Vec<Option<usize>> = vec![None /* ELF null section */];
     let mut embsec_counter = 0;
     for section in obj_file.sections() {
-        if section.size() == 0 {
-            section_indexes.push(None);
-            continue;
-        }
+        log::debug!("PE section {}: 0x{:X}", section.name().unwrap(), section.address());
         let section_name = if section.name()? == ".embsec_" {
             embsec_counter += 1;
             format!(".embsec{}", embsec_counter - 1).to_string()
@@ -785,13 +781,8 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             SectionKind::Data => ObjSectionKind::Data,
             SectionKind::ReadOnlyData => ObjSectionKind::ReadOnlyData,
             SectionKind::UninitializedData => ObjSectionKind::Bss,
-            // SectionKind::Other if section_name == ".comment" => ObjSectionKind::Comment,
-            _ => {
-                section_indexes.push(None);
-                continue;
-            }
+            _ => ObjSectionKind::Data,
         };
-        section_indexes.push(Some(sections.len()));
         // because some exes like to give us data whose size < the virtual size
         let mut section_data = section.uncompressed_data()?.to_vec();
         section_data.resize(section.size() as usize, 0);

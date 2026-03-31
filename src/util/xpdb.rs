@@ -41,23 +41,22 @@ fn warn_unsupported_sym_kind(sym: &pdb::Symbol, set: &mut HashSet<pdb::SymbolKin
 /// Convert to jeff's SectionAddress type
 fn to_section_addr(
     pdbmap: &pdb::AddressMap,
-    pdb2dtk_section: &[u8; 32],
     pdb_offs: &pdb::PdbInternalSectionOffset,
 ) -> SectionAddress {
     let s_addr = pdb_offs.to_section_offset(pdbmap).unwrap_or_default();
     SectionAddress {
         address: s_addr.offset,
-        section: pdb2dtk_section[s_addr.section as usize] as u32,
+        // jeff sections are 0-indexed
+        section: s_addr.section as u32 - 1,
     }
 }
 
 fn to_virtual_address(
     pdbmap: &pdb::AddressMap,
     section_addrs: &ObjSections,
-    pdb2dtk_section: &[u8; 32],
     pdb_offs: &pdb::PdbInternalSectionOffset,
 ) -> Result<u64> {
-    let s_addr = to_section_addr(pdbmap, pdb2dtk_section, pdb_offs);
+    let s_addr = to_section_addr(pdbmap, pdb_offs);
     let sect_base = section_addrs.get(s_addr.section).unwrap_or(&ObjSection::default()).address;
     Ok(s_addr.address as u64 + sect_base)
 }
@@ -68,14 +67,8 @@ pub fn try_parse_pdb(
 ) -> Result<Vec<ObjSymbol>> {
     let mut dbfile = pdb::PDB::open(File::open(path)?)?;
 
-    // setup configgery
-    let mut pdb2dtk_section: [u8; 32] =
-        std::array::from_fn::<u8, 32, _>(|x: usize| -> u8 { x as u8 });
-
-    // build PDB -> DTK section lookup table
-    ensure!(section_addrs.len() <= 32, "Oh god, why does your XEX have more than 32 sections?");
+    // Ensure pdb sections match the exe sections and that all the names match
     {
-        let dtk_iter = section_addrs.iter();
         let sec_headers = dbfile.sections()?.unwrap();
         let mut embsec_counter = 0;
         let pdb_hdr_names: Vec<String> = sec_headers
@@ -90,20 +83,19 @@ pub fn try_parse_pdb(
                 s_name
             })
             .collect();
-
-        for dtk_section in dtk_iter {
-            pdb_hdr_names.iter().enumerate().for_each(|x| {
-                if *x.1 == dtk_section.1.name {
-                    pdb2dtk_section[x.0 + 1] = dtk_section.0 as u8;
-                    log::debug!(
-                        "Remapping PDB section {} (no. {}) to DTK section {} (no. {})",
-                        x.1,
-                        x.0 + 1,
-                        dtk_section.1.name,
-                        dtk_section.0
-                    );
-                }
-            });
+        ensure!(
+            pdb_hdr_names.len() == section_addrs.len() as usize,
+            "PDB has {} sections, EXE has {}",
+            pdb_hdr_names.len(),
+            section_addrs.len()
+        );
+        for i in 0..pdb_hdr_names.len() {
+            ensure!(
+                pdb_hdr_names[i] == section_addrs[i as u32].name,
+                "PDB section '{}' does not match EXE section '{}'",
+                pdb_hdr_names[i],
+                section_addrs[i as u32].name
+            );
         }
     }
 
@@ -140,7 +132,7 @@ pub fn try_parse_pdb(
     for symbol in all_syms_iter {
         match symbol.parse() {
             Ok(pdb::SymbolData::Public(data)) => {
-                let symaddr = to_section_addr(&pdbmap, &pdb2dtk_section, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // We get almost everything we need to know about a symbol
@@ -153,8 +145,7 @@ pub fn try_parse_pdb(
                 // TODO: Not all S_PUB32 records represent functions or objects;
                 // Some may just be labels, which can be skipped
                 obj_sym.name = data.name.to_string().into();
-                obj_sym.address =
-                    to_virtual_address(&pdbmap, section_addrs, &pdb2dtk_section, &data.offset)?;
+                obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset)?;
                 obj_sym.section = Some(symaddr.section);
                 obj_sym.flags = ObjSymbolFlagSet(ObjSymbolFlags::Global.into());
                 obj_sym.kind =
@@ -162,7 +153,7 @@ pub fn try_parse_pdb(
                 obj_sym.data_kind = ObjDataKind::Unknown;
             }
             Ok(pdb::SymbolData::Data(data)) => {
-                let symaddr = to_section_addr(&pdbmap, &pdb2dtk_section, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GDATA32 or S_LDATA32 record
@@ -180,8 +171,7 @@ pub fn try_parse_pdb(
                         data.name.to_string().into()
                     };
                     obj_sym.name = name;
-                    obj_sym.address =
-                        to_virtual_address(&pdbmap, section_addrs, &pdb2dtk_section, &data.offset)?;
+                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset)?;
                     obj_sym.section = Some(symaddr.section);
                 }
                 // TODO: We can also deduce the size by using the type
@@ -191,7 +181,7 @@ pub fn try_parse_pdb(
                 // See https://docs.rs/pdb/latest/pdb/struct.ItemInformation.html
             }
             Ok(pdb::SymbolData::ThreadStorage(data)) => {
-                let symaddr = to_section_addr(&pdbmap, &pdb2dtk_section, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GTHREAD32 or S_LTHREAD32 record
@@ -201,15 +191,14 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Object;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address =
-                        to_virtual_address(&pdbmap, section_addrs, &pdb2dtk_section, &data.offset)?;
+                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset)?;
                     obj_sym.section = Some(symaddr.section);
                 }
 
                 // TODO: Above note for DATA records also applies here
             }
             Ok(pdb::SymbolData::Procedure(data)) => {
-                let symaddr = to_section_addr(&pdbmap, &pdb2dtk_section, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GPROC32 or S_LPROC32 record
@@ -222,13 +211,12 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Function;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address =
-                        to_virtual_address(&pdbmap, section_addrs, &pdb2dtk_section, &data.offset)?;
+                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset)?;
                     obj_sym.section = Some(symaddr.section);
                 }
             }
             Ok(pdb::SymbolData::Thunk(data)) => {
-                let symaddr = to_section_addr(&pdbmap, &pdb2dtk_section, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_THUNK32 record
