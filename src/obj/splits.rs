@@ -121,10 +121,12 @@ impl ObjSplits {
             .map_err(|_| anyhow!("Multiple splits for unit {} with rename {:?}", unit, rename))
     }
 
-    pub fn push(&mut self, address: u32, split: ObjSplit) {
+    /// Add the split, returning a mutable reference to it within the vector
+    pub fn push(&mut self, address: u32, split: ObjSplit) -> &mut ObjSplit {
         let out = self.splits.entry(address).or_default();
         out.push(split);
         out.sort_by_key(|s| s.end);
+        out.last_mut().unwrap()
     }
 
     pub fn remove(&mut self, address: u32) -> Option<Vec<ObjSplit>> { self.splits.remove(&address) }

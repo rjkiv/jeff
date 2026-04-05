@@ -64,23 +64,6 @@ fn to_virtual_address(
     section_addr_to_virtual_addr(section_addrs, &to_section_addr(pdbmap, pdb_offs))
 }
 
-/// Section contributions from a given module are not guaranteed to form
-/// a single, continuous block per group, as one might expect. This is the case
-/// at least for the .xidata group. The solution implemented here is to add
-/// "pseudo-modules" as needed to hold any additional, non-contiguous chunks.
-/// In practice, this should only serve to handle a few unusual contribution
-/// sequences in the XDK modules
-struct PseudoModuleState {
-    /// Pointer into mod_indices
-    pub curr: i32,
-    /// Elements after the first are pseudo-modules
-    pub mod_indices: Vec<i32>,
-}
-
-impl PseudoModuleState {
-    const UNSEEN: i32 = -1;
-}
-
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
 struct CoffGroup {
     /// Starting address of the group
@@ -168,6 +151,9 @@ pub fn try_parse_pdb(
     for symbol in all_syms_iter {
         match symbol.parse() {
             Ok(pdb2::SymbolData::Public(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
                 let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
@@ -189,6 +175,9 @@ pub fn try_parse_pdb(
                 obj_sym.data_kind = ObjDataKind::Unknown;
             }
             Ok(pdb2::SymbolData::Data(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
                 let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
@@ -220,6 +209,9 @@ pub fn try_parse_pdb(
                 // See https://docs.rs/pdb2/latest/pdb2/struct.ItemInformation.html
             }
             Ok(pdb2::SymbolData::ThreadStorage(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
                 let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
@@ -237,6 +229,9 @@ pub fn try_parse_pdb(
                 // TODO: Above note for DATA records also applies here
             }
             Ok(pdb2::SymbolData::Procedure(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
                 let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
@@ -255,6 +250,9 @@ pub fn try_parse_pdb(
                 }
             }
             Ok(pdb2::SymbolData::Thunk(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
                 let symaddr = to_section_addr(&pdbmap, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
@@ -313,20 +311,14 @@ pub fn try_parse_pdb(
 
     let num_modules = dbi.modules()?.count().unwrap_or(0) as i32;
 
-    // The next available module index, to be incremented each time a new
-    // pseudo-module is created
-    let mut next_avail = num_modules;
-    let mut module_map: HashMap<i32, PseudoModuleState> = HashMap::new();
     let mut module_names: Vec<String> = vec![];
     for i in 0..num_modules {
-        module_map
-            .insert(i, PseudoModuleState { curr: PseudoModuleState::UNSEEN, mod_indices: vec![i] });
         module_names.push(format!("module_{}.cpp", i));
     }
 
     // curr_grp will increase monotonically, since contributions are sorted
-    let mut curr_grp = PseudoModuleState::UNSEEN;
-    let mut curr_mod = PseudoModuleState::UNSEEN;
+    let mut curr_grp = -1;
+    let mut curr_mod = -1;
     let mut curr_split: &mut ObjSplit = &mut Default::default();
 
     let mut contribs = dbi.section_contributions()?;
@@ -338,15 +330,11 @@ pub fn try_parse_pdb(
         let sec_idx = s_addr.section as usize;
         let start = section_addr_to_virtual_addr(section_addrs, &s_addr);
         let end = start + contrib.size as u64;
-        let mut mod_idx = contrib.module as i32;
+        let mod_idx = contrib.module as i32;
 
         let is_new_grp = start >= groups[(curr_grp + 1) as usize].address;
         let is_new_mod = mod_idx != curr_mod;
         if is_new_grp {
-            // Reset state
-            for key in module_map.iter_mut() {
-                key.1.curr = PseudoModuleState::UNSEEN;
-            }
             // Skip empty groups
             loop {
                 curr_grp += 1;
@@ -356,32 +344,9 @@ pub fn try_parse_pdb(
             }
         }
 
-        let ent = module_map.get_mut(&mod_idx).expect("Out-of-range module index");
         if is_new_grp || is_new_mod {
-            // This increments to 0 the first time around per group, but
-            // if it increments again, we need a pseudo-module
-            ent.curr += 1;
-            if ent.curr >= ent.mod_indices.len() as i32 {
-                ent.mod_indices.push(next_avail);
-                module_names.push(format!(
-                    "module_{}_part_{}.cpp",
-                    ent.mod_indices[0],
-                    ent.curr + 1
-                ));
-                log::info!(
-                    "Created pseudo-module #{}, named {}",
-                    next_avail,
-                    module_names[next_avail as usize]
-                );
-                next_avail += 1;
-                assert!(
-                    module_names.len() == next_avail as usize,
-                    "name table size should track with module count"
-                );
-            }
             curr_mod = mod_idx;
 
-            mod_idx = ent.mod_indices[ent.curr as usize];
             let mod_name = &module_names[mod_idx as usize];
             let rename = if groups[curr_grp as usize].name == section_addrs[sec_idx as u32].name {
                 None
@@ -389,7 +354,9 @@ pub fn try_parse_pdb(
                 Some(groups[curr_grp as usize].name.clone())
             };
 
-            splits_by_section[sec_idx].push(start as u32, ObjSplit {
+            // Get a mutable reference to the ObjSplit we just pushed, so
+            // subsequent contributions to it can update its size
+            curr_split = splits_by_section[sec_idx].push(start as u32, ObjSplit {
                 unit: mod_name.clone(),
                 end: end as u32,
                 align: None,
@@ -398,12 +365,6 @@ pub fn try_parse_pdb(
                 skip: false,
                 rename: rename.clone(),
             });
-            // Get a mutable reference to the ObjSplit we just pushed, so
-            // subsequent contributions to it can update its size
-            curr_split = splits_by_section[sec_idx]
-                .for_unit_rename(mod_name, rename.as_deref())?
-                .expect("Failed to get newly-created ObjSplit")
-                .1;
         }
         // FIXME: This currently requires detect_objects=false to work.
         // Deducing exact object sizes from the PDB should fix this
