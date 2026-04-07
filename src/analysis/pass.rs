@@ -37,8 +37,13 @@ impl AnalysisPass for FindSaveRestSledsXbox {
 
                 // save/restore gpr/fpr/vmx should've been found in pdata
                 if !func.contains("_upper") {
-                    assert!(obj.known_functions.contains_key(&start),
-                        "Could not find reg intrinsic from pdata. Is that even possible for an xex?");
+                    assert!(
+                        obj.known_functions.contains_key(&start),
+                        concat!(
+                            "Could not find reg intrinsic from pdata. ",
+                            "For PDB analysis, add 'symbols_known: true' to config.yml"
+                        )
+                    );
                 }
                 // add known symbols for them
                 if obj.known_functions.contains_key(&start) {

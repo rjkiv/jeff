@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     fs::File,
     vec::Vec,
 };
@@ -41,27 +41,15 @@ fn warn_unsupported_sym_kind(sym: &pdb2::Symbol, set: &mut HashSet<pdb2::SymbolK
 /// Convert to jeff's SectionAddress type
 fn to_section_addr(
     pdbmap: &pdb2::AddressMap,
-    pdb_offs: &pdb2::PdbInternalSectionOffset,
-) -> SectionAddress {
-    let s_addr = pdb_offs.to_section_offset(pdbmap).unwrap_or_default();
-    SectionAddress {
-        address: s_addr.offset,
-        // jeff sections are 0-indexed
-        section: s_addr.section as u32 - 1,
-    }
-}
-
-fn section_addr_to_virtual_addr(section_addrs: &ObjSections, s_addr: &SectionAddress) -> u64 {
-    let sect_base = section_addrs.get(s_addr.section).unwrap_or(&ObjSection::default()).address;
-    s_addr.address as u64 + sect_base
-}
-
-fn to_virtual_address(
-    pdbmap: &pdb2::AddressMap,
     section_addrs: &ObjSections,
     pdb_offs: &pdb2::PdbInternalSectionOffset,
-) -> u64 {
-    section_addr_to_virtual_addr(section_addrs, &to_section_addr(pdbmap, pdb_offs))
+) -> SectionAddress {
+    let sect_offs = pdb_offs.to_section_offset(pdbmap).unwrap_or_default();
+    // Subtracting 1 because jeff sections are 0-indexed
+    // TODO: Do optimized binaries have a different mapping?
+    let jeff_sect = (sect_offs.section - 1) as u32;
+    let sect_base = section_addrs.get(jeff_sect).unwrap_or(&ObjSection::default()).address;
+    SectionAddress { section: jeff_sect, address: sect_base as u32 + sect_offs.offset }
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
@@ -76,11 +64,24 @@ struct CoffGroup {
     pub name: String,
 }
 
+/// All the useful information parsed from a PDB
+#[derive(Debug)]
+pub struct PdbAnalyzeResult {
+    /// Names of translation units
+    pub units: Vec<String>,
+    /// Splits derived from the Section Contributions Stream
+    pub splits: Vec<ObjSplits>,
+    /// Symbols derived from the Global and Module Symbol Streams
+    pub symbols: Vec<ObjSymbol>,
+    /// Locations of labels. Note that all labels are symbols
+    pub labels: Vec<SectionAddress>,
+}
+
 /// Extract translation units, splits, and symbols from a PDB
 pub fn try_parse_pdb(
     path: &Utf8NativePathBuf,
     section_addrs: &ObjSections,
-) -> Result<(Vec<String>, Vec<ObjSplits>, Vec<ObjSymbol>)> {
+) -> Result<PdbAnalyzeResult> {
     let mut dbfile = pdb2::PDB::open(File::open(path)?)?;
 
     // Ensure pdb sections match the exe sections and that all the names match
@@ -147,14 +148,14 @@ pub fn try_parse_pdb(
 
     let all_syms_iter = all_syms.into_iter();
     let mut groups: Vec<CoffGroup> = vec![];
-    let mut ldata_dupes: HashMap<String, u32> = HashMap::new();
+    let mut known_labels: Vec<SectionAddress> = vec![];
     for symbol in all_syms_iter {
         match symbol.parse() {
             Ok(pdb2::SymbolData::Public(data)) => {
                 if data.offset.section == 0 {
                     continue;
                 }
-                let symaddr = to_section_addr(&pdbmap, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // We get almost everything we need to know about a symbol
@@ -167,7 +168,7 @@ pub fn try_parse_pdb(
                 // TODO: Not all S_PUB32 records represent functions or objects;
                 // Some may just be labels, which can be skipped
                 obj_sym.name = data.name.to_string().into();
-                obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset);
+                obj_sym.address = symaddr.address.into();
                 obj_sym.section = Some(symaddr.section);
                 obj_sym.flags = ObjSymbolFlagSet(ObjSymbolFlags::Global.into());
                 obj_sym.kind =
@@ -178,7 +179,7 @@ pub fn try_parse_pdb(
                 if data.offset.section == 0 {
                     continue;
                 }
-                let symaddr = to_section_addr(&pdbmap, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GDATA32 or S_LDATA32 record
@@ -187,19 +188,8 @@ pub fn try_parse_pdb(
                 } else {
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Object;
-                    // TODO: Now that we extract object files and splits, we can
-                    // update this renaming so it is only done for repeat
-                    // names of symbols in the same file
-                    let name = data.name.to_string().clone();
-                    let c =
-                        *ldata_dupes.entry(name.to_string()).and_modify(|c| *c += 1).or_insert(1);
-                    let name: String = if c > 1 {
-                        format!("static_dup_{}_{}", c - 1, name)
-                    } else {
-                        data.name.to_string().into()
-                    };
-                    obj_sym.name = name;
-                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset);
+                    obj_sym.name = data.name.to_string().into();
+                    obj_sym.address = symaddr.address.into();
                     obj_sym.section = Some(symaddr.section);
                 }
                 // TODO: We can also deduce the size by using the type
@@ -212,7 +202,7 @@ pub fn try_parse_pdb(
                 if data.offset.section == 0 {
                     continue;
                 }
-                let symaddr = to_section_addr(&pdbmap, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GTHREAD32 or S_LTHREAD32 record
@@ -222,7 +212,7 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Object;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset);
+                    obj_sym.address = symaddr.address.into();
                     obj_sym.section = Some(symaddr.section);
                 }
 
@@ -232,20 +222,20 @@ pub fn try_parse_pdb(
                 if data.offset.section == 0 {
                     continue;
                 }
-                let symaddr = to_section_addr(&pdbmap, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GPROC32 or S_LPROC32 record
                 obj_sym.size = data.len as u64;
                 obj_sym.size_known = true;
-                obj_sym.align = Some(4);
+                obj_sym.align = Some(8);
                 if data.global {
                     obj_sym.flags.set_scope(ObjSymbolScope::Global);
                 } else {
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Function;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address = to_virtual_address(&pdbmap, section_addrs, &data.offset);
+                    obj_sym.address = symaddr.address.into();
                     obj_sym.section = Some(symaddr.section);
                 }
             }
@@ -253,7 +243,7 @@ pub fn try_parse_pdb(
                 if data.offset.section == 0 {
                     continue;
                 }
-                let symaddr = to_section_addr(&pdbmap, &data.offset);
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_THUNK32 record
@@ -261,11 +251,31 @@ pub fn try_parse_pdb(
                 obj_sym.size_known = true;
                 obj_sym.align = Some(4);
             }
+            Ok(pdb2::SymbolData::Label(data)) => {
+                if data.offset.section == 0 {
+                    continue;
+                }
+                let name: String = data.name.to_string().into();
+                if name.starts_with("$M") || name.starts_with("$LN") {
+                    // These are uninteresting auto-generated symbols
+                    continue;
+                }
+                let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
+                let obj_sym = syms.entry(symaddr).or_default();
+                obj_sym.address = symaddr.address.into();
+                obj_sym.data_kind = ObjDataKind::Unknown;
+                obj_sym.flags.set_scope(ObjSymbolScope::Local);
+                obj_sym.kind = ObjSymbolKind::Unknown;
+                obj_sym.name = name;
+                obj_sym.section = Some(symaddr.section);
+
+                known_labels.push(symaddr);
+            }
             Ok(pdb2::SymbolData::CoffGroup(data)) => groups.push(CoffGroup {
-                address: to_virtual_address(&pdbmap, section_addrs, &data.offset),
+                address: to_section_addr(&pdbmap, section_addrs, &data.offset).address.into(),
                 size: data.cb,
                 name: data.name.to_string().into(),
-                section: to_section_addr(&pdbmap, &data.offset).section,
+                section: to_section_addr(&pdbmap, section_addrs, &data.offset).section,
             }),
             Ok(pdb2::SymbolData::Section(_data)) => {
                 // TODO: We already have most section info from the EXE, but
@@ -326,9 +336,9 @@ pub fn try_parse_pdb(
         // TODO: Extract file names from the Sources substream to replace the
         // auto-generated names. Take only the base name, fix the extension,
         // and disambiguate identical names with a prefix
-        let s_addr = to_section_addr(&pdbmap, &contrib.offset);
+        let s_addr = to_section_addr(&pdbmap, section_addrs, &contrib.offset);
         let sec_idx = s_addr.section as usize;
-        let start = section_addr_to_virtual_addr(section_addrs, &s_addr);
+        let start: u64 = s_addr.address.into();
         let end = start + contrib.size as u64;
         let mod_idx = contrib.module as i32;
 
@@ -414,5 +424,10 @@ pub fn try_parse_pdb(
         };
     }
 
-    Ok((module_names, splits_by_section, addr_vec))
+    Ok(PdbAnalyzeResult {
+        units: module_names,
+        splits: splits_by_section,
+        symbols: addr_vec,
+        labels: known_labels,
+    })
 }
