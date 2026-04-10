@@ -315,16 +315,55 @@ pub fn try_parse_pdb(
         );
     }
 
+    // Process all of the S_OBJNAME records to name the object files.
+    // We don't know how many modules will have a module stream, yet
+    // modules lacking streams may still have section contributions;
+    // thus, default names must be available
+    let num_modules = dbi.modules()?.count().unwrap_or(0) as i32;
+    let mut module_names: Vec<String> = vec![];
+    for i in 0..num_modules {
+        module_names.push(format!("module{}.cpp", i));
+    }
+
+    let mut seen_names = HashSet::new();
+    let mut mod_iter = dbi.modules()?.enumerate();
+    while let Some((i, module)) = mod_iter.next()? {
+        if let Some(info) = dbfile.module_info(&module)? {
+            let mut module_syms = info.symbols()?;
+            while let Some(sym) = module_syms.next()? {
+                if let Ok(pdb2::SymbolData::ObjName(data)) = sym.parse() {
+                    let path: String = data.name.to_string().into();
+                    if let Some(file) = path.rsplit("\\").next() {
+                        // Replace forbidden filename chars. This is mainly
+                        // to handle unusual OBJNAMEs that are not really paths
+                        let mut base: String =
+                            file.to_string()
+                                .chars()
+                                .map(|c| {
+                                    if c.is_alphanumeric() || c == '.' || c == '-' {
+                                        c
+                                    } else {
+                                        '_'
+                                    }
+                                })
+                                .collect();
+                        base = base.trim_end_matches(".obj").to_string() + ".cpp";
+                        if seen_names.insert(base.clone()) {
+                            module_names[i] = base;
+                        } else {
+                            module_names[i] = format!("module{}_{}", i, base);
+                        }
+                        // Ignore any more S_OBJNAME records in this module
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     // Begin parsing splits
     let mut splits_by_section: Vec<ObjSplits> = vec![];
     splits_by_section.resize_with(section_addrs.len() as usize, Default::default);
-
-    let num_modules = dbi.modules()?.count().unwrap_or(0) as i32;
-
-    let mut module_names: Vec<String> = vec![];
-    for i in 0..num_modules {
-        module_names.push(format!("module_{}.cpp", i));
-    }
 
     // curr_grp will increase monotonically, since contributions are sorted
     let mut curr_grp = -1;
