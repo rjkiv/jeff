@@ -79,6 +79,8 @@ pub struct ProjectConfig {
     #[serde(default = "bool_true", skip_serializing_if = "is_true")]
     pub detect_strings: bool,
     #[serde(default = "bool_true", skip_serializing_if = "is_true")]
+    pub use_pdb_types: bool,
+    #[serde(default = "bool_true", skip_serializing_if = "is_true")]
     pub write_asm: bool,
     /// Specifies the start of the common BSS section.
     #[serde(skip_serializing_if = "is_default")]
@@ -113,6 +115,7 @@ impl Default for ProjectConfig {
             modules: vec![],
             detect_objects: true,
             detect_strings: true,
+            use_pdb_types: true,
             write_asm: true,
             common_start: None,
             symbols_known: false,

@@ -144,10 +144,11 @@ fn set_obj_size_by_type(obj_sym: &mut ObjSymbol, ty_finder: &TypeFinder, index: 
 
 /// Try to set the size of the object symbol according to its name
 fn set_obj_size_by_name(obj_sym: &mut ObjSymbol, name: &str) {
-    if name.starts_with("??_C@_0") || name.starts_with("??_C@_1") {
-        // This is a string or a wide string. In either case, the size
-        // is encoded into the symbol name itself.
-        obj_sym.data_kind = ObjDataKind::String;
+    let is_string = name.starts_with("??_C@_0");
+    let is_wstring = name.starts_with("??_C@_1");
+    if is_string || is_wstring {
+        // In either case, the size is encoded into the symbol name itself
+        obj_sym.data_kind = if is_string { ObjDataKind::String } else { ObjDataKind::String16 };
         let ptr = &mut name["??_C@_0".len()..].chars();
         let mut str_size = 0;
         for ch in ptr.by_ref() {
@@ -203,10 +204,14 @@ pub struct PdbAnalyzeResult {
     pub labels: Vec<SectionAddress>,
 }
 
-/// Extract translation units, splits, and symbols from a PDB
+/// Extract translation units, splits, and symbols from a PDB. The use_types
+/// flag enables the parsing of the type information stream to deduce object
+/// sizes. This is optional, since some PDBs are known to have corrupt data
+/// in this stream.
 pub fn try_parse_pdb(
     path: &Utf8NativePathBuf,
     section_addrs: &ObjSections,
+    use_types: bool,
 ) -> Result<PdbAnalyzeResult> {
     let mut dbfile = pdb2::PDB::open(File::open(path)?)?;
 
@@ -248,8 +253,10 @@ pub fn try_parse_pdb(
     let mut ty_finder = tpi.finder();
     let mut ty_iter = tpi.iter();
 
-    while (ty_iter.next()?).is_some() {
-        ty_finder.update(&ty_iter);
+    if use_types {
+        while (ty_iter.next()?).is_some() {
+            ty_finder.update(&ty_iter);
+        }
     }
 
     let pdbmap = dbfile.address_map()?;
@@ -329,7 +336,9 @@ pub fn try_parse_pdb(
                     obj_sym.address = symaddr.address.into();
                     obj_sym.section = Some(symaddr.section);
                 }
-                set_obj_size_by_type(obj_sym, &ty_finder, data.type_index);
+                if use_types {
+                    set_obj_size_by_type(obj_sym, &ty_finder, data.type_index);
+                }
             }
             Ok(pdb2::SymbolData::ThreadStorage(data)) => {
                 if data.offset.section == 0 {
@@ -348,7 +357,9 @@ pub fn try_parse_pdb(
                     obj_sym.address = symaddr.address.into();
                     obj_sym.section = Some(symaddr.section);
                 }
-                set_obj_size_by_type(obj_sym, &ty_finder, data.type_index);
+                if use_types {
+                    set_obj_size_by_type(obj_sym, &ty_finder, data.type_index);
+                }
             }
             Ok(pdb2::SymbolData::Procedure(data)) => {
                 if data.offset.section == 0 {
@@ -544,8 +555,6 @@ pub fn try_parse_pdb(
                 rename: rename.clone(),
             });
         }
-        // FIXME: This currently requires detect_objects=false to work.
-        // Deducing exact object sizes from the PDB should fix this
         curr_split.end = end as u32;
     }
 

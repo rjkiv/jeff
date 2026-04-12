@@ -473,7 +473,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 
     if let Some(pdb_path) = &config.base.pdb {
         let pdb_path: Utf8NativePathBuf = pdb_path.with_encoding();
-        let pdb = try_parse_pdb(&pdb_path, &obj.sections)?;
+        let pdb = try_parse_pdb(&pdb_path, &obj.sections, config.use_pdb_types)?;
 
         // Apply all the splits
         // FIXME: Don't add splits unconditionally here; it may conflict with
@@ -742,7 +742,7 @@ fn map(args: MapArgs) -> Result<()> {
 
 fn pdb(args: PdbArgs) -> Result<()> {
     println!("pdb: {}", args.input);
-    let data = try_parse_pdb(&args.input, &ObjSections::new(ObjKind::Executable, vec![]))?;
+    let data = try_parse_pdb(&args.input, &ObjSections::new(ObjKind::Executable, vec![]), true)?;
     println!("{:#?}", data);
     Ok(())
 }
