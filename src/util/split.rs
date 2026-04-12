@@ -544,7 +544,12 @@ fn split_pdata(obj: &mut ObjInfo) -> Result<()> {
 /// - Creating splits for gaps between existing splits
 /// - Resolving a new object link order
 #[instrument(level = "debug", skip(obj))]
-pub fn update_splits(obj: &mut ObjInfo, common_start: Option<u32>, fill_gaps: bool) -> Result<()> {
+pub fn update_splits(
+    obj: &mut ObjInfo,
+    common_start: Option<u32>,
+    fill_gaps: bool,
+    redo_pdata_splits: bool,
+) -> Result<()> {
     // // Create splits for extab and extabindex entries
     // if let Some((section_index, section)) = obj.sections.by_name("extabindex")? {
     //     if !section.data.is_empty() {
@@ -576,7 +581,9 @@ pub fn update_splits(obj: &mut ObjInfo, common_start: Option<u32>, fill_gaps: bo
     // }
 
     // Create splits for .pdata entries
-    split_pdata(obj)?;
+    if redo_pdata_splits {
+        split_pdata(obj)?;
+    }
 
     // Remove linker generated symbols from splits
     // trim_linker_generated_symbols(obj)?;

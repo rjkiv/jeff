@@ -255,7 +255,7 @@ fn split_write_obj_exe(
 
     debug!("Adjusting splits");
     let module_id = module.obj.module_id;
-    update_splits(&mut module.obj, None, false)?;
+    update_splits(&mut module.obj, None, false, !config.quick_analysis)?;
 
     debug!("Writing configuration");
     if let Some(symbols_path) = &module.config.symbols {
@@ -633,7 +633,7 @@ fn disasm(args: DisasmArgs) -> Result<()> {
 
     // Gamepad Release
     apply_splits_file(&args.out, &mut obj)?;
-    update_splits(&mut obj, None, false)?;
+    update_splits(&mut obj, None, false, true)?;
     let split_objs = split_obj(&obj, None)?;
 
     for coff_obj in &split_objs {

@@ -187,7 +187,7 @@ fn config(args: ConfigArgs) -> Result<()> {
     log::info!("Processing map...");
     let entries = process_map(file.as_mut(), None, None)?;
     let mut obj = create_obj(&entries)?;
-    if let Err(e) = update_splits(&mut obj, None, false) {
+    if let Err(e) = update_splits(&mut obj, None, false, true) {
         error!("Failed to update splits: {}", e)
     }
     DirBuilder::new().recursive(true).create(&args.out_dir)?;
