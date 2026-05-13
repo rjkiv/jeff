@@ -776,10 +776,17 @@ fn info(args: InfoArgs) -> Result<()> {
     println!();
 
     println!("Static Libraries:");
-    let mut idx = 1;
-    for lib in xex.opt_header_data.static_libs {
-        println!("  {}. {}: v{}.{}.{}.{}", idx, lib.name, lib.major, lib.minor, lib.build, lib.qfe);
-        idx += 1;
+
+    for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
+        println!(
+            "  {}. {}: v{}.{}.{}.{}",
+            idx + 1,
+            lib.name,
+            lib.major,
+            lib.minor,
+            lib.build,
+            lib.qfe
+        );
     }
     println!();
 
