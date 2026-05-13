@@ -396,11 +396,10 @@ impl AnalyzerState {
                 }
                 self.jump_tables.append(&mut slices.jump_table_references.clone());
                 for label in slices.special_jump_table_labels.iter() {
-                    let cur = label.clone();
-                    self.known_symbols.entry(cur).or_default().push(ObjSymbol {
-                        name: format!("$LN{:X}", cur.address),
-                        address: cur.address as u64,
-                        section: Some(cur.section),
+                    self.known_symbols.entry(*label).or_default().push(ObjSymbol {
+                        name: format!("$LN{:X}", label.address),
+                        address: label.address as u64,
+                        section: Some(label.section),
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         ..Default::default()
@@ -450,11 +449,10 @@ impl AnalyzerState {
             }
             self.jump_tables.append(&mut slices.jump_table_references.clone());
             for label in slices.special_jump_table_labels.iter() {
-                let cur = label.clone();
-                self.known_symbols.entry(cur).or_default().push(ObjSymbol {
-                    name: format!("$LN{:X}", cur.address),
-                    address: cur.address as u64,
-                    section: Some(cur.section),
+                self.known_symbols.entry(*label).or_default().push(ObjSymbol {
+                    name: format!("$LN{:X}", label.address),
+                    address: label.address as u64,
+                    section: Some(label.section),
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     ..Default::default()
