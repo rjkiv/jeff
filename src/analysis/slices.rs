@@ -24,6 +24,7 @@ pub struct FunctionSlices {
     pub branches: BTreeMap<SectionAddress, Vec<SectionAddress>>,
     pub function_references: BTreeSet<SectionAddress>,
     pub jump_table_references: BTreeMap<SectionAddress, u32>,
+    pub special_jump_table_labels: Vec<SectionAddress>,
     pub prologue: Option<SectionAddress>,
     pub epilogue: Option<SectionAddress>,
     // Either a block or tail call
@@ -406,6 +407,7 @@ impl FunctionSlices {
                         })
                     {
                         self.jump_table_references.insert(address, size);
+                        self.special_jump_table_labels.push(ins_addr + 4);
                         let mut branches = vec![];
                         for addr in entries {
                             branches.push(addr);
