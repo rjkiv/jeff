@@ -10,9 +10,9 @@ use tracing_attributes::instrument;
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
-        ObjArchitecture, ObjInfo, ObjKind, ObjReloc, ObjRelocations, ObjSection, ObjSectionKind,
-        ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope,
-        ObjUnit, SectionIndex, SymbolIndex, section_kind_for_section,
+        section_kind_for_section, ObjArchitecture, ObjInfo, ObjKind, ObjReloc, ObjRelocations,
+        ObjSection, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
+        ObjSymbolKind, ObjSymbolScope, ObjUnit, SectionIndex, SymbolIndex,
     },
     util::{align_up, toposort::toposort},
 };
@@ -885,7 +885,6 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
             }
 
             if !split.common {
-                
                 let split_kind = split
                     .rename
                     .as_ref()
