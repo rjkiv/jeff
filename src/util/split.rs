@@ -12,7 +12,7 @@ use crate::{
     obj::{
         ObjArchitecture, ObjInfo, ObjKind, ObjReloc, ObjRelocations, ObjSection, ObjSectionKind,
         ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope,
-        ObjUnit, SectionIndex, SymbolIndex,
+        ObjUnit, SectionIndex, SymbolIndex, section_kind_for_section,
     },
     util::{align_up, toposort::toposort},
 };
@@ -885,7 +885,10 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
             }
 
             if !split.common {
-                let data = match section.kind {
+                let split_kind = split.rename.as_ref()
+                    .and_then(|name| section_kind_for_section(name).ok())
+                    .unwrap_or(section.kind);
+                let data = match split_kind {
                     ObjSectionKind::Bss => vec![],
                     _ => section.data[(current_address.address as u64 - section.address) as usize
                         ..(split_end.address as u64 - section.address) as usize]
@@ -893,7 +896,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                 };
                 split_obj.sections.push(ObjSection {
                     name: split.rename.as_ref().unwrap_or(&section.name).clone(),
-                    kind: section.kind,
+                    kind: split_kind,
                     address: 0,
                     size: split_end.address as u64 - current_address.address as u64,
                     data,
