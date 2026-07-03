@@ -886,6 +886,9 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
 
             if !split.common {
                 let split_kind = split.rename.as_ref()
+                let split_kind = split
+                    .rename
+                    .as_ref()
                     .and_then(|name| section_kind_for_section(name).ok())
                     .unwrap_or(section.kind);
                 let data = match split_kind {
