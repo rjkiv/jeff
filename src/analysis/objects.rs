@@ -75,8 +75,16 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
     Ok(())
 }
 
+struct DetectedString {
+    pub idx: SymbolIndex,
+    pub kind: ObjDataKind,
+    pub size: usize,
+    // future field for mangling detected strings directly into MSVC symbols
+    pub demangled_name: Option<String>,
+}
+
 pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
-    let mut symbols_set = Vec::<(SymbolIndex, ObjDataKind, usize)>::new();
+    let mut symbols_set: Vec<DetectedString> = vec![];
     for (section_index, section) in obj
         .sections
         .iter()
@@ -136,11 +144,6 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             .for_section(section_index)
             .filter(|(_, sym)| sym.data_kind == ObjDataKind::Unknown)
         {
-            if symbol.name.starts_with("@stringBase") {
-                symbols_set.push((symbol_idx, ObjDataKind::StringTable, symbol.size as usize));
-                continue;
-            }
-
             let data = section.symbol_data(symbol)?;
             match is_string(data) {
                 StringResult::None => {}
@@ -151,7 +154,12 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                     {
                         let str = String::from_utf8_lossy(&data[..length]);
                         log::debug!("Found string '{}' @ {}", str, symbol.name);
-                        symbols_set.push((symbol_idx, ObjDataKind::String, size));
+                        symbols_set.push(DetectedString {
+                            idx: symbol_idx,
+                            kind: ObjDataKind::String,
+                            size,
+                            demangled_name: None,
+                        });
                     }
                 }
                 StringResult::WString { length, str } => {
@@ -160,20 +168,27 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                         || (is_auto_symbol(symbol) && symbol.size > size as u64)
                     {
                         log::debug!("Found wide string '{}' @ {}", str, symbol.name);
-                        symbols_set.push((symbol_idx, ObjDataKind::String16, size));
+                        symbols_set.push(DetectedString {
+                            idx: symbol_idx,
+                            kind: ObjDataKind::String16,
+                            size,
+                            demangled_name: None,
+                        });
                     }
                 }
             }
         }
     }
 
-    for (symbol_idx, data_kind, size) in symbols_set {
-        let mut symbol = obj.symbols[symbol_idx].clone();
-        log::debug!("Setting {} ({:#010X}) to size {:#X}", symbol.name, symbol.address, size);
-        symbol.data_kind = data_kind;
-        symbol.size = size as u64;
+    for entry in symbols_set.iter() {
+        let mut symbol = obj.symbols[entry.idx].clone();
+        // TODO: create an MSVC mangled representation of the string, and have that be the new symbol name
+        symbol.name = format!("str_{:08X}", symbol.address as u32);
+        log::debug!("Setting {} ({:#010X}) to size {:#X}", symbol.name, symbol.address, entry.size);
+        symbol.data_kind = entry.kind;
+        symbol.size = entry.size as u64;
         symbol.size_known = true;
-        obj.symbols.replace(symbol_idx, symbol)?;
+        obj.symbols.replace(entry.idx, symbol)?;
     }
     Ok(())
 }
