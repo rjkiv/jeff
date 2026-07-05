@@ -495,6 +495,7 @@ impl AnalyzerState {
 
     fn detect_new_functions(&mut self, obj: &ObjInfo) -> Result<bool> {
         let mut new_functions = vec![];
+        let mut truncations: Vec<(SectionAddress, SectionAddress)> = vec![];
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             if section.name == ".xidata" {
                 continue;
@@ -507,7 +508,15 @@ impl AnalyzerState {
                     (Some((&first, first_info)), Some(&(&second, second_info))) => {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
-                            bail!("Overlapping functions {}-{} -> {}", first, first_end, second);
+                            log::warn!(
+                                "Overlapping functions {}-{} -> {}, truncating end of {}",
+                                first,
+                                first_end,
+                                second,
+                                first
+                            );
+                            truncations.push((first, second));
+                            continue;
                         }
                         let addr = match skip_alignment(section, first_end, second) {
                             Some(addr) => addr,
@@ -556,7 +565,12 @@ impl AnalyzerState {
                 }
             }
         }
-        let found_new = !new_functions.is_empty();
+        let found_new = !new_functions.is_empty() || !truncations.is_empty();
+        for (fn_addr, new_end) in truncations {
+            if let Some(info) = self.functions.get_mut(&fn_addr) {
+                info.end = Some(new_end);
+            }
+        }
         for addr in new_functions {
             let opt = self.functions.insert(addr, FunctionInfo::default());
             ensure!(opt.is_none(), "Attempted to detect duplicate function @ {:#010X}", addr);

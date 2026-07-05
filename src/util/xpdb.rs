@@ -437,8 +437,12 @@ pub fn try_parse_pdb(
 
     // Sort by address and append a sentinel
     groups.sort();
+    let end_addr = match groups.last() {
+        Some(last) => last.address + last.size as u64,
+        None => 0,
+    };
     groups.push(CoffGroup {
-        address: groups[groups.len() - 1].address + groups[groups.len() - 1].size as u64,
+        address: end_addr,
         size: 0,
         name: "END".to_string(),
         section: u32::MAX,
@@ -521,16 +525,23 @@ pub fn try_parse_pdb(
         let end = start + contrib.size as u64;
         let mod_idx = contrib.module as i32;
 
-        let is_new_grp = start >= groups[(curr_grp + 1) as usize].address;
+        let next_idx = (curr_grp + 1) as usize;
+        let is_new_grp = next_idx < groups.len() && start >= groups[next_idx].address;
         let is_new_mod = mod_idx != curr_mod;
         if is_new_grp {
             // Skip empty groups
             loop {
                 curr_grp += 1;
+                if (curr_grp + 1) as usize >= groups.len() {
+                    break;
+                }
                 if start < groups[(curr_grp + 1) as usize].address {
                     break;
                 }
             }
+        }
+        if (curr_grp + 1) as usize >= groups.len() {
+            continue;
         }
 
         if is_new_grp || is_new_mod {
