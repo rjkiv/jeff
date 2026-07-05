@@ -536,7 +536,13 @@ where
                 match symbol_kind {
                     ObjSymbolKind::Object => {
                         current_address = write_data_reloc(
-                            w, symbols, entries, reloc_addr, r, section_entries, section,
+                            w,
+                            symbols,
+                            entries,
+                            reloc_addr,
+                            r,
+                            section_entries,
+                            section,
                         )?;
                         continue;
                     }

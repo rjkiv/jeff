@@ -526,8 +526,7 @@ pub fn try_parse_pdb(
         let mod_idx = contrib.module as i32;
 
         let next_idx = (curr_grp + 1) as usize;
-        let is_new_grp = next_idx < groups.len()
-            && start >= groups[next_idx].address;
+        let is_new_grp = next_idx < groups.len() && start >= groups[next_idx].address;
         let is_new_mod = mod_idx != curr_mod;
         if is_new_grp {
             // Skip empty groups

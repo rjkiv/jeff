@@ -585,7 +585,10 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 fn extract(args: ExtractArgs) -> Result<()> {
     if is_xex_file(&args.xex_file)? {
         let xex_ext = args.xex_file.extension();
-        ensure!(xex_ext.is_some() && xex_ext.unwrap() == "xex", "Need to provide a valid input xex!");
+        ensure!(
+            xex_ext.is_some() && xex_ext.unwrap() == "xex",
+            "Need to provide a valid input xex!"
+        );
         let (exe_name, exe_bytes) = extract_exe(&args.xex_file)?;
         let xex_dir = args.xex_file.parent().unwrap();
         let out_path = xex_dir.join(exe_name);
@@ -772,9 +775,16 @@ fn info(args: InfoArgs) -> Result<()> {
         let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
         println!(
             "  {}",
-            if bff.compression == XexCompression::Compressed { "Compressed" } else { "Uncompressed" }
+            if bff.compression == XexCompression::Compressed {
+                "Compressed"
+            } else {
+                "Uncompressed"
+            }
         );
-        println!("  {}", if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" });
+        println!(
+            "  {}",
+            if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" }
+        );
         println!();
 
         println!("Basefile Info:");
