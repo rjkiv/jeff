@@ -13,8 +13,8 @@ use itertools::Itertools;
 use object::{
     read::pe::PeFile32,
     write::{Object, Relocation, SectionId, Symbol, SymbolId, SymbolSection},
-    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
-    SymbolScope,
+    Architecture, BinaryFormat, Endianness, Object as ReadObject, RelocationFlags, SectionKind,
+    SymbolFlags, SymbolKind, SymbolScope,
 };
 use tracing::{debug, info};
 use typed_path::{Utf8NativePath, Utf8NativePathBuf};
@@ -44,8 +44,8 @@ use crate::{
         path::native_path,
         split::{split_obj, update_splits},
         xex::{
-            coff_path_for_unit, extract_exe, list_exe_sections, process_xex, write_coff,
-            XexCompression, XexEncryption, XexInfo,
+            coff_path_for_unit, extract_exe, is_xex_file, list_exe_sections, process_pe,
+            process_xex, write_coff, XexCompression, XexEncryption, XexInfo,
         },
         xpdb::try_parse_pdb,
     },
@@ -189,16 +189,17 @@ fn split(args: SplitArgs) -> Result<()> {
     let function_count = exe.obj.symbols.by_kind(ObjSymbolKind::Function).count();
     info!("Initial analysis completed (found {} functions)", function_count);
 
-    // extract and write exe
-    let (exe_name, exe_bytes) = extract_exe(&config.base.object.with_encoding())?;
-
     // Create out dirs
     DirBuilder::new().recursive(true).create(&args.out_dir)?;
-    // write the exe in the same dir the xex is
-    let exe_path: Utf8NativePathBuf =
-        config.base.object.with_encoding().parent().unwrap().join(&exe_name);
-    info!("Extracting exe to {exe_path}");
-    std::fs::write(exe_path, exe_bytes)?;
+
+    // extract and write exe (only if .xex - if already .exe there is no need)
+    if is_xex_file(&config.base.object.with_encoding())? {
+        let (exe_name, exe_bytes) = extract_exe(&config.base.object.with_encoding())?;
+        let exe_path: Utf8NativePathBuf =
+            config.base.object.with_encoding().parent().unwrap().join(&exe_name);
+        info!("Extracting exe to {exe_path}");
+        std::fs::write(exe_path, exe_bytes)?;
+    }
 
     info!("Rebuilding relocations and splitting");
     // dol split_write_obj
@@ -295,6 +296,11 @@ fn split_write_obj_exe(
     };
     for (unit, split_obj) in module.obj.link_order.iter().zip(&split_objs) {
         // pub fn write_elf(obj: &ObjInfo, export_all: bool) -> Result<Vec<u8>>
+        // skip units with no sections (would produce invalid COFF)
+        if split_obj.sections.is_empty() {
+            log::info!("Skipping empty-section unit {}", unit.name);
+            continue;
+        }
         let out_obj = write_coff(split_obj)?;
         let obj_path = coff_path_for_unit(&unit.name);
         let out_path = obj_dir.join(&obj_path);
@@ -432,11 +438,10 @@ fn split_write_obj_exe(
             // write the file
             let file = File::create(&full_path)?;
             let mut writer = BufWriter::new(file);
-            if write_asm(&mut writer, asm_obj)
+            if let Err(e) = write_asm(&mut writer, asm_obj)
                 .with_context(|| format!("Failed to write {full_path}"))
-                .is_err()
             {
-                println!("Failed to write {full_path}!");
+                log::warn!("Failed to write {full_path}: {e:#}");
             }
             // write_asm(&mut writer, &asm_obj).with_context(|| format!("Failed to write {full_path}"))?;
             writer.flush()?;
@@ -462,7 +467,11 @@ fn write_coff_if_changed(path: &Utf8NativePath, contents: &[u8]) -> Result<()> {
 // load_analyze_dol but for xexes
 fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     let object_path: Utf8NativePathBuf = config.base.object.with_encoding();
-    let mut obj = process_xex(&object_path)?;
+    let mut obj = if is_xex_file(&object_path)? {
+        process_xex(&object_path)?
+    } else {
+        process_pe(&object_path)?
+    };
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
@@ -574,15 +583,16 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 // https://github.com/emoose/idaxex/blob/5b7de7b964e67fc049db0c61e4cba5d13ee69cec/formats/xex.hpp
 
 fn extract(args: ExtractArgs) -> Result<()> {
-    // validate that our input is an .xex
-    let xex_ext = args.xex_file.extension();
-    ensure!(xex_ext.is_some() && xex_ext.unwrap() == "xex", "Need to provide a valid input xex!");
-    // then, grab the exe
-    let (exe_name, exe_bytes) = extract_exe(&args.xex_file)?;
-    let xex_dir = args.xex_file.parent().unwrap();
-    // ...and write it to the same directory the xex is in
-    let out_path = xex_dir.join(exe_name);
-    std::fs::write(out_path, exe_bytes)?;
+    if is_xex_file(&args.xex_file)? {
+        let xex_ext = args.xex_file.extension();
+        ensure!(xex_ext.is_some() && xex_ext.unwrap() == "xex", "Need to provide a valid input xex!");
+        let (exe_name, exe_bytes) = extract_exe(&args.xex_file)?;
+        let xex_dir = args.xex_file.parent().unwrap();
+        let out_path = xex_dir.join(exe_name);
+        std::fs::write(out_path, exe_bytes)?;
+    } else {
+        println!("File is already a PE executable, no extraction needed.");
+    }
     Ok(())
 }
 
@@ -593,8 +603,12 @@ fn disasm(args: DisasmArgs) -> Result<()> {
 
     // extract_exe(&args.xex_file);
 
-    // step 1. process xex, and return an ObjInfo
-    let mut obj = process_xex(&args.xex_file)?;
+    // step 1. process xex (or pe), and return an ObjInfo
+    let mut obj = if is_xex_file(&args.xex_file)? {
+        process_xex(&args.xex_file)?
+    } else {
+        process_pe(&args.xex_file)?
+    };
 
     let mut state = AnalyzerState::default();
 
@@ -748,50 +762,59 @@ fn pdb(args: PdbArgs) -> Result<()> {
 }
 
 fn info(args: InfoArgs) -> Result<()> {
-    let xex = XexInfo::from_file(&args.input)?;
-    println!("Jeff: Retrieving Xex info...");
-    println!("shoutouts go to xorloser for the original XexTool!\n");
+    if is_xex_file(&args.input)? {
+        let xex = XexInfo::from_file(&args.input)?;
+        println!("Jeff: Retrieving Xex info...");
+        println!("shoutouts go to xorloser for the original XexTool!\n");
 
-    println!("Xex Info:");
-    println!("  {}", if xex.is_dev_kit { "Devkit" } else { "Retail" });
-    let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
-    println!(
-        "  {}",
-        if bff.compression == XexCompression::Compressed { "Compressed" } else { "Uncompressed" }
-    );
-    println!("  {}", if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" });
-    println!();
-
-    println!("Basefile Info:");
-    println!("  Original PE Name: {}", xex.opt_header_data.original_name);
-    println!("  Load address: 0x{:08X}", xex.opt_header_data.image_base);
-    println!("  Entry point: 0x{:08X}", xex.opt_header_data.entry_point);
-    print!("  File time: 0x{:08X} - ", xex.opt_header_data.file_timestamp);
-    // west coast best coast
-    let dur = std::time::Duration::from_secs(xex.opt_header_data.file_timestamp as u64);
-    let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
-    let pst = FixedOffset::west_opt(8 * 3600).unwrap();
-    let dt_pst = datetime.with_timezone(&pst);
-    println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
-    println!();
-
-    println!("Static Libraries:");
-
-    for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
+        println!("Xex Info:");
+        println!("  {}", if xex.is_dev_kit { "Devkit" } else { "Retail" });
+        let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
         println!(
-            "  {}. {}: v{}.{}.{}.{}",
-            idx + 1,
-            lib.name,
-            lib.major,
-            lib.minor,
-            lib.build,
-            lib.qfe
+            "  {}",
+            if bff.compression == XexCompression::Compressed { "Compressed" } else { "Uncompressed" }
         );
-    }
-    println!();
+        println!("  {}", if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" });
+        println!();
 
-    // TODO: import libraries
-    list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));
+        println!("Basefile Info:");
+        println!("  Original PE Name: {}", xex.opt_header_data.original_name);
+        println!("  Load address: 0x{:08X}", xex.opt_header_data.image_base);
+        println!("  Entry point: 0x{:08X}", xex.opt_header_data.entry_point);
+        print!("  File time: 0x{:08X} - ", xex.opt_header_data.file_timestamp);
+        let dur = std::time::Duration::from_secs(xex.opt_header_data.file_timestamp as u64);
+        let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
+        let pst = FixedOffset::west_opt(8 * 3600).unwrap();
+        let dt_pst = datetime.with_timezone(&pst);
+        println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
+        println!();
+
+        println!("Static Libraries:");
+        for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
+            println!(
+                "  {}. {}: v{}.{}.{}.{}",
+                idx + 1,
+                lib.name,
+                lib.major,
+                lib.minor,
+                lib.build,
+                lib.qfe
+            );
+        }
+        println!();
+
+        // TODO: import libraries
+        list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));
+    } else {
+        println!("Jeff: Retrieving PE info...\n");
+        let pe_bytes = fs::read(&args.input)?;
+        let pe_file = PeFile32::parse(&*pe_bytes).expect("Failed to parse PE file");
+        println!("PE Info:");
+        println!("  File: {}", args.input);
+        println!("  Entry point: 0x{:08X}", pe_file.entry());
+        println!();
+        list_exe_sections(&pe_file);
+    }
 
     Ok(())
 }

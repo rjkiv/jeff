@@ -535,8 +535,9 @@ where
                 reloc = reloc_iter.next();
                 match symbol_kind {
                     ObjSymbolKind::Object => {
-                        current_address =
-                            write_data_reloc(w, symbols, entries, reloc_addr, r, section_entries)?;
+                        current_address = write_data_reloc(
+                            w, symbols, entries, reloc_addr, r, section_entries, section,
+                        )?;
                         continue;
                     }
                     ObjSymbolKind::Function => {
@@ -870,6 +871,7 @@ fn write_data_reloc<W>(
     reloc_address: u32,
     reloc: &ObjReloc,
     section_entries: &[BTreeMap<u32, Vec<SymbolEntry>>],
+    section: &ObjSection,
 ) -> Result<u32>
 where
     W: Write + ?Sized,
@@ -897,6 +899,22 @@ where
             write!(w, "\t.4byte ")?;
             write_reloc_symbol(w, symbols, reloc)?;
             writeln!(w)?;
+            Ok(reloc_address + 4)
+        }
+        ObjRelocKind::PpcRel14 | ObjRelocKind::PpcRel24 => {
+            let off = (reloc_address - section.address as u32) as usize;
+            let code = u32::from_be_bytes(section.data[off..off + 4].try_into().unwrap());
+            let ins = Ins::new(code, Extensions::xenon());
+            let file_offset = section.file_offset + off as u64;
+            write_ins(
+                w,
+                symbols,
+                reloc_address,
+                ins,
+                Some(reloc),
+                file_offset,
+                section.virtual_address,
+            )?;
             Ok(reloc_address + 4)
         }
         _ => Err(anyhow!(
