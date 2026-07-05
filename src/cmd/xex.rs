@@ -23,8 +23,9 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::{
     analysis::{
         cfa::{AnalyzerState, SectionAddress},
-        objects::{detect_objects, detect_rtti, detect_strings},
+        objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
+        rtti::detect_rtti,
         tracker::Tracker,
     },
     cmd::dol::{
