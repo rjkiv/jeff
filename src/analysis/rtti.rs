@@ -80,7 +80,7 @@ fn set_class_hierarchy_descriptor(
         obj.symbols.at_section_address(rdata_section, class_hierarchy_descriptor_addr).collect();
     match rtti.class_hierarchy_descriptor {
         Some(desc) => {
-            for (orig_sym_idx, orig_sym) in orig_type_info_symbol_info {
+            for (orig_sym_idx, _) in orig_type_info_symbol_info {
                 assert_eq!(
                     orig_sym_idx, desc,
                     "Found different Class Hierarchy Descriptor locations!"
@@ -89,7 +89,7 @@ fn set_class_hierarchy_descriptor(
             }
         }
         None => {
-            for (orig_sym_idx, orig_sym) in orig_type_info_symbol_info {
+            for (orig_sym_idx, _) in orig_type_info_symbol_info {
                 rtti.class_hierarchy_descriptor = Some(orig_sym_idx);
                 break;
             }
@@ -250,7 +250,22 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
             );
             obj.symbols.replace(desc.symbol_index, new_sym)?;
         }
-        // TODO: RTTI Complete Object Locators and vftables
+        // Single RTTI Complete Object Locators and vftables
+        if addrs.complete_object_locators.len() == 1 {
+            let loc = &addrs.complete_object_locators[0];
+            // replace the symbols for the singular CompleteObjectLocator and the vftable
+            let mut new_loc_sym = obj.symbols[loc.object_locator_index].clone();
+            new_loc_sym.name = format!("??_R4{}6B@", name[3..].to_string());
+            obj.symbols.replace(loc.object_locator_index, new_loc_sym)?;
+            if let Some(vftable_idx) = loc.vftable_index {
+                let mut new_vtable_sym = obj.symbols[vftable_idx].clone();
+                new_vtable_sym.name = format!("??_7{}6B@", name[3..].to_string());
+                obj.symbols.replace(vftable_idx, new_vtable_sym)?;
+            } else {
+                unreachable!();
+            }
+        }
+        // TODO: Multi-RTTI Complete Object Locators and vftables
     }
     Ok(())
 }
@@ -260,6 +275,10 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
         // No .rdata section
         return Ok(());
     };
+
+    // key = addr of the Complete Object Locator
+    // value = the type name it belongs to
+    let mut complete_object_locator_addresses: BTreeMap<u32, &String> = BTreeMap::new();
 
     // the remaining RTTI structures live in .rdata
     for (sym_idx, sym) in obj.symbols.for_section(section_index) {
@@ -319,6 +338,7 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
                 vftable_index: None,
                 superclass_name: None,
             });
+            complete_object_locator_addresses.insert(sym.address as u32, cur_rtti_type_name);
             set_class_hierarchy_descriptor(
                 obj,
                 cur_rtti_obj,
@@ -330,7 +350,7 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
 
     // we found each RTTI object's Class Hierarchy Descriptor index, but not currently analyzed
     // this loop will analyze them and get us the Base Class Array and other inheritance metadata
-    for (name, rtti_obj) in &mut rtti.rtti_data_by_name {
+    for (_, rtti_obj) in &mut rtti.rtti_data_by_name {
         if let Some(class_hierarchy_sym_idx) = rtti_obj.class_hierarchy_descriptor {
             // we need the data from the class hierarchy descriptor here
             let sym = &obj.symbols[class_hierarchy_sym_idx];
@@ -346,36 +366,71 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
                 u32::from_be_bytes(class_hierarchy_data[12..16].try_into()?);
             let base_class_array_symbol_info: Vec<_> =
                 obj.symbols.at_section_address(section_index, base_class_array_addr).collect();
-            for (orig_sym_idx, orig_sym) in base_class_array_symbol_info {
+            for (orig_sym_idx, _) in base_class_array_symbol_info {
                 rtti_obj.base_class_array = Some(orig_sym_idx);
                 break;
             }
         }
         // no unreachable!() else case here, because some Type Descriptors legit just don't have other RTTI metadata
     }
+
+    // finally, run through the objects in .rdata again, and check if the previous addr over has a value in complete_object_locator_addresses.
+    // if it is, then we're looking at the corresponding vftable
+    let mut first = true;
+    for (sym_idx, sym) in obj.symbols.for_section(section_index) {
+        // skip the first item, since we're doing a little subtraction
+        if first {
+            first = false;
+            continue;
+        }
+        // this obviously would not apply to strings
+        if sym.name.starts_with("str_") {
+            continue;
+        }
+        let the_prev_addr_over =
+            section.data_range((sym.address - 4) as u32, sym.address as u32)?;
+
+        let maybe_complete_object_locator_address =
+            u32::from_be_bytes(the_prev_addr_over.try_into()?);
+
+        if let Some(name) =
+            complete_object_locator_addresses.get(&maybe_complete_object_locator_address)
+        {
+            // log::debug!("Found the vtable for {}! It's at {:08X}", name, sym.address);
+
+            let cur_rtti_obj = rtti.rtti_data_by_name.get_mut(*name).expect("this should exist");
+            // with this RTTIObject, go to the Complete Object Locator that has the maybe_complete_object_locator_address
+            for col in cur_rtti_obj.complete_object_locators.iter_mut() {
+                let cur_obj_locator_addr = obj.symbols[col.object_locator_index].address as u32;
+                if cur_obj_locator_addr == maybe_complete_object_locator_address {
+                    // then set the vtable symbol index to this one
+                    col.vftable_index = Some(sym_idx);
+                    break;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
 fn determine_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
-    // now we just need the vftables/superclass names from the Complete Object Locators
+    // now we just need the superclass names from the Complete Object Locators
+    // at this point, all the CompleteObjectLocators have vftable addresses but no superclass names:
+    // we need both in order to accurately label the CompleteObjectLocator symbols
     for (name, rtti_object) in &rtti.rtti_data_by_name {
         println!("Class name: {}", name);
-        println!("\tNum Complete Object Locators: {}", rtti_object.complete_object_locators.len());
-        for locator in rtti_object.complete_object_locators.iter() {
-            let locator_addr = (&obj.symbols[locator.object_locator_index]).address as u32;
-            println!("\t\t{:08X}", locator_addr);
-        }
-        println!("\tNum Base Class Descriptors: {}", rtti_object.base_class_descriptors.len());
-        for desc in rtti_object.base_class_descriptors.iter() {
-            let desc_addr = (&obj.symbols[desc.symbol_index]).address as u32;
+        // this only applies to objects with multiple Complete Object Locators:
+        // single ones have no superclass to add to the symbol
+        if rtti_object.complete_object_locators.len() > 1 {
             println!(
-                "\t\t{:08X} ({}, {}, {}, {})",
-                desc_addr,
-                desc.identifiers[0],
-                desc.identifiers[1],
-                desc.identifiers[2],
-                desc.identifiers[3]
+                "\tNum Complete Object Locators: {}",
+                rtti_object.complete_object_locators.len()
             );
+            for locator in rtti_object.complete_object_locators.iter() {
+                let locator_addr = (&obj.symbols[locator.object_locator_index]).address as u32;
+                println!("\t\t{:08X}", locator_addr);
+            }
         }
     }
     Ok(())
