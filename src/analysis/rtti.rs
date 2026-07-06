@@ -105,6 +105,39 @@ fn cstr_slice_to_str(bytes: &[u8]) -> Result<&str, std::str::Utf8Error> {
     std::str::from_utf8(&bytes[..end])
 }
 
+// i had to steal this from LLVM's MicrosoftCXXNameMangler::mangleNumber and mangleBits
+fn encode_num(num: i32) -> String {
+    // <non-negative integer> ::= A@              # when Number == 0
+    //                        ::= <decimal digit> # when 1 <= Number <= 10
+    //                        ::= <hex digit>+ @  # when Number >= 10
+    // <number>               ::= [?] <non-negative integer>
+    let mut ret = String::new();
+    let mut eval = num;
+    if eval < 0 {
+        eval = -eval;
+        ret.push('?');
+    }
+    if eval == 0 {
+        ret.push_str("A@");
+    } else if eval >= 1 && eval <= 10 {
+        ret += &*(eval - 1).to_string();
+    } else {
+        let mut digits = Vec::new();
+        let mut value = eval as u32;
+        while value != 0 {
+            let nibble = (value & 0xF) as u8;
+            digits.push((b'A' + nibble) as char);
+            value >>= 4;
+        }
+        digits.reverse();
+        for ch in digits {
+            ret.push(ch);
+        }
+        ret.push('@');
+    }
+    ret
+}
+
 // Finds RTTI Type Descriptor symbols, and type_info's vtable.
 fn find_rtti_type_descriptors(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
     let Some((section_index, section)) = obj.sections.by_name(".data")? else {
@@ -204,8 +237,20 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
             new_sym.name = format!("??_R2{}8", name[3..].to_string());
             obj.symbols.replace(*symbol_idx, new_sym)?;
         }
-        // TODO: RTTI Complete Object Locators
-        // TODO: RTTI Base Class Descriptors
+        // RTTI Base Class Descriptors
+        for desc in &addrs.base_class_descriptors {
+            let mut new_sym = obj.symbols[desc.symbol_index].clone();
+            new_sym.name = format!(
+                "??_R1{}{}{}{}{}8",
+                encode_num(desc.identifiers[0]),
+                encode_num(desc.identifiers[1]),
+                encode_num(desc.identifiers[2]),
+                encode_num(desc.identifiers[3]),
+                name[3..].to_string()
+            );
+            obj.symbols.replace(desc.symbol_index, new_sym)?;
+        }
+        // TODO: RTTI Complete Object Locators and vftables
     }
     Ok(())
 }
@@ -233,7 +278,7 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
         if let Some(cur_rtti_type_name) =
             rtti.rtti_type_descriptor_entries.get(&u32::from_be_bytes(sym_data[0..4].try_into()?))
         {
-            log::debug!("RTTI Base Class Descriptor found at: {:#08X}", sym.address as u32);
+            // log::debug!("RTTI Base Class Descriptor found at: {:#08X}", sym.address as u32);
 
             // base class descriptors are 28 bytes / 7 words
             let base_class_descriptor_data =
@@ -262,7 +307,7 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
         else if let Some(cur_rtti_type_name) =
             rtti.rtti_type_descriptor_entries.get(&u32::from_be_bytes(sym_data[12..16].try_into()?))
         {
-            log::debug!("RTTI Complete Object Locator found at: {:#08X}", sym.address as u32);
+            // log::debug!("RTTI Complete Object Locator found at: {:#08X}", sym.address as u32);
 
             // base class descriptors are 20 bytes / 5 words
             let base_class_descriptor_data =
@@ -308,9 +353,31 @@ fn find_remaining_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Re
         }
         // no unreachable!() else case here, because some Type Descriptors legit just don't have other RTTI metadata
     }
+    Ok(())
+}
 
+fn determine_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
     // now we just need the vftables/superclass names from the Complete Object Locators
-
+    for (name, rtti_object) in &rtti.rtti_data_by_name {
+        println!("Class name: {}", name);
+        println!("\tNum Complete Object Locators: {}", rtti_object.complete_object_locators.len());
+        for locator in rtti_object.complete_object_locators.iter() {
+            let locator_addr = (&obj.symbols[locator.object_locator_index]).address as u32;
+            println!("\t\t{:08X}", locator_addr);
+        }
+        println!("\tNum Base Class Descriptors: {}", rtti_object.base_class_descriptors.len());
+        for desc in rtti_object.base_class_descriptors.iter() {
+            let desc_addr = (&obj.symbols[desc.symbol_index]).address as u32;
+            println!(
+                "\t\t{:08X} ({}, {}, {}, {})",
+                desc_addr,
+                desc.identifiers[0],
+                desc.identifiers[1],
+                desc.identifiers[2],
+                desc.identifiers[3]
+            );
+        }
+    }
     Ok(())
 }
 
@@ -334,6 +401,9 @@ pub fn detect_rtti(obj: &mut ObjInfo) -> Result<()> {
 
     // with the RTTI Type Descriptor info, find the remaining RTTI structures
     find_remaining_rtti_structs(obj, &mut rtti_metadata)?;
+
+    // at this point, we still need superclass info for the remaining RTTI symbols
+    // determine_superclass_info(obj, &mut rtti_metadata)?;
 
     apply_rtti_symbols(obj, &rtti_metadata)?;
     Ok(())
