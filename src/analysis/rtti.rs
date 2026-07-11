@@ -62,8 +62,8 @@ struct VFTable {
 }
 
 struct RTTIBaseClass {
-    // the specific Base Class Descriptor for this superclass
-    pub base_class_descriptor_addr: u32,
+    // the specific Type Descriptor for this superclass
+    pub type_descriptor_addr: u32,
     pub complete_object_locator_addr: u32,
     pub vftable_addr: u32,
 }
@@ -76,6 +76,7 @@ struct RTTIClass {
     pub type_descriptor_addr: u32,
     pub class_hierarchy_descriptor_addr: u32,
     pub base_class_array_addr: u32,
+    pub base_class_array_len: u32, // for ez reference, preventing a BCA lookup for it
     // Technically an RTTIClass can have multiple BCDs, depending on how many other classes inherit from it,
     // but this field will store the BCD for this class itself, sourced from the first entry in the BCA.
     pub base_class_descriptor_addr: u32,
@@ -406,6 +407,7 @@ fn find_chds_and_bcas(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                 },
                 base_class_descriptors: bca_entries,
             };
+            cur_rtti_class.base_class_array_len = bca.base_class_descriptors.len() as u32;
             rtti.base_class_array_lookup.insert(cur_rtti_class.base_class_array_addr, bca);
         }
         // no unreachable!() else case here, because some Type Descriptors legit just don't have other RTTI metadata
@@ -515,9 +517,11 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
     // now, sort the RTTIClasses by smallest number of unresolved vftables
     // we do this because smaller vftable counts are likely to have less complex inheritance.
     // also, RTTIClasses with smaller vftable counts will very likely serve as the base classes
-    // for more complexly inherited classes down the line as we progress through the Vec
+    // for more complexly inherited classes down the line as we progress through the Vec.
+    // within each group of RTTIClasses that have the same number of COLs/vftables,
+    // further sort them by smallest number of BCA entries.
     rtti.discovered_classes
-        .sort_by(|a, b| a.unresolved_col_addrs.len().cmp(&b.unresolved_col_addrs.len()));
+        .sort_by_key(|class| (class.unresolved_col_addrs.len(), class.base_class_array_len));
 
     for rtti_class in &mut rtti.discovered_classes {
         // if this RTTIClass doesn't even have a BCA nor any known COLs/vftables, don't bother with all this
@@ -535,23 +539,31 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                     rtti_class.name, rtti_class.unresolved_col_addrs[0]
                 );
             };
-            // if direct_base_class_descriptor_addrs.len() == 0, this has no base classes
-            let base_class_bcd = if rtti_class.direct_base_class_descriptor_addrs.len() == 0 {
-                // so the BCD entry will be our own BCD
-                rtti_class.base_class_descriptor_addr
-            } else {
-                // it's entirely possible that a class can have multiple bases but only one COL/vftable,
-                // which would *technically* make setting it to the first BCD in direct_base_class_descriptor_addrs incorrect.
-                // but, since the final symbol label won't have a base class appended to it, it doesn't really matter what we set the bcd value to here.
-                rtti_class.direct_base_class_descriptor_addrs[0]
-            };
             rtti_class.base_classes.push(RTTIBaseClass {
-                base_class_descriptor_addr: base_class_bcd,
+                // for 1 COL/vftable, it belongs to us - so use our TD
+                type_descriptor_addr: rtti_class.type_descriptor_addr,
                 complete_object_locator_addr: my_sole_col.exe_info.addr,
                 vftable_addr: my_sole_col.vftable_addr,
             });
             rtti_class.unresolved_col_addrs.clear();
+        } else if rtti_class.unresolved_col_addrs.len() == 2 {
+            // this branch and onward (when unresolved_col_addrs.len > 1)
+            // will require walking up the inheritance tree to get the COL/vftable base class names
+            log::debug!(
+                "RTTI Class with 2 COL/vftables {} has {} direct bases!",
+                rtti_class.name,
+                rtti_class.direct_base_class_descriptor_addrs.len()
+            );
         }
+
+        // else {
+        //     log::debug!(
+        //         "RTTI Class {} has {} direct bases and {} COL/vftable pairs to analyze!",
+        //         rtti_class.name,
+        //         rtti_class.direct_base_class_descriptor_addrs.len(),
+        //         rtti_class.unresolved_col_addrs.len()
+        //     );
+        // }
     }
 
     Ok(())
