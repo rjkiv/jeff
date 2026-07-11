@@ -95,7 +95,8 @@ struct RTTIClass {
 struct RTTIMetadata {
     // this will be populated when searching for Type Descriptor entries
     pub type_info_vtable: Option<RTTIExeInfo>,
-    pub discovered_classes: Vec<RTTIClass>,
+    // key = type descriptor addr, value = the RTTI class
+    pub discovered_classes: BTreeMap<u32, RTTIClass>,
     // LOOKUP MAPS - quick lookup for RTTI Objects via their address in the exe
     pub base_class_descriptor_lookup: BTreeMap<u32, BaseClassDescriptor>,
     pub base_class_array_lookup: BTreeMap<u32, BaseClassArray>,
@@ -106,12 +107,12 @@ struct RTTIMetadata {
 }
 
 impl RTTIMetadata {
-    fn get_class_from_type_descriptor(&self, addr: u32) -> Option<&RTTIClass> {
-        self.discovered_classes.iter().find(|c| c.type_descriptor_addr == addr)
-    }
-
-    fn get_class_from_type_descriptor_mut(&mut self, addr: u32) -> Option<&mut RTTIClass> {
-        self.discovered_classes.iter_mut().find(|c| c.type_descriptor_addr == addr)
+    // method to walk inheritance tree for TDs?
+    // methods to get from lookups?
+    fn get_type_descriptor(&self, addr: u32) -> &TypeDescriptor {
+        self.type_descriptor_lookup.get(&addr).unwrap_or_else(|| {
+            unreachable!("Invalid Type Descriptor addr {:08X}", addr);
+        })
     }
 }
 
@@ -216,7 +217,7 @@ fn find_rtti_type_descriptors(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<
             let mut new_rtti_class = RTTIClass::default();
             new_rtti_class.name = type_str.to_string();
             new_rtti_class.type_descriptor_addr = sym.address as u32;
-            rtti.discovered_classes.push(new_rtti_class);
+            rtti.discovered_classes.insert(new_rtti_class.type_descriptor_addr, new_rtti_class);
 
             // log::debug!("Discovered RTTI Type Descriptor entry: {}", type_str);
         }
@@ -241,17 +242,13 @@ fn find_bcds_and_cols(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
         let first_word = u32::from_be_bytes(sym_data[0..4].try_into()?);
 
         // if the first word is a Type Descriptor address, this is a Base Class Descriptor
-        if rtti.type_descriptor_lookup.contains_key(&first_word) {
+        if let Some(rtti_class) = rtti.discovered_classes.get_mut(&first_word) {
             // log::debug!("RTTI Base Class Descriptor found at: {:#08X}", sym.address as u32);
 
             // base class descriptors are 28 bytes / 7 words
             let base_class_descriptor_data =
                 section.data_range(sym.address as u32, sym.address as u32 + 28)?;
 
-            // find the RTTIClass corresponding with this Type Descriptor
-            let Some(rtti_class) = rtti.get_class_from_type_descriptor_mut(first_word) else {
-                unreachable!("Type Descriptor addr {:08X} exists in the lookup, but not its corresponding RTTIClass?", first_word);
-            };
             // check the CHD addr and make sure it's the same
             // we'll actually parse CHDs/add them to our lookup outside of this loop
             let chd_addr = u32::from_be_bytes(base_class_descriptor_data[24..28].try_into()?);
@@ -280,17 +277,12 @@ fn find_bcds_and_cols(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
         } else if sym.size >= 16 {
             // if the 4th word is a Type Descriptor address, this is a Complete Object Locator
             let fourth_word = u32::from_be_bytes(sym_data[12..16].try_into()?);
-            if rtti.type_descriptor_lookup.contains_key(&fourth_word) {
+            if let Some(rtti_class) = rtti.discovered_classes.get_mut(&fourth_word) {
                 // log::debug!("RTTI Complete Object Locator found at: {:#08X}", sym.address as u32);
 
                 // complete object locators are 20 bytes / 5 words
                 let complete_object_locator_data =
                     section.data_range(sym.address as u32, sym.address as u32 + 20)?;
-
-                // find the RTTIClass corresponding with this Type Descriptor
-                let Some(rtti_class) = rtti.get_class_from_type_descriptor_mut(fourth_word) else {
-                    unreachable!("Type Descriptor addr {:08X} exists in the lookup, but not its corresponding RTTIClass?", fourth_word);
-                };
 
                 // check the CHD addr and make sure it's the same
                 // we'll actually parse CHDs/add them to our lookup outside of this loop
@@ -333,7 +325,7 @@ fn find_chds_and_bcas(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
         unreachable!("RTTI being used, but there's no .rdata section???");
     };
 
-    for cur_rtti_class in &mut rtti.discovered_classes {
+    for cur_rtti_class in &mut rtti.discovered_classes.values_mut() {
         if cur_rtti_class.class_hierarchy_descriptor_addr != 0 {
             // get the CHD, and in the process, the addr of the corresponding BCA
             let Some((chd_sym_idx, chd_sym)) = obj
@@ -438,18 +430,6 @@ fn find_vftables(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
             section.data_range((sym.address - 4) as u32, sym.address as u32)?.try_into()?,
         );
 
-        let col_type_descriptor_addr =
-            match rtti.complete_object_locator_lookup.get(&maybe_complete_object_locator_address) {
-                Some(c) => c.type_descriptor_addr,
-                None => continue,
-            };
-
-        // find the RTTIClass corresponding with this Type Descriptor
-        let Some(rtti_class) = rtti.get_class_from_type_descriptor_mut(col_type_descriptor_addr)
-        else {
-            unreachable!("Type Descriptor addr {:08X} exists in the lookup, but not its corresponding RTTIClass?", col_type_descriptor_addr);
-        };
-
         // log::debug!("Found the vtable for {}! It's at {:08X}", rtti_name, sym.address);
         let vftable =
             VFTable { exe_info: RTTIExeInfo { symbol_index: sym_idx, addr: sym.address as u32 } };
@@ -480,8 +460,9 @@ fn find_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
 }
 
 fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
+    let mut classes_to_process: Vec<&mut RTTIClass> = vec![];
     // for each RTTIClass, go through the BCA and determine the superclasses from their BCDs
-    for rtti_class in &mut rtti.discovered_classes {
+    for rtti_class in &mut rtti.discovered_classes.values_mut() {
         if let Some(bca) = rtti.base_class_array_lookup.get(&rtti_class.base_class_array_addr) {
             // we skip over the first entry in the BCA, because it's just the BCD for this class
             rtti_class.base_class_descriptor_addr = bca.base_class_descriptors[0];
@@ -513,6 +494,7 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                 }
             }
         }
+        classes_to_process.push(rtti_class);
     }
     // now, sort the RTTIClasses by smallest number of unresolved vftables
     // we do this because smaller vftable counts are likely to have less complex inheritance.
@@ -520,10 +502,10 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
     // for more complexly inherited classes down the line as we progress through the Vec.
     // within each group of RTTIClasses that have the same number of COLs/vftables,
     // further sort them by smallest number of BCA entries.
-    rtti.discovered_classes
+    classes_to_process
         .sort_by_key(|class| (class.unresolved_col_addrs.len(), class.base_class_array_len));
 
-    for rtti_class in &mut rtti.discovered_classes {
+    for rtti_class in classes_to_process {
         // if this RTTIClass doesn't even have a BCA nor any known COLs/vftables, don't bother with all this
         if rtti_class.base_class_array_addr == 0 || rtti_class.unresolved_col_addrs.len() == 0 {
             continue;
@@ -549,11 +531,14 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
         } else if rtti_class.unresolved_col_addrs.len() == 2 {
             // this branch and onward (when unresolved_col_addrs.len > 1)
             // will require walking up the inheritance tree to get the COL/vftable base class names
+            // for each direct base in direct_base_class_descriptor_addrs, go from: BCD -> TD -> RTTIClass -> base_classes
             log::debug!(
                 "RTTI Class with 2 COL/vftables {} has {} direct bases!",
                 rtti_class.name,
                 rtti_class.direct_base_class_descriptor_addrs.len()
             );
+
+            // rtti.get_type_descriptor(0);
         }
 
         // else {
@@ -580,7 +565,7 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
     }
     // RTTI Base Class Descriptors
     for (_, bcd) in &rtti.base_class_descriptor_lookup {
-        if let Some(rtti_obj) = rtti.get_class_from_type_descriptor(bcd.type_descriptor_addr) {
+        if let Some(rtti_obj) = rtti.discovered_classes.get(&bcd.type_descriptor_addr) {
             let mut new_sym = obj.symbols[bcd.exe_info.symbol_index].clone();
             new_sym.name = format!(
                 "??_R1{}{}{}{}{}8",
@@ -602,8 +587,10 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
         }
     }
     // iterate across our RTTIClasses to get TDs, CHDs, and BCAs
-    for rtti_obj in &rtti.discovered_classes {
-        if let Some(td) = rtti.type_descriptor_lookup.get(&rtti_obj.type_descriptor_addr) {
+    for (td_addr, rtti_obj) in &rtti.discovered_classes {
+        assert_eq!(td_addr, &rtti_obj.type_descriptor_addr);
+        {
+            let td = rtti.get_type_descriptor(rtti_obj.type_descriptor_addr);
             let mut new_sym = obj.symbols[td.exe_info.symbol_index].clone();
             // example:
             // Type Descriptor class name (. omitted): ?AVFilePath@@
@@ -614,11 +601,6 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
             // shoutout 4 byte alignment
             new_sym.size = new_sym.size.next_multiple_of(4);
             obj.symbols.replace(td.exe_info.symbol_index, new_sym)?;
-        } else {
-            unreachable!(
-                "RTTI Class {} has invalid Type Descriptor addr {:08X}",
-                rtti_obj.name, rtti_obj.type_descriptor_addr
-            );
         }
         if rtti_obj.class_hierarchy_descriptor_addr != 0 {
             if let Some(chd) = rtti
