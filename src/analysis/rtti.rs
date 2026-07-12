@@ -61,12 +61,33 @@ struct VFTable {
     pub exe_info: RTTIExeInfo,
 }
 
+// Info for a base class of an RTTIClass.
+// Used for both applying final symbol labels, and for analysis of future derived RTTIClasses.
 #[derive(Clone, Default)]
 struct RTTIBaseClass {
     // the specific Type Descriptor for this superclass
+    // contains the base class's name, used for labeling and analysis
     pub type_descriptor_addr: u32,
+    // The COL for this base class, used in the final label
     pub complete_object_locator_addr: u32,
+    // The vftable for this base class, used in the final label
     pub vftable_addr: u32,
+    // Whether this base class is virtually inherited, used for analysis
+    // use InheritanceKind here?
+    pub is_virtual: bool,
+}
+
+enum InheritanceKind {
+    // if physical, keep track of the m_disp
+    Physical(i32),
+    // i dunno what to keep track of for virtual yet
+    Virtual,
+}
+
+struct RTTIBaseClassCandidate {
+    // contains the name to assign to the COL
+    pub type_descriptor_addr: u32,
+    pub inheritance_kind: InheritanceKind,
 }
 
 // A class that uses RTTI
@@ -117,33 +138,128 @@ impl RTTIMetadata {
     }
 
     // only tracks type descriptors for now, subject to change
-    fn walk_inheritance_tree(&self, direct_bases: &Vec<u32>) -> Result<Vec<u32>> {
+    fn walk_inheritance_tree(
+        &self,
+        // the type descriptor of the main class whose inheritance tree we're trying to walk in the first place
+        main_td: u32,
+        direct_bases: &Vec<u32>,
+        has_primary: bool,
+    ) -> Result<Vec<RTTIBaseClassCandidate>> {
         // a pool of relevant information to be extracted from our direct bases' base classes
-        let mut candidate_pool: Vec<u32> = Vec::new();
+        let mut candidate_pool: Vec<RTTIBaseClassCandidate> = Vec::new();
 
-        for bcd_addr in direct_bases {
+        // for each direct base DB, note DB's base classes
+        for (i, bcd_addr) in direct_bases.iter().enumerate() {
             let bcd =
                 self.base_class_descriptor_lookup.get(bcd_addr).unwrap_or_else(|| unreachable!());
+            let cur_bcd_is_physical = bcd.p_disp == -1;
             let cur_base_class = self
                 .discovered_classes
                 .get(&bcd.type_descriptor_addr)
                 .unwrap_or_else(|| unreachable!());
-            // then, for each base, extract the relevant info
-            // then, for each base, extract the relevant info
+
+            log::debug!(
+                "\tDirect base ({}): {}",
+                if cur_bcd_is_physical { "physical" } else { "virtual" },
+                cur_base_class.name
+            );
+
+            // from each base class that DB has, record the base class's name (td), physical vs virtual
             for base in &cur_base_class.base_classes {
-                candidate_pool.push(base.type_descriptor_addr);
+                let td = base.type_descriptor_addr;
+                let iter_base_class =
+                    self.discovered_classes.get(&td).unwrap_or_else(|| unreachable!());
+                let mut is_physical = false;
+                // if base's type descriptor == cur base class's type descriptor,
+                // whether this is physical or virtual will depend on cur_bcd_is_physical
+                if td == cur_base_class.type_descriptor_addr {
+                    is_physical = cur_bcd_is_physical;
+                } else {
+                    is_physical = !base.is_virtual;
+                }
+
+                log::debug!(
+                    "\t\tcontains base class ({}): {}",
+                    if is_physical { "physical" } else { "virtual" },
+                    iter_base_class.name
+                );
+
+                // if there's already a candidate in our pool with the same type descriptor
+                if let Some(existing_candidate) =
+                    candidate_pool.iter_mut().find(|c| c.type_descriptor_addr == td)
+                {
+                    // but, it happens to be virtual, and this one is physical
+                    if matches!(existing_candidate.inheritance_kind, InheritanceKind::Virtual)
+                        && is_physical
+                    {
+                        // swap it out
+                        existing_candidate.inheritance_kind = InheritanceKind::Physical(0);
+                    }
+                }
+                // else, just add it as normal
+                else {
+                    candidate_pool.push(RTTIBaseClassCandidate {
+                        type_descriptor_addr: td,
+                        inheritance_kind: if is_physical {
+                            InheritanceKind::Physical(0)
+                        } else {
+                            InheritanceKind::Virtual
+                        },
+                    });
+                }
+
+                // let mut inheritance_kind: InheritanceKind;
+                // if !is_physical || base.is_virtual {
+                //     inheritance_kind = InheritanceKind::Virtual;
+                // } else {
+                //     // examine the base's COL (if it's not 0) and look at the offset
+                //     // add that to bcd's m_disp
+                //     let col = self
+                //         .complete_object_locator_lookup
+                //         .get(&base.complete_object_locator_addr)
+                //         .unwrap_or_else(|| unreachable!());
+                //     inheritance_kind = InheritanceKind::Physical(col.offset as i32 + bcd.m_disp);
+                // }
+                //
+                // candidate_pool
+                //     .push(RTTIBaseClassCandidate { type_descriptor_addr: td, inheritance_kind })
+            }
+        }
+        if has_primary {
+            // From the first direct physical base, the first physical base that has a COL for it, is the primary base
+            if let Some(index) = candidate_pool.iter().position(|candidate| {
+                matches!(candidate.inheritance_kind, InheritanceKind::Physical(_))
+            }) {
+                let primary = candidate_pool.remove(index);
+                // push it up front, we're gonna make the first entry in our candidate pool the primary
+                candidate_pool.insert(0, primary);
+            }
+            // Or, if there are no direct physical bases, add yourself to the recorded base classes, and make yourself the primary
+            else {
+                candidate_pool.insert(0, RTTIBaseClassCandidate {
+                    type_descriptor_addr: main_td,
+                    inheritance_kind: InheritanceKind::Physical(0),
+                });
             }
         }
 
-        for td_addr in &candidate_pool {
-            let cur_base_class =
-                self.discovered_classes.get(&td_addr).unwrap_or_else(|| unreachable!());
-            log::debug!("\tBase class identified: {}", cur_base_class.name);
-        }
+        // add another pass here? to remove any physical candidates that don't fit for any physical COL (0/X/0)
 
-        // if name_pool is 1 shy of matching unresolved_col_addrs's len, is the missing piece this class's name?
-        // what conditions need to be met in order for this class's name to be added as an additional base class candidate?
-        // if you have no direct physicals but a direct virtual, then add your name to the pool (i think)
+        for (i, candidate) in candidate_pool.iter().enumerate() {
+            let cand_class = self
+                .discovered_classes
+                .get(&candidate.type_descriptor_addr)
+                .unwrap_or_else(|| unreachable!());
+            if i == 0 && has_primary {
+                log::debug!("\tPrimary candidate: {}", cand_class.name);
+            } else {
+                let phys_str = match candidate.inheritance_kind {
+                    InheritanceKind::Physical(_) => "physical",
+                    InheritanceKind::Virtual => "virtual",
+                };
+                log::debug!("\tCandidate ({}): {}", phys_str, cand_class.name);
+            }
+        }
 
         Ok(candidate_pool)
     }
@@ -547,15 +663,29 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
     for td in &classes_to_process_by_type_descriptor {
         let mut new_rtti_class =
             rtti.discovered_classes.get(td).unwrap_or_else(|| unreachable!()).clone();
-        // if this RTTIClass doesn't even have a BCA nor any known COLs/vftables, don't bother with all this
-        if new_rtti_class.base_class_array_addr == 0
-            || new_rtti_class.unresolved_col_addrs.len() == 0
-        {
+        // if this RTTIClass doesn't even have a BCA, don't bother with all this
+        if new_rtti_class.base_class_array_addr == 0 {
             continue;
         }
 
+        // 0 COLs/vftables - still record base class info anyway
+        if new_rtti_class.unresolved_col_addrs.len() == 0 {
+            for direct_bcd_addr in &new_rtti_class.direct_base_class_descriptor_addrs {
+                let bcd = rtti
+                    .base_class_descriptor_lookup
+                    .get(direct_bcd_addr)
+                    .unwrap_or_else(|| unreachable!());
+                new_rtti_class.base_classes.push(RTTIBaseClass {
+                    type_descriptor_addr: bcd.type_descriptor_addr,
+                    complete_object_locator_addr: 0,
+                    vftable_addr: 0,
+                    is_virtual: false,
+                });
+            }
+            *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
+        }
         // 1 COL/vftable = zero virtual inheritance, easiest case to deal with rn
-        if new_rtti_class.unresolved_col_addrs.len() == 1 {
+        else if new_rtti_class.unresolved_col_addrs.len() == 1 {
             let Some(my_sole_col) =
                 rtti.complete_object_locator_lookup.get(&new_rtti_class.unresolved_col_addrs[0])
             else {
@@ -569,20 +699,55 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                 type_descriptor_addr: new_rtti_class.type_descriptor_addr,
                 complete_object_locator_addr: my_sole_col.exe_info.addr,
                 vftable_addr: my_sole_col.vftable_addr,
+                is_virtual: false,
             });
             new_rtti_class.unresolved_col_addrs.clear();
             *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
-        } else if new_rtti_class.unresolved_col_addrs.len() == 2 {
+        } else if new_rtti_class.unresolved_col_addrs.len() <= 2 {
             // this branch and onward (when unresolved_col_addrs.len > 1)
             // will require walking up the inheritance tree to get the COL/vftable base class names
             log::debug!(
-                "RTTI Class with 2 COL/vftables {} has {} direct bases!",
+                "RTTI Class with {} COL/vftables {} has {} direct bases!",
+                new_rtti_class.unresolved_col_addrs.len(),
                 new_rtti_class.name,
                 new_rtti_class.direct_base_class_descriptor_addrs.len()
             );
 
-            let base_class_candidate_pool =
-                rtti.walk_inheritance_tree(&new_rtti_class.direct_base_class_descriptor_addrs)?;
+            // If there's a COL with 0,0,0, a primary COL exists
+            // if false, we don't assign a primary candidate in walk inheritance tree
+            let has_primary_col = new_rtti_class.unresolved_col_addrs.iter().any(|col_addr| {
+                let col = rtti
+                    .complete_object_locator_lookup
+                    .get(col_addr)
+                    .unwrap_or_else(|| unreachable!());
+                col.signature == 0 && col.offset == 0 && col.cd_offset == 0
+            });
+
+            let base_class_candidate_pool = rtti.walk_inheritance_tree(
+                new_rtti_class.type_descriptor_addr,
+                &new_rtti_class.direct_base_class_descriptor_addrs,
+                has_primary_col,
+            )?;
+
+            if base_class_candidate_pool.len() != new_rtti_class.unresolved_col_addrs.len() {
+                log::warn!("RTTIClass {} does not have enough information to go off of, skipping further analysis...", new_rtti_class.name);
+                continue;
+            }
+
+            assert_eq!(base_class_candidate_pool.len(), new_rtti_class.unresolved_col_addrs.len());
+
+            for candidate in base_class_candidate_pool.iter() {
+                new_rtti_class.base_classes.push(RTTIBaseClass {
+                    type_descriptor_addr: candidate.type_descriptor_addr,
+                    complete_object_locator_addr: 0,
+                    vftable_addr: 0,
+                    is_virtual: match candidate.inheritance_kind {
+                        InheritanceKind::Physical(_) => false,
+                        InheritanceKind::Virtual => true,
+                    },
+                })
+            }
+            *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
 
             // match candidates in our pool to COL/vftables
             // the one whose offset is 0, that's either this class or a direct base
