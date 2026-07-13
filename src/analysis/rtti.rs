@@ -61,9 +61,17 @@ struct VFTable {
     pub exe_info: RTTIExeInfo,
 }
 
+#[derive(Clone)]
+enum InheritanceKind {
+    // if physical, keep track of the m_disp
+    Physical(i32),
+    // i dunno what to keep track of for virtual yet
+    Virtual,
+}
+
 // Info for a base class of an RTTIClass.
 // Used for both applying final symbol labels, and for analysis of future derived RTTIClasses.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct RTTIBaseClass {
     // the specific Type Descriptor for this superclass
     // contains the base class's name, used for labeling and analysis
@@ -74,14 +82,18 @@ struct RTTIBaseClass {
     pub vftable_addr: u32,
     // Whether this base class is virtually inherited, used for analysis
     // use InheritanceKind here?
-    pub is_virtual: bool,
+    pub inheritance_kind: InheritanceKind,
 }
 
-enum InheritanceKind {
-    // if physical, keep track of the m_disp
-    Physical(i32),
-    // i dunno what to keep track of for virtual yet
-    Virtual,
+impl Default for RTTIBaseClass {
+    fn default() -> Self {
+        Self {
+            type_descriptor_addr: 0,
+            complete_object_locator_addr: 0,
+            vftable_addr: 0,
+            inheritance_kind: InheritanceKind::Physical(-1),
+        }
+    }
 }
 
 struct RTTIBaseClassCandidate {
@@ -158,31 +170,31 @@ impl RTTIMetadata {
                 .get(&bcd.type_descriptor_addr)
                 .unwrap_or_else(|| unreachable!());
 
-            log::debug!(
-                "\tDirect base ({}): {}",
-                if cur_bcd_is_physical { "physical" } else { "virtual" },
-                cur_base_class.name
-            );
+            // log::debug!(
+            //     "\tDirect base ({}): {}",
+            //     if cur_bcd_is_physical { "physical" } else { "virtual" },
+            //     cur_base_class.name
+            // );
 
             // from each base class that DB has, record the base class's name (td), physical vs virtual
             for base in &cur_base_class.base_classes {
                 let td = base.type_descriptor_addr;
-                let iter_base_class =
-                    self.discovered_classes.get(&td).unwrap_or_else(|| unreachable!());
+                // let iter_base_class =
+                //     self.discovered_classes.get(&td).unwrap_or_else(|| unreachable!());
                 let mut is_physical = false;
                 // if base's type descriptor == cur base class's type descriptor,
                 // whether this is physical or virtual will depend on cur_bcd_is_physical
                 if td == cur_base_class.type_descriptor_addr {
                     is_physical = cur_bcd_is_physical;
                 } else {
-                    is_physical = !base.is_virtual;
+                    is_physical = !matches!(base.inheritance_kind, InheritanceKind::Virtual);
                 }
 
-                log::debug!(
-                    "\t\tcontains base class ({}): {}",
-                    if is_physical { "physical" } else { "virtual" },
-                    iter_base_class.name
-                );
+                // log::debug!(
+                //     "\t\tcontains base class ({}): {}",
+                //     if is_physical { "physical" } else { "virtual" },
+                //     iter_base_class.name
+                // );
 
                 // if there's already a candidate in our pool with the same type descriptor
                 if let Some(existing_candidate) =
@@ -679,7 +691,7 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                     type_descriptor_addr: bcd.type_descriptor_addr,
                     complete_object_locator_addr: 0,
                     vftable_addr: 0,
-                    is_virtual: false,
+                    inheritance_kind: InheritanceKind::Physical(0),
                 });
             }
             *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
@@ -699,11 +711,13 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
                 type_descriptor_addr: new_rtti_class.type_descriptor_addr,
                 complete_object_locator_addr: my_sole_col.exe_info.addr,
                 vftable_addr: my_sole_col.vftable_addr,
-                is_virtual: false,
+                inheritance_kind: InheritanceKind::Physical(0),
             });
             new_rtti_class.unresolved_col_addrs.clear();
             *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
-        } else if new_rtti_class.unresolved_col_addrs.len() <= 2 {
+        }
+        // arbitrary len limit, just lowering the scope
+        else if new_rtti_class.unresolved_col_addrs.len() <= 3 {
             // this branch and onward (when unresolved_col_addrs.len > 1)
             // will require walking up the inheritance tree to get the COL/vftable base class names
             log::debug!(
@@ -730,21 +744,24 @@ fn compute_superclasses(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<()> {
             )?;
 
             if base_class_candidate_pool.len() != new_rtti_class.unresolved_col_addrs.len() {
-                log::warn!("RTTIClass {} does not have enough information to go off of, skipping further analysis...", new_rtti_class.name);
+                log::warn!("RTTIClass {} inheritance tree was not correctly processed, skipping further analysis...", new_rtti_class.name);
                 continue;
             }
 
-            assert_eq!(base_class_candidate_pool.len(), new_rtti_class.unresolved_col_addrs.len());
+            for col_addr in new_rtti_class.unresolved_col_addrs.iter() {
+                let col = rtti
+                    .complete_object_locator_lookup
+                    .get(col_addr)
+                    .unwrap_or_else(|| unreachable!());
+                log::debug!("\tCOL: {}, {}, {}", col.signature, col.offset, col.cd_offset);
+            }
 
             for candidate in base_class_candidate_pool.iter() {
                 new_rtti_class.base_classes.push(RTTIBaseClass {
                     type_descriptor_addr: candidate.type_descriptor_addr,
                     complete_object_locator_addr: 0,
                     vftable_addr: 0,
-                    is_virtual: match candidate.inheritance_kind {
-                        InheritanceKind::Physical(_) => false,
-                        InheritanceKind::Virtual => true,
-                    },
+                    inheritance_kind: candidate.inheritance_kind.clone(),
                 })
             }
             *rtti.discovered_classes.get_mut(td).unwrap_or_else(|| unreachable!()) = new_rtti_class;
