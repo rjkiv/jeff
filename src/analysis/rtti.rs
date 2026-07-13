@@ -897,11 +897,10 @@ fn apply_rtti_symbols(obj: &mut ObjInfo, rtti: &RTTIMetadata) -> Result<()> {
 }
 
 pub fn detect_rtti(obj: &mut ObjInfo) -> Result<()> {
-    // TODO: re-enable this before merging to main
-    // if !obj.rtti {
-    //     log::debug!("This object does not use RTTI, skipping");
-    //     return Ok(());
-    // }
+    if !obj.rtti {
+        log::debug!("This object does not use RTTI, skipping");
+        return Ok(());
+    }
 
     // TODO:
     // this should also detect and label __RTtypeid and __RTDynamicCast
