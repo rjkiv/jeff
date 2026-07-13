@@ -25,6 +25,7 @@ use crate::{
         cfa::{AnalyzerState, SectionAddress},
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
+        rtti::detect_rtti,
         tracker::Tracker,
     },
     cmd::dol::{
@@ -253,6 +254,8 @@ fn split_write_obj_exe(
         debug!("Detecting strings");
         detect_strings(&mut module.obj)?;
     }
+
+    detect_rtti(&mut module.obj)?;
 
     debug!("Adjusting splits");
     let module_id = module.obj.module_id;
@@ -640,6 +643,8 @@ fn disasm(args: DisasmArgs) -> Result<()> {
 
     println!("Detecting strings");
     detect_strings(&mut obj)?;
+
+    detect_rtti(&mut obj)?;
 
     // println!("Writing symbols.txt");
     // let mut w = buf_writer(&args.out)?;

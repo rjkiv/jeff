@@ -54,6 +54,7 @@ pub struct ObjInfo {
     pub symbols: ObjSymbols,
     pub sections: ObjSections,
     pub entry: Option<u64>,
+    pub rtti: bool,
 
     // Linker generated
     pub sda2_base: Option<u32>,
@@ -93,6 +94,7 @@ impl ObjInfo {
             symbols: ObjSymbols::new(kind, symbols),
             sections: ObjSections::new(kind, sections),
             entry: None,
+            rtti: false,
             sda2_base: None,
             sda_base: None,
             stack_address: None,
