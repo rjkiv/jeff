@@ -25,7 +25,7 @@ use crate::{
         cfa::{AnalyzerState, SectionAddress},
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
-        rtti::detect_rtti,
+        rtti::FindRTTIObjectsXbox,
         tracker::Tracker,
     },
     cmd::dol::{
@@ -254,8 +254,6 @@ fn split_write_obj_exe(
         debug!("Detecting strings");
         detect_strings(&mut module.obj)?;
     }
-
-    detect_rtti(&mut module.obj)?;
 
     debug!("Adjusting splits");
     let module_id = module.obj.module_id;
@@ -571,6 +569,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         let mut state = AnalyzerState::default();
         debug!("Detecting function boundaries");
         FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+        FindRTTIObjectsXbox::execute(&mut state, &obj)?;
         state.detect_functions(&obj)?; // perform CFA
         state.apply(&mut obj)?; // give each found function a symbol
     }
@@ -621,6 +620,7 @@ fn disasm(args: DisasmArgs) -> Result<()> {
     // step 2. find common functions (save/restore reg funcs, XAPI calls)
     // rename the save/restore gpr/fpr funcs that were previously found in pdata
     FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+    FindRTTIObjectsXbox::execute(&mut state, &obj)?;
 
     state.detect_functions(&obj)?;
     log::info!(
@@ -643,8 +643,6 @@ fn disasm(args: DisasmArgs) -> Result<()> {
 
     println!("Detecting strings");
     detect_strings(&mut obj)?;
-
-    detect_rtti(&mut obj)?;
 
     // println!("Writing symbols.txt");
     // let mut w = buf_writer(&args.out)?;
