@@ -47,6 +47,8 @@ struct CompleteObjectLocator {
     pub owner: Weak<RefCell<RTTIClass>>,
     // The address of the vftable associated with this COL
     pub vftable_addr: u32,
+    // how many entries the vftable has
+    pub num_vftable_entries: u32,
 }
 
 // A class that uses RTTI
@@ -55,7 +57,7 @@ struct RTTIClass {
     pub name: String, // this class's name, inferred from the type descriptor
     pub type_descriptor_addr: u32, // type descriptor addr in the exe
     // Make this an Option because some RTTIClasses can legit just only have a Type Descriptor and nothing else
-    pub class_hierarchy_descriptor: Option<Rc<ClassHierarchyDescriptor>>, // TODO: this could be a plain ole CHD? No Rc?
+    pub class_hierarchy_descriptor: Option<ClassHierarchyDescriptor>,
     // But, it can have multiple base classes, each with their own COL and vftable
     pub complete_object_locators: Vec<CompleteObjectLocator>,
     // TODO: add a field for base classes/direct bases when walking the inheritance tree
@@ -148,6 +150,11 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
         unreachable!("No .rdata section???");
     };
 
+    // for calculating vftable sizes
+    let Some((_, text_section)) = obj.sections.by_name(".text")? else {
+        unreachable!("No .text section???");
+    };
+
     // now, search for COLs after the TDs (BCDs can't be found reliably, they can conflict with catchables)
     let mut i = 0;
     let data = &rdata_section.data;
@@ -187,11 +194,30 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                 }
 
                 // search for col_start_addr in .rdata
-                if let Some(vftable_idx) = memmem::find(data, &col_start_addr.to_be_bytes()) {
+                if let Some(col_start_idx) = memmem::find(data, &col_start_addr.to_be_bytes()) {
                     // the vftable is the next addr over from the COL, hence the +4
-                    let vftable_addr = rdata_section.address as u32 + vftable_idx as u32 + 4;
+                    let vftable_idx = col_start_idx + 4;
+                    let vftable_addr = rdata_section.address as u32 + vftable_idx as u32;
 
-                    // TODO: calculate vftable length here? add a field for it to CompleteObjectLocator?
+                    // calculate vftable entry count here
+                    // as long as an entry is a valid address in .text, keep going
+                    let mut num_vftable_entries: u32 = 0;
+                    loop {
+                        let cur_vftable_idx_offset =
+                            vftable_idx + (num_vftable_entries as usize * 4);
+                        let cur_vftable_entry = u32::from_be_bytes(
+                            data[cur_vftable_idx_offset..cur_vftable_idx_offset + 4].try_into()?,
+                        );
+                        // check that cur_vftable_entry is within .text bounds
+                        if text_section.address as u32 <= cur_vftable_entry
+                            && cur_vftable_entry
+                                < text_section.address as u32 + text_section.size as u32
+                        {
+                            num_vftable_entries += 1;
+                        } else {
+                            break;
+                        }
+                    }
 
                     // log::debug!(
                     //     "VFTable for COL at {:08X} found! It's at {:08X}",
@@ -206,6 +232,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                         cd_offset: u32::from_be_bytes(data[i - 4..i].try_into()?),
                         owner: Rc::downgrade(&rtti_class),
                         vftable_addr,
+                        num_vftable_entries,
                     };
                     assert_eq!(
                         col.signature, 0,
@@ -235,7 +262,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
     let mut bcds_by_exe_addr: BTreeMap<u32, Rc<BaseClassDescriptor>> = BTreeMap::new();
 
     for (chd_exe_addr, the_rtti_class) in classes_by_chd_exe_addr {
-        log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
+        // log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
         // navigate to the bytes in .rdata that make up this CHD, and parse it
         let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
         let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
@@ -273,13 +300,12 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                     let bcd_data_idx = cur_bcd_addr - rdata_section.address as u32;
                     let bcd_data =
                         &rdata_section.data[bcd_data_idx as usize..bcd_data_idx as usize + 28];
-                    // assert that the type descriptor at data[0..4] corresponds to the_rtti_class
                     let td_addr = u32::from_be_bytes(bcd_data[0..4].try_into()?);
                     let Some(class_for_bcd) = classes_by_type_descriptor_exe_addr.get(&td_addr)
                     else {
                         panic!("Bad Type Descriptor addr {:08X}!", td_addr);
                     };
-                    let bcd = BaseClassDescriptor {
+                    let bcd_ptr = Rc::new(BaseClassDescriptor {
                         addr: cur_bcd_addr,
                         num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
                         m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
@@ -287,8 +313,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                         v_disp: i32::from_be_bytes(bcd_data[16..20].try_into()?),
                         attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
                         owner: Rc::downgrade(&class_for_bcd),
-                    };
-                    let bcd_ptr = Rc::new(bcd);
+                    });
                     entry.insert(bcd_ptr.clone());
                     bcd_ptr
                 }
@@ -300,7 +325,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
             chd.base_class_descriptors.push(cur_bcd.clone());
         }
 
-        the_rtti_class.borrow_mut().class_hierarchy_descriptor = Some(Rc::new(chd));
+        the_rtti_class.borrow_mut().class_hierarchy_descriptor = Some(chd);
     }
 
     Ok(true)
