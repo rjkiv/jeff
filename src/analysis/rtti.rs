@@ -55,7 +55,7 @@ struct RTTIClass {
     pub name: String, // this class's name, inferred from the type descriptor
     pub type_descriptor_addr: u32, // type descriptor addr in the exe
     // Make this an Option because some RTTIClasses can legit just only have a Type Descriptor and nothing else
-    pub class_hierarchy_descriptor: Option<Rc<ClassHierarchyDescriptor>>,
+    pub class_hierarchy_descriptor: Option<Rc<ClassHierarchyDescriptor>>, // TODO: this could be a plain ole CHD? No Rc?
     // But, it can have multiple base classes, each with their own COL and vftable
     pub complete_object_locators: Vec<CompleteObjectLocator>,
     // TODO: add a field for base classes/direct bases when walking the inheritance tree
@@ -187,8 +187,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                 }
 
                 // search for col_start_addr in .rdata
-                let col_start_addr_bytes = col_start_addr.to_be_bytes();
-                if let Some(vftable_idx) = memmem::find(data, &col_start_addr_bytes) {
+                if let Some(vftable_idx) = memmem::find(data, &col_start_addr.to_be_bytes()) {
                     // the vftable is the next addr over from the COL, hence the +4
                     let vftable_addr = rdata_section.address as u32 + vftable_idx as u32 + 4;
 
@@ -234,6 +233,75 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
     // and we're not tryna make two BCDs with identical values;
     // rather, just have the multiple BCAs point to the same BCD.
     let mut bcds_by_exe_addr: BTreeMap<u32, Rc<BaseClassDescriptor>> = BTreeMap::new();
+
+    for (chd_exe_addr, the_rtti_class) in classes_by_chd_exe_addr {
+        log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
+        // navigate to the bytes in .rdata that make up this CHD, and parse it
+        let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
+        let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
+        let mut chd = ClassHierarchyDescriptor {
+            addr: chd_exe_addr,
+            signature: u32::from_be_bytes(chd_data[0..4].try_into()?),
+            attributes: u32::from_be_bytes(chd_data[4..8].try_into()?),
+            num_base_classes: u32::from_be_bytes(chd_data[8..12].try_into()?),
+            base_class_array_addr: u32::from_be_bytes(chd_data[12..16].try_into()?),
+            base_class_descriptors: vec![],
+        };
+        assert_eq!(
+            chd.signature, 0,
+            "how on earth is this not zero: CHD signature, addr {:08X}",
+            chd_exe_addr
+        );
+        // if the recorded BCA addr is not within .rdata, something has gone horribly wrong
+        assert!(
+            rdata_section.address as u32 <= chd.base_class_array_addr
+                && chd.base_class_array_addr
+                    < rdata_section.address as u32 + rdata_section.size as u32,
+            "Bad BCA addr {:08X}!",
+            chd.base_class_array_addr
+        );
+        // parse the BCA and BCDs as well, since the CHD will own the BCA
+        let bca_data_idx = chd.base_class_array_addr - rdata_section.address as u32;
+        let bca_data = &rdata_section.data
+            [bca_data_idx as usize..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
+
+        for (_, chunk) in bca_data.chunks_exact(4).enumerate() {
+            let cur_bcd_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
+            let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
+                Entry::Vacant(entry) => {
+                    // it's vacant, parse and create a new BCD instance
+                    let bcd_data_idx = cur_bcd_addr - rdata_section.address as u32;
+                    let bcd_data =
+                        &rdata_section.data[bcd_data_idx as usize..bcd_data_idx as usize + 28];
+                    // assert that the type descriptor at data[0..4] corresponds to the_rtti_class
+                    let td_addr = u32::from_be_bytes(bcd_data[0..4].try_into()?);
+                    let Some(class_for_bcd) = classes_by_type_descriptor_exe_addr.get(&td_addr)
+                    else {
+                        panic!("Bad Type Descriptor addr {:08X}!", td_addr);
+                    };
+                    let bcd = BaseClassDescriptor {
+                        addr: cur_bcd_addr,
+                        num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
+                        m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
+                        p_disp: i32::from_be_bytes(bcd_data[12..16].try_into()?),
+                        v_disp: i32::from_be_bytes(bcd_data[16..20].try_into()?),
+                        attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
+                        owner: Rc::downgrade(&class_for_bcd),
+                    };
+                    let bcd_ptr = Rc::new(bcd);
+                    entry.insert(bcd_ptr.clone());
+                    bcd_ptr
+                }
+                Entry::Occupied(entry) => {
+                    // it's occupied, just use the one we've got
+                    entry.get().clone()
+                }
+            };
+            chd.base_class_descriptors.push(cur_bcd.clone());
+        }
+
+        the_rtti_class.borrow_mut().class_hierarchy_descriptor = Some(Rc::new(chd));
+    }
 
     Ok(true)
 }
