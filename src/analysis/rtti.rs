@@ -1,10 +1,11 @@
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{btree_map::Entry, BTreeMap},
     rc::{Rc, Weak},
 };
 
 use anyhow::Result;
+use memchr::memmem;
 
 use crate::{
     analysis::{cfa::AnalyzerState, pass::AnalysisPass},
@@ -13,14 +14,16 @@ use crate::{
 
 // An RTTI Base Class Descriptor Object.
 struct BaseClassDescriptor {
-    pub addr: u32,                        // the address of this in the exe
-    pub type_descriptor: Weak<RTTIClass>, // type descriptor of the class
+    pub addr: u32,                // the address of this in the exe
     pub num_contained_bases: u32, // number of nested classes following in the Base Class Array
     pub m_disp: i32,              // member displacement
     pub p_disp: i32,              // vbtable displacement
     pub v_disp: i32,              // displacement inside vbtable
-    pub attributes: u32, // flags: 0x40 bit means has Class Hierarchy Descriptor, 0x10 bit means base class is virtually inherited
-    pub class_hierarchy_descriptor: Weak<ClassHierarchyDescriptor>,
+    // flags: 0x40 bit means has Class Hierarchy Descriptor, 0x10 bit means base class is virtually inherited
+    pub attributes: u32,
+    // NOTE: The RTTIClass associated with a BCD's TypeDescriptor and ClassHierarchyDescriptor entries will always be the same on Xbox 360,
+    // so we can condense those into one single owner field.
+    pub owner: Weak<RefCell<RTTIClass>>,
 }
 
 // An RTTI Class Hierarchy Descriptor object. Also contains Base Class Array information.
@@ -30,7 +33,7 @@ struct ClassHierarchyDescriptor {
     pub attributes: u32, // bit 0 set = multiple inheritance, bit 1 set = virtual inheritance
     pub num_base_classes: u32, // number of entries in the Base Class Array
     pub base_class_array_addr: u32, // BCA addr in the exe
-    pub base_class_descriptors: Vec<Rc<BaseClassDescriptor>>, // the addresses of the BCDs that make up this Base Class Array
+    pub base_class_descriptors: Vec<Rc<BaseClassDescriptor>>, // the BCDs that make up the Base Class Array
 }
 
 // An RTTI Complete Object Locator.
@@ -39,8 +42,9 @@ struct CompleteObjectLocator {
     pub signature: u32, // always 0
     pub offset: u32,    // offset of this vtable in complete class (from top)
     pub cd_offset: u32, // offset of constructor displacement
-    pub type_descriptor: Weak<RTTIClass>,
-    pub class_hierarchy_descriptor: Weak<ClassHierarchyDescriptor>,
+    // NOTE: The RTTIClass associated with a COL's TypeDescriptor and ClassHierarchyDescriptor entries will always be the same on Xbox 360,
+    // so we can condense those into one single owner field.
+    pub owner: Weak<RefCell<RTTIClass>>,
     // The address of the vftable associated with this COL
     pub vftable_addr: u32,
 }
@@ -53,7 +57,7 @@ struct RTTIClass {
     // Make this an Option because some RTTIClasses can legit just only have a Type Descriptor and nothing else
     pub class_hierarchy_descriptor: Option<Rc<ClassHierarchyDescriptor>>,
     // But, it can have multiple base classes, each with their own COL and vftable
-    pub complete_object_locators: Vec<Rc<CompleteObjectLocator>>,
+    pub complete_object_locators: Vec<CompleteObjectLocator>,
     // TODO: add a field for base classes/direct bases when walking the inheritance tree
 }
 
@@ -75,7 +79,9 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
     };
 
     // temporary maps to help us when populating/parsing RTTI objects
-    let mut type_descriptor_lookup: BTreeMap<u32, Rc<RefCell<RTTIClass>>> = BTreeMap::new();
+    let mut classes_by_type_descriptor_exe_addr: BTreeMap<u32, Rc<RefCell<RTTIClass>>> =
+        BTreeMap::new();
+    let mut classes_by_chd_exe_addr: BTreeMap<u32, Rc<RefCell<RTTIClass>>> = BTreeMap::new();
 
     // first, find the RTTI Type Descriptors in .data
     // since we aren't using ObjSymbols this time around, search for every instance of .?AU, .?AV, .PAU, .PAV
@@ -123,9 +129,9 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
 
             let rtti_class_ptr = Rc::new(RefCell::new(new_rtti_class));
             rtti.discovered_classes.push(rtti_class_ptr.clone());
-            type_descriptor_lookup.insert(td_addr, rtti_class_ptr.clone());
+            classes_by_type_descriptor_exe_addr.insert(td_addr, rtti_class_ptr.clone());
 
-            log::debug!("Discovered RTTI Type Descriptor entry at {:08X}: {}", td_addr, type_str);
+            // log::debug!("Discovered RTTI Type Descriptor entry at {:08X}: {}", td_addr, type_str);
             i += type_str.len().next_multiple_of(4);
         } else {
             i += 4;
@@ -133,34 +139,104 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
     }
 
     // quick check - if there were 0 Type Descriptors found, RTTI isn't supported, bail early
-    if type_descriptor_lookup.is_empty() {
+    if classes_by_type_descriptor_exe_addr.is_empty() {
         return Ok(false);
     }
 
-    // find: COLs (BCDs can't be found reliably)
-    // if we spot a COL, should we go recursively down the graph, creating structs?
-    // so from the COL, step to the CHD, then the BCA, then each of its BCDs?
+    // the remaining RTTI structures live in .rdata
+    let Some((_, rdata_section)) = obj.sections.by_name(".rdata")? else {
+        unreachable!("No .rdata section???");
+    };
+
+    // now, search for COLs after the TDs (BCDs can't be found reliably, they can conflict with catchables)
+    let mut i = 0;
+    let data = &rdata_section.data;
+    while i < data.len() {
+        let cur_word = u32::from_be_bytes(data[i..i + 4].try_into()?);
+        // if cur word is a key that exists in type_descriptor_lookup
+        if let Some(rtti_class) = classes_by_type_descriptor_exe_addr.get(&cur_word) {
+            // check the next word over
+            let next_word = u32::from_be_bytes(data[i + 4..i + 8].try_into()?);
+            // if it's a valid address in rdata, it means we're looking at a Complete Object Locator.
+            if rdata_section.address as u32 <= next_word
+                && next_word < rdata_section.address as u32 + rdata_section.size as u32
+            {
+                let col_start_addr = rdata_section.address as u32 + (i - 12) as u32;
+                // log::debug!(
+                //     "Discovered RTTI Complete Object Locator entry at {:08X}!",
+                //     col_start_addr
+                // );
+
+                // because we're using Rc's, it means we gotta get all our fields initialized before we apply the Rc<> part.
+                // so, when parsing a COL, take note of the ClassHierarchyDescriptor addr (add it in another lookup map)
+                // and then get the vftable addr right then and there, using the COL's addr
+
+                // next_word == the COL's CHD address
+                match classes_by_chd_exe_addr.entry(next_word) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(rtti_class.clone());
+                    }
+                    Entry::Occupied(entry) => {
+                        assert!(
+                            Rc::ptr_eq(entry.get(), &rtti_class),
+                            "CHD {:08X} already associated with a different RTTIClass {}!",
+                            next_word,
+                            rtti_class.borrow().name,
+                        );
+                    }
+                }
+
+                // search for col_start_addr in .rdata
+                let col_start_addr_bytes = col_start_addr.to_be_bytes();
+                if let Some(vftable_idx) = memmem::find(data, &col_start_addr_bytes) {
+                    // the vftable is the next addr over from the COL, hence the +4
+                    let vftable_addr = rdata_section.address as u32 + vftable_idx as u32 + 4;
+
+                    // TODO: calculate vftable length here? add a field for it to CompleteObjectLocator?
+
+                    // log::debug!(
+                    //     "VFTable for COL at {:08X} found! It's at {:08X}",
+                    //     col_start_addr,
+                    //     vftable_addr
+                    // );
+
+                    let col = CompleteObjectLocator {
+                        addr: col_start_addr,
+                        signature: u32::from_be_bytes(data[i - 12..i - 8].try_into()?),
+                        offset: u32::from_be_bytes(data[i - 8..i - 4].try_into()?),
+                        cd_offset: u32::from_be_bytes(data[i - 4..i].try_into()?),
+                        owner: Rc::downgrade(&rtti_class),
+                        vftable_addr,
+                    };
+                    assert_eq!(
+                        col.signature, 0,
+                        "how on earth is this not zero: COL signature, addr {:08X}",
+                        col_start_addr
+                    );
+                    rtti_class.borrow_mut().complete_object_locators.push(col);
+                    i += 8;
+                } else {
+                    panic!("How can a COL not have a vftable???")
+                }
+            } else {
+                i += 4;
+            }
+        } else {
+            i += 4;
+        }
+    }
+
+    // at this point, our RTTIClasses are only missing their CHD fields.
+    // but, we saved their addresses in classes_by_chd_exe_addr above.
+    // so parse them, and also parse BCAs/BCDs along the way.
+
+    // this lookup map here is because one BCD can be referenced by multiple BCAs,
+    // and we're not tryna make two BCDs with identical values;
+    // rather, just have the multiple BCAs point to the same BCD.
+    let mut bcds_by_exe_addr: BTreeMap<u32, Rc<BaseClassDescriptor>> = BTreeMap::new();
 
     Ok(true)
 }
-
-// fn find_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool> {
-//     // first, find the RTTI Type Descriptors
-//     find_rtti_type_descriptors(obj, rtti)?;
-//     // quick check - if there were 0 Type Descriptors found, RTTI isn't supported, bail early
-//     if rtti.type_descriptor_lookup.is_empty() {
-//         return Ok(false);
-//     }
-//     // then a few more sweeps to get the rest
-//     // first sweep: get BCDs and COLs in our lookups
-//     // our RTTIClasses will have CHD addresses, but they won't be analyzed yet
-//     find_bcds_and_cols(obj, rtti)?;
-//     // // second sweep: with our CHD addresses, create CHDs and BCAs for our lookups
-//     // find_chds_and_bcas(obj, rtti)?;
-//     // // last sweep: from the COLs we have, get the vftables
-//     // find_vftables(obj, rtti)?;
-//     Ok(true)
-// }
 
 pub struct FindRTTIObjectsXbox {}
 
