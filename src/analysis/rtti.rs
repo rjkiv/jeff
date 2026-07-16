@@ -68,11 +68,6 @@ struct RTTIMetadata {
     pub discovered_classes: Vec<Rc<RefCell<RTTIClass>>>,
 }
 
-// what if we had RTTI scanning here instead? before any CFA?
-// you can find Type Descriptors from: .?AU, .?AV, .PAU, .PAV
-// doing it here gives you more control over what size the symbols are
-// doing it in here would also mean no SymbolIndex, since we're not replacing symbols, we're adding them
-
 // Parse our ObjInfo for all the RTTI structures we can find.
 // Add labels for RTTI structures as we find them (eager approach), except for COLs, as we'll be analyzing them specially later.
 fn find_all_rtti_structs(
@@ -530,6 +525,9 @@ fn compute_superclass_info(
 pub struct FindRTTIObjectsXbox {}
 
 impl AnalysisPass for FindRTTIObjectsXbox {
+    // Scan for RTTI objects, before any CFA is performed.
+    // Allows us to mark them as known_symbols ahead of time, we have control over what the symbol sizes/scopes should be,
+    // and by stepping through vftables, we have more known function start addresses we can provide to our object.
     fn execute(state: &mut AnalyzerState, obj: &ObjInfo) -> Result<()> {
         let mut rtti_metadata = RTTIMetadata { discovered_classes: vec![] };
 
