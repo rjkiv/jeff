@@ -8,6 +8,7 @@ pub mod diff;
 pub mod file;
 pub mod map;
 pub mod map_exe;
+pub mod msvc;
 pub mod nested;
 pub mod nlzss;
 pub mod path;

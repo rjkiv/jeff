@@ -8,13 +8,16 @@ use anyhow::Result;
 use memchr::memmem;
 
 use crate::{
-    analysis::{cfa::AnalyzerState, pass::AnalysisPass},
-    obj::ObjInfo,
+    analysis::{
+        cfa::{AnalyzerState, FunctionInfo, SectionAddress},
+        pass::AnalysisPass,
+    },
+    obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags},
+    util::msvc::encode_num,
 };
 
 // An RTTI Base Class Descriptor Object.
 struct BaseClassDescriptor {
-    pub addr: u32,                // the address of this in the exe
     pub num_contained_bases: u32, // number of nested classes following in the Base Class Array
     pub m_disp: i32,              // member displacement
     pub p_disp: i32,              // vbtable displacement
@@ -28,8 +31,7 @@ struct BaseClassDescriptor {
 
 // An RTTI Class Hierarchy Descriptor object. Also contains Base Class Array information.
 struct ClassHierarchyDescriptor {
-    pub addr: u32,                  // the address of this in the exe
-    pub signature: u32,             // always 0
+    pub signature: u32,                                       // always 0
     pub attributes: u32, // bit 0 set = multiple inheritance, bit 1 set = virtual inheritance
     pub num_base_classes: u32, // number of entries in the Base Class Array
     pub base_class_array_addr: u32, // BCA addr in the exe
@@ -55,7 +57,6 @@ struct CompleteObjectLocator {
 struct RTTIClass {
     // A class using RTTI can only ever have one type descriptor, class hierarchy descriptor (and by extension, Base Class Array)
     pub name: String, // this class's name, inferred from the type descriptor
-    pub type_descriptor_addr: u32, // type descriptor addr in the exe
     // Make this an Option because some RTTIClasses can legit just only have a Type Descriptor and nothing else
     pub class_hierarchy_descriptor: Option<ClassHierarchyDescriptor>,
     // But, it can have multiple base classes, each with their own COL and vftable
@@ -65,8 +66,6 @@ struct RTTIClass {
 
 // RTTI Metadata to be passed between functions.
 struct RTTIMetadata {
-    // the addr of type_info's vftable; this will be populated when searching for Type Descriptor entries
-    pub type_info_vtable: Option<u32>,
     pub discovered_classes: Vec<Rc<RefCell<RTTIClass>>>,
 }
 
@@ -75,10 +74,17 @@ struct RTTIMetadata {
 // doing it here gives you more control over what size the symbols are
 // doing it in here would also mean no SymbolIndex, since we're not replacing symbols, we're adding them
 
-fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool> {
-    let Some((_, data_section)) = obj.sections.by_name(".data")? else {
-        unreachable!("No .data section???");
-    };
+// Parse our ObjInfo for all the RTTI structures we can find.
+// Add labels for RTTI structures as we find them (eager approach), except for COLs, as we'll be analyzing them specially later.
+fn find_all_rtti_structs(
+    state: &mut AnalyzerState,
+    obj: &ObjInfo,
+    rtti: &mut RTTIMetadata,
+) -> Result<bool> {
+    let (data_sec_idx, data_section) = obj.sections.by_name(".data")?.expect("No .data section!");
+
+    // we'll find this as we search for Type Descriptor entries
+    let mut type_info_vtable: Option<u32> = None;
 
     // temporary maps to help us when populating/parsing RTTI objects
     let mut classes_by_type_descriptor_exe_addr: BTreeMap<u32, Rc<RefCell<RTTIClass>>> =
@@ -95,7 +101,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
             let td_addr = data_section.address as u32 + (i - 8) as u32;
             let this_vtable_addr = u32::from_be_bytes(data[i - 8..i - 4].try_into()?);
             // if we've already set the global type info vtable addr
-            if let Some(global_vtable_addr) = rtti.type_info_vtable {
+            if let Some(global_vtable_addr) = type_info_vtable {
                 // check that the one we just read is the same, as there can only be one unique type info vtable addr
                 assert_eq!(
                     global_vtable_addr, this_vtable_addr,
@@ -103,7 +109,7 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                 );
             } else {
                 // else, populate the global vtable addr with this one
-                rtti.type_info_vtable = Some(this_vtable_addr);
+                type_info_vtable = Some(this_vtable_addr);
             }
             let should_be_zero = u32::from_be_bytes(data[i - 4..i].try_into()?);
             assert_eq!(
@@ -124,7 +130,6 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
 
             let new_rtti_class = RTTIClass {
                 name: type_str.to_string(),
-                type_descriptor_addr: td_addr,
                 class_hierarchy_descriptor: None,
                 complete_object_locators: Vec::new(),
             };
@@ -134,6 +139,24 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
             classes_by_type_descriptor_exe_addr.insert(td_addr, rtti_class_ptr.clone());
 
             // log::debug!("Discovered RTTI Type Descriptor entry at {:08X}: {}", td_addr, type_str);
+
+            state
+                .known_symbols
+                .entry(SectionAddress::new(data_sec_idx, td_addr))
+                .or_default()
+                .push(ObjSymbol {
+                    // example:
+                    // Type Descriptor class name (. omitted): ?AVFilePath@@
+                    // Type Descriptor full symbol: ??_R0?AVFilePath@@@8
+                    name: format!("??_R0{}@8", type_str),
+                    address: td_addr as u64,
+                    section: Some(data_sec_idx),
+                    size: (type_str.len() + 8).next_multiple_of(4) as u64,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                });
+
             i += type_str.len().next_multiple_of(4);
         } else {
             i += 4;
@@ -146,14 +169,25 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
     }
 
     // the remaining RTTI structures live in .rdata
-    let Some((_, rdata_section)) = obj.sections.by_name(".rdata")? else {
-        unreachable!("No .rdata section???");
-    };
+    let (rdata_sec_idx, rdata_section) =
+        obj.sections.by_name(".rdata")?.expect("No .rdata section!");
+    // for parsing vftables
+    let (text_sec_idx, text_section) = obj.sections.by_name(".text")?.expect("No .text section!");
 
-    // for calculating vftable sizes
-    let Some((_, text_section)) = obj.sections.by_name(".text")? else {
-        unreachable!("No .text section???");
-    };
+    // add the type_info vftable here
+    let vftable_addr =
+        type_info_vtable.expect("So there's RTTI, but no global type info vtable addr?");
+    state.known_symbols.entry(SectionAddress::new(rdata_sec_idx, vftable_addr)).or_default().push(
+        ObjSymbol {
+            name: "??_7type_info@@6B@".to_string(),
+            address: vftable_addr as u64,
+            section: Some(rdata_sec_idx),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            ..Default::default()
+        },
+    );
 
     // now, search for COLs after the TDs (BCDs can't be found reliably, they can conflict with catchables)
     let mut i = 0;
@@ -213,6 +247,11 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                             && cur_vftable_entry
                                 < text_section.address as u32 + text_section.size as u32
                         {
+                            // add this to our known function addrs
+                            state.functions.insert(
+                                SectionAddress::new(text_sec_idx, cur_vftable_entry),
+                                FunctionInfo { analyzed: false, end: None, slices: None },
+                            );
                             num_vftable_entries += 1;
                         } else {
                             break;
@@ -267,7 +306,6 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
         let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
         let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
         let mut chd = ClassHierarchyDescriptor {
-            addr: chd_exe_addr,
             signature: u32::from_be_bytes(chd_data[0..4].try_into()?),
             attributes: u32::from_be_bytes(chd_data[4..8].try_into()?),
             num_base_classes: u32::from_be_bytes(chd_data[8..12].try_into()?),
@@ -279,6 +317,25 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
             "how on earth is this not zero: CHD signature, addr {:08X}",
             chd_exe_addr
         );
+
+        // label the CHD here
+        state
+            .known_symbols
+            .entry(SectionAddress::new(rdata_sec_idx, chd_exe_addr))
+            .or_default()
+            .push(ObjSymbol {
+                // example:
+                // Type Descriptor class name (. omitted): ?AVFilePath@@
+                // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
+                name: format!("??_R3{}8", the_rtti_class.borrow().name[3..].to_string()),
+                address: chd_exe_addr as u64,
+                section: Some(rdata_sec_idx),
+                size: 16,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                ..Default::default()
+            });
+
         // if the recorded BCA addr is not within .rdata, something has gone horribly wrong
         assert!(
             rdata_section.address as u32 <= chd.base_class_array_addr
@@ -287,6 +344,26 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
             "Bad BCA addr {:08X}!",
             chd.base_class_array_addr
         );
+
+        // label the BCA here
+        state
+            .known_symbols
+            .entry(SectionAddress::new(rdata_sec_idx, chd.base_class_array_addr))
+            .or_default()
+            .push(ObjSymbol {
+                // example:
+                // Type Descriptor class name (. omitted): ?AVFilePath@@
+                // Class Hierarchy Descriptor full symbol: ??_R2FilePath@@8
+                name: format!("??_R2{}8", the_rtti_class.borrow().name[3..].to_string()),
+                address: chd.base_class_array_addr as u64,
+                section: Some(rdata_sec_idx),
+                // there's a null word after the last BCD entry, hence the +1
+                size: ((chd.num_base_classes + 1) * 4) as u64,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                ..Default::default()
+            });
+
         // parse the BCA and BCDs as well, since the CHD will own the BCA
         let bca_data_idx = chd.base_class_array_addr - rdata_section.address as u32;
         let bca_data = &rdata_section.data
@@ -306,7 +383,6 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                         panic!("Bad Type Descriptor addr {:08X}!", td_addr);
                     };
                     let bcd_ptr = Rc::new(BaseClassDescriptor {
-                        addr: cur_bcd_addr,
                         num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
                         m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
                         p_disp: i32::from_be_bytes(bcd_data[12..16].try_into()?),
@@ -314,6 +390,27 @@ fn find_all_rtti_structs(obj: &ObjInfo, rtti: &mut RTTIMetadata) -> Result<bool>
                         attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
                         owner: Rc::downgrade(&class_for_bcd),
                     });
+                    // label the BCD here
+                    state
+                        .known_symbols
+                        .entry(SectionAddress::new(rdata_sec_idx, cur_bcd_addr))
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: format!(
+                                "??_R1{}{}{}{}{}8",
+                                encode_num(bcd_ptr.m_disp),
+                                encode_num(bcd_ptr.p_disp),
+                                encode_num(bcd_ptr.v_disp),
+                                encode_num(bcd_ptr.attributes as i32),
+                                class_for_bcd.borrow().name[3..].to_string()
+                            ),
+                            address: cur_bcd_addr as u64,
+                            section: Some(rdata_sec_idx),
+                            size: 28,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        });
                     entry.insert(bcd_ptr.clone());
                     bcd_ptr
                 }
@@ -335,20 +432,19 @@ pub struct FindRTTIObjectsXbox {}
 
 impl AnalysisPass for FindRTTIObjectsXbox {
     fn execute(state: &mut AnalyzerState, obj: &ObjInfo) -> Result<()> {
-        let mut rtti_metadata = RTTIMetadata { type_info_vtable: None, discovered_classes: vec![] };
+        let mut rtti_metadata = RTTIMetadata { discovered_classes: vec![] };
 
         log::info!("Hello from FindRTTIObjectsXbox");
 
-        // try to find Type Descriptors
-        // if you found none, that would mean there's no RTTI, so quit early
-        // else, do everything you've already implemented in rtti.rs
-
         // find all the RTTI structs you can
-        if !find_all_rtti_structs(obj, &mut rtti_metadata)? {
+        if !find_all_rtti_structs(state, obj, &mut rtti_metadata)? {
             return Ok(());
         }
 
-        // we'll mainly be editing state.known_symbols
+        // if we've reached this point, we have a full set of RTTI objects and their relationships
+        // and everything except for COLs and vftables have been labeled
+        // so, compute superclass information to get the remaining context needed to label those
+
         Ok(())
     }
 }
