@@ -929,7 +929,6 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
         symbols: ObjSymbols::new(ObjKind::Executable, vec![]),
         sections: ObjSections::new(ObjKind::Executable, sections),
         entry: None, // TODO result.entry_point
-        rtti: false,
         sda2_base: None,
         sda_base: None,
         stack_address: None,

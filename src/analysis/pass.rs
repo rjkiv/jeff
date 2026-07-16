@@ -46,18 +46,19 @@ impl AnalysisPass for FindSaveRestSledsXbox {
                     );
                 }
                 // add known symbols for them
-                if obj.known_functions.contains_key(&start) {
-                    let known_func_size = obj.known_functions.get(&start).unwrap().unwrap();
-                    state.known_symbols.entry(start).or_default().push(ObjSymbol {
-                        name: func.to_string(),
-                        address: start.address as u64,
-                        section: Some(start.section),
-                        size: known_func_size as u64,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Function,
-                        ..Default::default()
-                    });
+                if let Some(known_func) = obj.known_functions.get(&start) {
+                    if let Some(known_func_size) = known_func {
+                        state.known_symbols.entry(start).or_default().push(ObjSymbol {
+                            name: func.to_string(),
+                            address: start.address as u64,
+                            section: Some(start.section),
+                            size: known_func_size.clone() as u64,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Function,
+                            ..Default::default()
+                        });
+                    }
                 }
                 for i in reg_start..reg_end {
                     let addr = start + (i - reg_start) * step_size;

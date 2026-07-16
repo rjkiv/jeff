@@ -183,14 +183,6 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
     for entry in symbols_set.iter() {
         let mut symbol = obj.symbols[entry.idx].clone();
 
-        // if we see a string involving dynamic casting, we've got RTTI
-        // this specific string is thrown in an std::exception, so it should also be detectable in retail builds
-        if let Some(the_string) = &entry.demangled_name {
-            if the_string == "Bad dynamic_cast!" {
-                obj.rtti = true;
-            }
-        }
-
         // TODO: create an MSVC mangled representation of the string, and have that be the new symbol name
         symbol.name = format!("str_{:08X}", symbol.address as u32);
         log::debug!("Setting {} ({:#010X}) to size {:#X}", symbol.name, symbol.address, entry.size);
