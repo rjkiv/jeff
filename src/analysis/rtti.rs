@@ -300,7 +300,13 @@ fn find_all_rtti_structs(
     // rather, just have the multiple BCAs point to the same BCD.
     let mut bcds_by_exe_addr: BTreeMap<u32, Rc<BaseClassDescriptor>> = BTreeMap::new();
 
-    for (chd_exe_addr, the_rtti_class) in classes_by_chd_exe_addr {
+    // it is entirely possible that a new CHD can be discovered while populating other CHDs,
+    // due to an RTTI class not having any COLs, and thus, no CHD discovered at that point.
+    // so, this will serve as an indicator for which CHDs have been fully parsed
+    let mut parsed_chds_by_exe_addr: BTreeMap<u32, Rc<RefCell<RTTIClass>>> = BTreeMap::new();
+
+    // while classes_by_chd_exe_addr.len() != parsed_chds_by_exe_addr.len()?
+    for (chd_exe_addr, the_rtti_class) in &classes_by_chd_exe_addr {
         // log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
         // navigate to the bytes in .rdata that make up this CHD, and parse it
         let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
@@ -321,14 +327,14 @@ fn find_all_rtti_structs(
         // label the CHD here
         state
             .known_symbols
-            .entry(SectionAddress::new(rdata_sec_idx, chd_exe_addr))
+            .entry(SectionAddress::new(rdata_sec_idx, chd_exe_addr.clone()))
             .or_default()
             .push(ObjSymbol {
                 // example:
                 // Type Descriptor class name (. omitted): ?AVFilePath@@
                 // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
                 name: format!("??_R3{}8", the_rtti_class.borrow().name[3..].to_string()),
-                address: chd_exe_addr as u64,
+                address: chd_exe_addr.clone() as u64,
                 section: Some(rdata_sec_idx),
                 size: 16,
                 size_known: true,
@@ -382,6 +388,21 @@ fn find_all_rtti_structs(
                     else {
                         panic!("Bad Type Descriptor addr {:08X}!", td_addr);
                     };
+                    let chd_addr = u32::from_be_bytes(bcd_data[24..28].try_into()?);
+                    if !classes_by_chd_exe_addr.contains_key(&chd_addr) {
+                        log::warn!(
+                            "Missing CHD addr {:08X} for {}!",
+                            chd_addr,
+                            class_for_bcd.borrow().name
+                        );
+                    }
+
+                    // FIXME: it is entirely possible that a new CHD can be discovered here,
+                    // due to an RTTI class not having any COLs, and thus, no CHD discovered at that point.
+                    // if a new CHD was discovered here, we need to parse it, plus its BCA
+                    // the BCDs i *believe* should already be discovered, but look just in case
+                    // see above map
+
                     let bcd_ptr = Rc::new(BaseClassDescriptor {
                         num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
                         m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
@@ -428,6 +449,73 @@ fn find_all_rtti_structs(
     Ok(true)
 }
 
+fn compute_superclass_info(
+    state: &mut AnalyzerState,
+    obj: &ObjInfo,
+    rtti: &mut RTTIMetadata,
+) -> Result<()> {
+    let (rdata_sec_idx, _) = obj.sections.by_name(".rdata")?.expect("No .rdata section!");
+
+    // the original impl had us walking through each RTTI object and getting direct bases
+    // but, since we have direct access to the BCAs now, this isn't necessary, we can just...do that on the fly
+
+    // so, let's sort the RTTIClasses by smallest amount of COLs, and then smallest number of BCA entries (0 if no BCA)
+    rtti.discovered_classes.sort_by_key(|rc| {
+        let c = rc.borrow();
+        let bca_len = match &c.class_hierarchy_descriptor {
+            Some(chd) => chd.num_base_classes,
+            None => 0,
+        };
+        (c.complete_object_locators.len(), bca_len)
+    });
+
+    for rc in &rtti.discovered_classes {
+        // get the underlying RTTIClass from the Rc
+        let mut c = rc.borrow_mut();
+        if let Some(chd) = &c.class_hierarchy_descriptor {
+            // do the superclass analysis
+            // 1 COL/vftable = zero virtual inheritance, easiest case to deal with rn
+            if c.complete_object_locators.len() == 1 {
+                log::debug!("1 COL RTTI Object {}", c.name);
+                let the_sole_col = &c.complete_object_locators[0];
+                // make a label for the COL, and for the vftable
+                state
+                    .known_symbols
+                    .entry(SectionAddress::new(rdata_sec_idx, the_sole_col.addr))
+                    .or_default()
+                    .push(ObjSymbol {
+                        name: format!("??_R4{}6B@", c.name[3..].to_string()),
+                        address: the_sole_col.addr as u64,
+                        section: Some(rdata_sec_idx),
+                        size: 20,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        ..Default::default()
+                    });
+                state
+                    .known_symbols
+                    .entry(SectionAddress::new(rdata_sec_idx, the_sole_col.vftable_addr))
+                    .or_default()
+                    .push(ObjSymbol {
+                        name: format!("??_7{}6B@", c.name[3..].to_string()),
+                        address: the_sole_col.vftable_addr as u64,
+                        section: Some(rdata_sec_idx),
+                        size: (the_sole_col.num_vftable_entries * 4) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        ..Default::default()
+                    });
+            }
+            // nightmare territory - 2+ COLs
+            else {
+                // TODO: walk the inheritance tree and deduce superclass info for the final labels
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub struct FindRTTIObjectsXbox {}
 
 impl AnalysisPass for FindRTTIObjectsXbox {
@@ -444,6 +532,7 @@ impl AnalysisPass for FindRTTIObjectsXbox {
         // if we've reached this point, we have a full set of RTTI objects and their relationships
         // and everything except for COLs and vftables have been labeled
         // so, compute superclass information to get the remaining context needed to label those
+        compute_superclass_info(state, obj, &mut rtti_metadata)?;
 
         Ok(())
     }
