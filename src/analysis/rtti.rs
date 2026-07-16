@@ -34,7 +34,6 @@ struct ClassHierarchyDescriptor {
     pub signature: u32,                                       // always 0
     pub attributes: u32, // bit 0 set = multiple inheritance, bit 1 set = virtual inheritance
     pub num_base_classes: u32, // number of entries in the Base Class Array
-    pub base_class_array_addr: u32, // BCA addr in the exe
     pub base_class_descriptors: Vec<Rc<BaseClassDescriptor>>, // the BCDs that make up the Base Class Array
 }
 
@@ -305,145 +304,153 @@ fn find_all_rtti_structs(
     // so, this will serve as an indicator for which CHDs have been fully parsed
     let mut parsed_chds_by_exe_addr: BTreeMap<u32, Rc<RefCell<RTTIClass>>> = BTreeMap::new();
 
-    // while classes_by_chd_exe_addr.len() != parsed_chds_by_exe_addr.len()?
-    for (chd_exe_addr, the_rtti_class) in &classes_by_chd_exe_addr {
-        // log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
-        // navigate to the bytes in .rdata that make up this CHD, and parse it
-        let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
-        let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
-        let mut chd = ClassHierarchyDescriptor {
-            signature: u32::from_be_bytes(chd_data[0..4].try_into()?),
-            attributes: u32::from_be_bytes(chd_data[4..8].try_into()?),
-            num_base_classes: u32::from_be_bytes(chd_data[8..12].try_into()?),
-            base_class_array_addr: u32::from_be_bytes(chd_data[12..16].try_into()?),
-            base_class_descriptors: vec![],
-        };
-        assert_eq!(
-            chd.signature, 0,
-            "how on earth is this not zero: CHD signature, addr {:08X}",
-            chd_exe_addr
-        );
+    while classes_by_chd_exe_addr.len() != parsed_chds_by_exe_addr.len() {
+        let mut missed_chds: BTreeMap<u32, Rc<RefCell<RTTIClass>>> = BTreeMap::new();
+        for (chd_exe_addr, the_rtti_class) in &classes_by_chd_exe_addr {
+            // don't re-parse
+            if parsed_chds_by_exe_addr.contains_key(chd_exe_addr) {
+                continue;
+            }
 
-        // label the CHD here
-        state
-            .known_symbols
-            .entry(SectionAddress::new(rdata_sec_idx, chd_exe_addr.clone()))
-            .or_default()
-            .push(ObjSymbol {
-                // example:
-                // Type Descriptor class name (. omitted): ?AVFilePath@@
-                // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
-                name: format!("??_R3{}8", the_rtti_class.borrow().name[3..].to_string()),
-                address: chd_exe_addr.clone() as u64,
-                section: Some(rdata_sec_idx),
-                size: 16,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                ..Default::default()
-            });
-
-        // if the recorded BCA addr is not within .rdata, something has gone horribly wrong
-        assert!(
-            rdata_section.address as u32 <= chd.base_class_array_addr
-                && chd.base_class_array_addr
-                    < rdata_section.address as u32 + rdata_section.size as u32,
-            "Bad BCA addr {:08X}!",
-            chd.base_class_array_addr
-        );
-
-        // label the BCA here
-        state
-            .known_symbols
-            .entry(SectionAddress::new(rdata_sec_idx, chd.base_class_array_addr))
-            .or_default()
-            .push(ObjSymbol {
-                // example:
-                // Type Descriptor class name (. omitted): ?AVFilePath@@
-                // Class Hierarchy Descriptor full symbol: ??_R2FilePath@@8
-                name: format!("??_R2{}8", the_rtti_class.borrow().name[3..].to_string()),
-                address: chd.base_class_array_addr as u64,
-                section: Some(rdata_sec_idx),
-                // there's a null word after the last BCD entry, hence the +1
-                size: ((chd.num_base_classes + 1) * 4) as u64,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                ..Default::default()
-            });
-
-        // parse the BCA and BCDs as well, since the CHD will own the BCA
-        let bca_data_idx = chd.base_class_array_addr - rdata_section.address as u32;
-        let bca_data = &rdata_section.data
-            [bca_data_idx as usize..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
-
-        for (_, chunk) in bca_data.chunks_exact(4).enumerate() {
-            let cur_bcd_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
-            let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
-                Entry::Vacant(entry) => {
-                    // it's vacant, parse and create a new BCD instance
-                    let bcd_data_idx = cur_bcd_addr - rdata_section.address as u32;
-                    let bcd_data =
-                        &rdata_section.data[bcd_data_idx as usize..bcd_data_idx as usize + 28];
-                    let td_addr = u32::from_be_bytes(bcd_data[0..4].try_into()?);
-                    let Some(class_for_bcd) = classes_by_type_descriptor_exe_addr.get(&td_addr)
-                    else {
-                        panic!("Bad Type Descriptor addr {:08X}!", td_addr);
-                    };
-                    let chd_addr = u32::from_be_bytes(bcd_data[24..28].try_into()?);
-                    if !classes_by_chd_exe_addr.contains_key(&chd_addr) {
-                        log::warn!(
-                            "Missing CHD addr {:08X} for {}!",
-                            chd_addr,
-                            class_for_bcd.borrow().name
-                        );
-                    }
-
-                    // FIXME: it is entirely possible that a new CHD can be discovered here,
-                    // due to an RTTI class not having any COLs, and thus, no CHD discovered at that point.
-                    // if a new CHD was discovered here, we need to parse it, plus its BCA
-                    // the BCDs i *believe* should already be discovered, but look just in case
-                    // see above map
-
-                    let bcd_ptr = Rc::new(BaseClassDescriptor {
-                        num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
-                        m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
-                        p_disp: i32::from_be_bytes(bcd_data[12..16].try_into()?),
-                        v_disp: i32::from_be_bytes(bcd_data[16..20].try_into()?),
-                        attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
-                        owner: Rc::downgrade(&class_for_bcd),
-                    });
-                    // label the BCD here
-                    state
-                        .known_symbols
-                        .entry(SectionAddress::new(rdata_sec_idx, cur_bcd_addr))
-                        .or_default()
-                        .push(ObjSymbol {
-                            name: format!(
-                                "??_R1{}{}{}{}{}8",
-                                encode_num(bcd_ptr.m_disp),
-                                encode_num(bcd_ptr.p_disp),
-                                encode_num(bcd_ptr.v_disp),
-                                encode_num(bcd_ptr.attributes as i32),
-                                class_for_bcd.borrow().name[3..].to_string()
-                            ),
-                            address: cur_bcd_addr as u64,
-                            section: Some(rdata_sec_idx),
-                            size: 28,
-                            size_known: true,
-                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                            ..Default::default()
-                        });
-                    entry.insert(bcd_ptr.clone());
-                    bcd_ptr
-                }
-                Entry::Occupied(entry) => {
-                    // it's occupied, just use the one we've got
-                    entry.get().clone()
-                }
+            // log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
+            // navigate to the bytes in .rdata that make up this CHD, and parse it
+            let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
+            let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
+            let mut chd = ClassHierarchyDescriptor {
+                signature: u32::from_be_bytes(chd_data[0..4].try_into()?),
+                attributes: u32::from_be_bytes(chd_data[4..8].try_into()?),
+                num_base_classes: u32::from_be_bytes(chd_data[8..12].try_into()?),
+                base_class_descriptors: vec![],
             };
-            chd.base_class_descriptors.push(cur_bcd.clone());
-        }
+            assert_eq!(
+                chd.signature, 0,
+                "how on earth is this not zero: CHD signature, addr {:08X}",
+                chd_exe_addr
+            );
 
-        the_rtti_class.borrow_mut().class_hierarchy_descriptor = Some(chd);
+            let base_class_array_addr = u32::from_be_bytes(chd_data[12..16].try_into()?);
+
+            // label the CHD here
+            state
+                .known_symbols
+                .entry(SectionAddress::new(rdata_sec_idx, *chd_exe_addr))
+                .or_default()
+                .push(ObjSymbol {
+                    // example:
+                    // Type Descriptor class name (. omitted): ?AVFilePath@@
+                    // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
+                    name: format!("??_R3{}8", the_rtti_class.borrow().name[3..].to_string()),
+                    address: *chd_exe_addr as u64,
+                    section: Some(rdata_sec_idx),
+                    size: 16,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                });
+
+            // if the recorded BCA addr is not within .rdata, something has gone horribly wrong
+            assert!(
+                rdata_section.address as u32 <= base_class_array_addr
+                    && base_class_array_addr
+                        < rdata_section.address as u32 + rdata_section.size as u32,
+                "Bad BCA addr {:08X}!",
+                base_class_array_addr
+            );
+
+            // label the BCA here
+            state
+                .known_symbols
+                .entry(SectionAddress::new(rdata_sec_idx, base_class_array_addr))
+                .or_default()
+                .push(ObjSymbol {
+                    // example:
+                    // Type Descriptor class name (. omitted): ?AVFilePath@@
+                    // Class Hierarchy Descriptor full symbol: ??_R2FilePath@@8
+                    name: format!("??_R2{}8", the_rtti_class.borrow().name[3..].to_string()),
+                    address: base_class_array_addr as u64,
+                    section: Some(rdata_sec_idx),
+                    // there's a null word after the last BCD entry, hence the +1
+                    size: ((chd.num_base_classes + 1) * 4) as u64,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                });
+
+            // parse the BCA and BCDs as well, since the CHD will own the BCA
+            let bca_data_idx = base_class_array_addr - rdata_section.address as u32;
+            let bca_data = &rdata_section.data[bca_data_idx as usize
+                ..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
+
+            for (_, chunk) in bca_data.chunks_exact(4).enumerate() {
+                let cur_bcd_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
+                let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
+                    Entry::Vacant(entry) => {
+                        // it's vacant, parse and create a new BCD instance
+                        let bcd_data_idx = cur_bcd_addr - rdata_section.address as u32;
+                        let bcd_data =
+                            &rdata_section.data[bcd_data_idx as usize..bcd_data_idx as usize + 28];
+                        let td_addr = u32::from_be_bytes(bcd_data[0..4].try_into()?);
+                        let Some(class_for_bcd) = classes_by_type_descriptor_exe_addr.get(&td_addr)
+                        else {
+                            panic!("Bad Type Descriptor addr {:08X}!", td_addr);
+                        };
+                        let chd_addr = u32::from_be_bytes(bcd_data[24..28].try_into()?);
+                        if !classes_by_chd_exe_addr.contains_key(&chd_addr) {
+                            // log::warn!(
+                            //     "Missing CHD addr {:08X} for {}!",
+                            //     chd_addr,
+                            //     class_for_bcd.borrow().name
+                            // );
+                            // if we don't have it marked as missed, add it in
+                            missed_chds.entry(chd_addr).or_insert_with(|| class_for_bcd.clone());
+                        }
+
+                        let bcd_ptr = Rc::new(BaseClassDescriptor {
+                            num_contained_bases: u32::from_be_bytes(bcd_data[4..8].try_into()?),
+                            m_disp: i32::from_be_bytes(bcd_data[8..12].try_into()?),
+                            p_disp: i32::from_be_bytes(bcd_data[12..16].try_into()?),
+                            v_disp: i32::from_be_bytes(bcd_data[16..20].try_into()?),
+                            attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
+                            owner: Rc::downgrade(&class_for_bcd),
+                        });
+                        // label the BCD here
+                        state
+                            .known_symbols
+                            .entry(SectionAddress::new(rdata_sec_idx, cur_bcd_addr))
+                            .or_default()
+                            .push(ObjSymbol {
+                                name: format!(
+                                    "??_R1{}{}{}{}{}8",
+                                    encode_num(bcd_ptr.m_disp),
+                                    encode_num(bcd_ptr.p_disp),
+                                    encode_num(bcd_ptr.v_disp),
+                                    encode_num(bcd_ptr.attributes as i32),
+                                    class_for_bcd.borrow().name[3..].to_string()
+                                ),
+                                address: cur_bcd_addr as u64,
+                                section: Some(rdata_sec_idx),
+                                size: 28,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                ..Default::default()
+                            });
+                        entry.insert(bcd_ptr.clone());
+                        bcd_ptr
+                    }
+                    Entry::Occupied(entry) => {
+                        // it's occupied, just use the one we've got
+                        entry.get().clone()
+                    }
+                };
+                chd.base_class_descriptors.push(cur_bcd.clone());
+            }
+
+            the_rtti_class.borrow_mut().class_hierarchy_descriptor = Some(chd);
+            parsed_chds_by_exe_addr.insert(*chd_exe_addr, the_rtti_class.clone());
+        }
+        let old_len = classes_by_chd_exe_addr.len();
+        classes_by_chd_exe_addr.append(&mut missed_chds);
+        assert!(classes_by_chd_exe_addr.len() >= old_len, "Unbreakable loop while parsing CHDs!");
     }
 
     Ok(true)
@@ -474,8 +481,12 @@ fn compute_superclass_info(
         let mut c = rc.borrow_mut();
         if let Some(chd) = &c.class_hierarchy_descriptor {
             // do the superclass analysis
+            // 0 COLs/vftables - still record info/mark anything down here? not sure yet
+            if c.complete_object_locators.len() == 0 {
+                log::debug!("0 COL RTTI Object {}", c.name);
+            }
             // 1 COL/vftable = zero virtual inheritance, easiest case to deal with rn
-            if c.complete_object_locators.len() == 1 {
+            else if c.complete_object_locators.len() == 1 {
                 log::debug!("1 COL RTTI Object {}", c.name);
                 let the_sole_col = &c.complete_object_locators[0];
                 // make a label for the COL, and for the vftable
