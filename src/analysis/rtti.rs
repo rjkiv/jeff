@@ -89,7 +89,7 @@ fn find_all_rtti_structs(
     // since we aren't using ObjSymbols this time around, search for every instance of .?AU, .?AV, .PAU, .PAV
     let mut i = 8;
     let data = &data_section.data;
-    while i < data.len() {
+    while i + 4 < data.len() {
         let chunk = &data[i..i + 4];
         if chunk == b".?AU" || chunk == b".?AV" || chunk == b".PAU" || chunk == b".PAV" {
             let td_addr = data_section.address as u32 + (i - 8) as u32;
@@ -186,7 +186,7 @@ fn find_all_rtti_structs(
     // now, search for COLs after the TDs (BCDs can't be found reliably, they can conflict with catchables)
     let mut i = 0;
     let data = &rdata_section.data;
-    while i < data.len() {
+    while i + 4 < data.len() {
         let cur_word = u32::from_be_bytes(data[i..i + 4].try_into()?);
         // if cur word is a key that exists in type_descriptor_lookup
         if let Some(rtti_class) = classes_by_type_descriptor_exe_addr.get(&cur_word) {
@@ -531,12 +531,16 @@ impl AnalysisPass for FindRTTIObjectsXbox {
     fn execute(state: &mut AnalyzerState, obj: &ObjInfo) -> Result<()> {
         let mut rtti_metadata = RTTIMetadata { discovered_classes: vec![] };
 
-        log::info!("Hello from FindRTTIObjectsXbox");
-
         // find all the RTTI structs you can
         if !find_all_rtti_structs(state, obj, &mut rtti_metadata)? {
+            log::info!("No RTTI found!");
             return Ok(());
         }
+
+        log::info!(
+            "Discovered {} classes that use RTTI!\n",
+            rtti_metadata.discovered_classes.len()
+        );
 
         // if we've reached this point, we have a full set of RTTI objects and their relationships
         // and everything except for COLs and vftables have been labeled
