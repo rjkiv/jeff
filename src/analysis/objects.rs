@@ -3,7 +3,8 @@ use anyhow::Result;
 use crate::{
     obj::{ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbolKind, SymbolIndex},
     util::{
-        config::is_auto_symbol, msvc::encode_narrow_string_literal,
+        config::is_auto_symbol,
+        msvc::{encode_narrow_string_literal, encode_wide_string_literal},
         split::is_linker_generated_label,
     },
 };
@@ -174,7 +175,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                             idx: symbol_idx,
                             kind: ObjDataKind::String16,
                             size,
-                            mangled_name: None,
+                            mangled_name: Some(encode_wide_string_literal(&*str)),
                         });
                     }
                 }

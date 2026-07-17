@@ -108,8 +108,6 @@ const JAM_CRC: Algorithm<u32> = Algorithm {
     residue: 0,
 };
 
-// ??_C@_0M@IPBHJBIO@kMCNotOwner?$AA@
-
 // stole llvm's mangleStringLiteral for this one
 pub fn encode_narrow_string_literal(str: &str) -> String {
     // <char-type> ::= 0   # char, char16_t, char32_t
@@ -149,6 +147,45 @@ pub fn encode_narrow_string_literal(str: &str) -> String {
 
     for i in 0..num_bytes_to_mangle {
         encode_byte(&mut ret, cstr[i]);
+    }
+
+    // then push an @
+    ret.push('@');
+
+    ret
+}
+
+pub fn encode_wide_string_literal(wstr: &str) -> String {
+    let mut ret = String::new();
+    ret.push_str("??_C@_");
+    ret.push('1');
+
+    // we need the null terminator, come on rust
+    let mut cwstr: Vec<u16> = wstr.encode_utf16().collect();
+    cwstr.push(0);
+
+    let wstr_byte_size = cwstr.len() * 2;
+
+    ret.push_str(encode_num(wstr_byte_size as i32).as_str());
+
+    let mut crc_bytes = Vec::with_capacity(wstr_byte_size);
+    for wchar in &cwstr {
+        // llvm does le_bytes, xbox 360 went be_bytes. xbox 360 isn't like the other girls 💅
+        crc_bytes.extend(wchar.to_be_bytes());
+    }
+
+    let crc = Crc::<u32>::new(&JAM_CRC);
+    let hash = crc.checksum(&crc_bytes);
+    ret.push_str(encode_unsigned_num(hash).as_str());
+
+    // now, encode no more than the first 32 characters
+    let num_bytes_to_mangle = min(64, wstr_byte_size);
+
+    // so it goes BE for the CRC, but back to LE for the individual wchar mangling?
+    // ok microsoft epic sick
+    for i in (0..num_bytes_to_mangle).step_by(2) {
+        encode_byte(&mut ret, crc_bytes[i + 1]);
+        encode_byte(&mut ret, crc_bytes[i]);
     }
 
     // then push an @
