@@ -569,7 +569,10 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         let mut state = AnalyzerState::default();
         debug!("Detecting function boundaries");
         FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-        FindRTTIObjectsXbox::execute(&mut state, &obj)?;
+        // don't search for RTTI again, we already did it during initial analysis
+        if symbols_cache.is_none() {
+            FindRTTIObjectsXbox::execute(&mut state, &obj)?;
+        }
         state.detect_functions(&obj)?; // perform CFA
         state.apply(&mut obj)?; // give each found function a symbol
     }
