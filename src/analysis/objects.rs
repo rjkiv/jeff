@@ -2,7 +2,10 @@ use anyhow::Result;
 
 use crate::{
     obj::{ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbolKind, SymbolIndex},
-    util::{config::is_auto_symbol, split::is_linker_generated_label},
+    util::{
+        config::is_auto_symbol, msvc::encode_narrow_string_literal,
+        split::is_linker_generated_label,
+    },
 };
 
 pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
@@ -79,8 +82,7 @@ struct DetectedString {
     pub idx: SymbolIndex,
     pub kind: ObjDataKind,
     pub size: usize,
-    // future field for mangling detected strings directly into MSVC symbols
-    pub demangled_name: Option<String>,
+    pub mangled_name: Option<String>,
 }
 
 pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
@@ -158,7 +160,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                             idx: symbol_idx,
                             kind: ObjDataKind::String,
                             size,
-                            demangled_name: Some(str.to_string()),
+                            mangled_name: Some(encode_narrow_string_literal(&*str)),
                         });
                     }
                 }
@@ -172,7 +174,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                             idx: symbol_idx,
                             kind: ObjDataKind::String16,
                             size,
-                            demangled_name: Some(str.clone()),
+                            mangled_name: None,
                         });
                     }
                 }
@@ -182,9 +184,10 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
 
     for entry in symbols_set.iter() {
         let mut symbol = obj.symbols[entry.idx].clone();
-
-        // TODO: create an MSVC mangled representation of the string, and have that be the new symbol name
-        symbol.name = format!("str_{:08X}", symbol.address as u32);
+        symbol.name = match &entry.mangled_name {
+            Some(mangled_name) => mangled_name.clone(),
+            None => format!("str_{:08X}", symbol.address as u32),
+        };
         log::debug!("Setting {} ({:#010X}) to size {:#X}", symbol.name, symbol.address, entry.size);
         symbol.data_kind = entry.kind;
         symbol.size = entry.size as u64;
