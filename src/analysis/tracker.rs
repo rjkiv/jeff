@@ -85,23 +85,20 @@ impl Tracker {
     pub fn new(obj: &ObjInfo) -> Tracker {
         Self {
             processed_functions: Default::default(),
-            sda2_base: obj.sda2_base,
-            sda_base: obj.sda_base,
+            sda2_base: None,
+            sda_base: None,
             relocations: Default::default(),
             data_types: Default::default(),
-            stack_address: obj.stack_address,
-            stack_end: obj.stack_end.or_else(|| {
-                // Stack ends after all BSS sections
-                obj.sections
-                    .iter()
-                    .rfind(|&(_, s)| s.kind == ObjSectionKind::Bss)
-                    .map(|(_, s)| (s.address + s.size) as u32)
-            }),
-            db_stack_addr: obj.db_stack_addr,
-            arena_lo: obj
-                .arena_lo
-                .or_else(|| obj.db_stack_addr.map(|db_stack_addr| (db_stack_addr + 0x1F) & !0x1F)),
-            arena_hi: Some(obj.arena_hi.unwrap_or(0x81700000)),
+            stack_address: None,
+            stack_end:
+            // Stack ends after all BSS sections
+            obj.sections
+                .iter()
+                .rfind(|&(_, s)| s.kind == ObjSectionKind::Bss)
+                .map(|(_, s)| (s.address + s.size) as u32),
+            db_stack_addr:None,
+            arena_lo: None,
+            arena_hi: None,
             known_relocations: Default::default(),
             stores_to: Default::default(),
             sda_to: Default::default(),
@@ -475,7 +472,7 @@ impl Tracker {
         let mut possible_missed_branches = BTreeMap::new();
 
         let mut executor = Executor::new(obj);
-        executor.push(function_start, VM::new_with_base(self.sda2_base, self.sda_base), false);
+        executor.push(function_start, VM::new(), false);
         loop {
             executor.run(obj, |data| -> Result<ExecCbResult<()>> {
                 self.instruction_callback(
@@ -731,19 +728,8 @@ impl Tracker {
                     }
                     (symbol_idx, target.address as i64 - symbol_address as i64)
                 } else {
-                    // Create a new label
-                    let name = if obj.module_id == 0 {
-                        format!("lbl_{:08X}", target.address)
-                    } else {
-                        format!(
-                            "lbl_{}_{}_{:X}",
-                            obj.module_id,
-                            obj.sections[target.section].name.trim_start_matches('.'),
-                            target.address
-                        )
-                    };
                     let symbol_idx = obj.symbols.add_direct(ObjSymbol {
-                        name,
+                        name: format!("lbl_{:08X}", target.address),
                         address: target.address as u64,
                         section: Some(target.section),
                         data_kind,

@@ -56,14 +56,11 @@ pub struct ObjInfo {
     // The entry point of the executable
     pub entry: Option<u64>,
 
-    // Linker generated
-    pub sda2_base: Option<u32>,
-    pub sda_base: Option<u32>,
-    pub stack_address: Option<u32>,
-    pub stack_end: Option<u32>,
-    pub db_stack_addr: Option<u32>,
-    pub arena_lo: Option<u32>,
-    pub arena_hi: Option<u32>,
+    // Compiler generated info
+    // pdata_funcs
+    // exception_datas
+    // exception_records
+    // Option<u32> exception_handler_addr
 
     // Extracted
     pub link_order: Vec<ObjUnit>,
@@ -73,10 +70,6 @@ pub struct ObjInfo {
     // From .ctors, .dtors and extab
     pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
     pub pdata_funcs: Vec<SectionAddress>,
-
-    // REL
-    /// Module ID (0 for main)
-    pub module_id: u32,
 }
 
 impl ObjInfo {
@@ -94,33 +87,15 @@ impl ObjInfo {
             symbols: ObjSymbols::new(kind, symbols),
             sections: ObjSections::new(kind, sections),
             entry: None,
-            sda2_base: None,
-            sda_base: None,
-            stack_address: None,
-            stack_end: None,
-            db_stack_addr: None,
-            arena_lo: None,
-            arena_hi: None,
             link_order: vec![],
             blocked_relocation_sources: Default::default(),
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
-            module_id: 0,
         }
     }
 
     pub fn add_symbol(&mut self, in_symbol: ObjSymbol, replace: bool) -> Result<SymbolIndex> {
-        match in_symbol.name.as_str() {
-            "_SDA_BASE_" => self.sda_base = Some(in_symbol.address as u32),
-            "_SDA2_BASE_" => self.sda2_base = Some(in_symbol.address as u32),
-            "_stack_addr" => self.stack_address = Some(in_symbol.address as u32),
-            "_stack_end" => self.stack_end = Some(in_symbol.address as u32),
-            "_db_stack_addr" => self.db_stack_addr = Some(in_symbol.address as u32),
-            "__ArenaLo" => self.arena_lo = Some(in_symbol.address as u32),
-            "__ArenaHi" => self.arena_hi = Some(in_symbol.address as u32),
-            _ => {}
-        }
         self.symbols.add(in_symbol, replace)
     }
 

@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+#![allow(unused)]
+// laying down the foundations for labeling multiple/virtual inheritance RTTI objects
+// haven't implemented it yet
+
 use std::{
     cell::RefCell,
     collections::{btree_map::Entry, BTreeMap},
@@ -473,7 +478,8 @@ fn compute_superclass_info(
 
     for rc in &rtti.discovered_classes {
         // get the underlying RTTIClass from the Rc
-        let mut c = rc.borrow_mut();
+        // make this mutable when you start modifying potential base class members
+        let c = rc.borrow_mut();
         if let Some(chd) = &c.class_hierarchy_descriptor {
             // do the superclass analysis
             // 0 COLs/vftables - still record info/mark anything down here? not sure yet

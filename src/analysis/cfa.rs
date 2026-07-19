@@ -140,14 +140,9 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            let name = if obj.module_id == 0 {
-                format!("fn_{:08X}", start.address)
-            } else {
-                format!("fn_{}_{:X}", obj.module_id, start.address)
-            };
             obj.add_symbol(
                 ObjSymbol {
-                    name,
+                    name: format!("fn_{:08X}", start.address),
                     address: start.address as u64,
                     section: Some(start.section),
                     size: (end.address - start.address) as u64,
@@ -176,19 +171,9 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            let address_str = if obj.module_id == 0 {
-                format!("{:08X}", addr.address)
-            } else {
-                format!(
-                    "{}_{}_{:X}",
-                    obj.module_id,
-                    section.name.trim_start_matches('.'),
-                    addr.address
-                )
-            };
             obj.add_symbol(
                 ObjSymbol {
-                    name: format!("jumptable_{address_str}"),
+                    name: format!("jumptable_{:08X}", addr.address),
                     address: addr.address as u64,
                     section: Some(addr.section),
                     size: size as u64,

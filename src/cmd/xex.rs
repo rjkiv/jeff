@@ -256,7 +256,6 @@ fn split_write_obj_exe(
     }
 
     debug!("Adjusting splits");
-    let module_id = module.obj.module_id;
     update_splits(&mut module.obj, None, false, !config.quick_analysis)?;
 
     debug!("Writing configuration");
@@ -289,7 +288,7 @@ fn split_write_obj_exe(
     };
     let mut out_config = OutputModule {
         name: module_name,
-        module_id,
+        module_id: 0,
         ldscript: out_dir.join("ldscript.lcf").with_unix_encoding(),
         units: Vec::with_capacity(split_objs.len()),
         entry,

@@ -929,19 +929,11 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
         symbols: ObjSymbols::new(ObjKind::Executable, vec![]),
         sections: ObjSections::new(ObjKind::Executable, sections),
         entry: None, // TODO result.entry_point
-        sda2_base: None,
-        sda_base: None,
-        stack_address: None,
-        stack_end: None,
-        db_stack_addr: None,
-        arena_lo: None,
-        arena_hi: None,
         link_order: vec![],
         blocked_relocation_sources: Default::default(),
         blocked_relocation_targets: Default::default(),
         known_functions: Default::default(),
         pdata_funcs: Default::default(),
-        module_id: 0,
     };
 
     // If every symbol the map has alignment 4, it's likely bogus

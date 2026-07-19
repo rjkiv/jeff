@@ -40,7 +40,7 @@ pub fn encode_unsigned_num(num: u32) -> String {
     //                        ::= <hex digit>+ @  # when Number >= 10
     // <number>               ::= [?] <non-negative integer>
     let mut ret = String::new();
-    let mut eval = num;
+    let eval = num;
     if eval == 0 {
         ret.push_str("A@");
     } else if eval >= 1 && eval <= 10 {

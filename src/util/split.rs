@@ -345,18 +345,8 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                         symbol_end,
                         next_address
                     );
-                    let name = if obj.module_id == 0 {
-                        format!("lbl_{symbol_end:08X}")
-                    } else {
-                        format!(
-                            "lbl_{}_{}_{:X}",
-                            obj.module_id,
-                            section.name.trim_start_matches('.'),
-                            symbol_end
-                        )
-                    };
                     to_add.push(ObjSymbol {
-                        name,
+                        name: format!("lbl_{symbol_end:08X}"),
                         address: symbol_end as u64,
                         section: Some(section_index),
                         size: (next_address - symbol_end) as u64,
@@ -931,19 +921,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                         // If the symbol is local, we'll upgrade the scope to global
                         // and rename it to avoid conflicts
                         if target_sym.flags.is_local() {
-                            let address_str = if obj.module_id == 0 {
-                                format!("{:08X}", target_sym.address)
-                            } else if let Some(section_index) = target_sym.section {
-                                let target_section = &obj.sections[section_index];
-                                format!(
-                                    "{}_{}_{:X}",
-                                    obj.module_id,
-                                    target_section.name.trim_start_matches('.'),
-                                    target_sym.address
-                                )
-                            } else {
-                                bail!("Local symbol {} has no section", target_sym.name);
-                            };
+                            let address_str = format!("{:08X}", target_sym.address);
                             let new_name = if target_sym.name.ends_with(&address_str) {
                                 target_sym.name.clone()
                             } else {

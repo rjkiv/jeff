@@ -769,7 +769,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     let mut sections: Vec<ObjSection> = vec![];
     let mut embsec_counter = 0;
     for section in obj_file.sections() {
-        log::debug!("PE section {}: 0x{:X}", section.name().unwrap(), section.address());
+        log::debug!("PE section {}: 0x{:X}", section.name()?, section.address());
         let section_name = if section.name()? == ".embsec_" {
             embsec_counter += 1;
             format!(".embsec{}", embsec_counter - 1).to_string()
