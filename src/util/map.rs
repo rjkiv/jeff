@@ -18,9 +18,8 @@ use regex::{Captures, Regex};
 
 use crate::{
     obj::{
-        section_kind_for_section, ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSections,
-        ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbols, ObjUnit,
-        SectionIndex,
+        section_kind_for_section, ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSplit,
+        ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex,
     },
     util::nested::NestedVec,
 };
@@ -736,18 +735,7 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
             }
         })
         .collect();
-    let mut obj = ObjInfo {
-        kind: ObjKind::Executable,
-        name: "".to_string(),
-        symbols: ObjSymbols::new(ObjKind::Executable, vec![]),
-        sections: ObjSections::new(ObjKind::Executable, sections),
-        entry: None, // TODO result.entry_point
-        link_order: vec![],
-        blocked_relocation_sources: Default::default(),
-        blocked_relocation_targets: Default::default(),
-        known_functions: Default::default(),
-        pdata_funcs: Default::default(),
-    };
+    let mut obj = ObjInfo::new(ObjKind::Executable, "".to_string(), vec![], sections);
 
     // If every symbol the map has alignment 4, it's likely bogus
     let bogus_alignment =

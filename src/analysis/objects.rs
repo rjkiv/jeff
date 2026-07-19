@@ -9,8 +9,10 @@ use crate::{
 };
 
 pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
-    for (section_index, section) in
-        obj.sections.iter_mut().filter(|(_, s)| s.kind != ObjSectionKind::Code)
+    for (section_index, section) in obj
+        .sections
+        .iter_mut()
+        .filter(|(_, s)| s.kind != ObjSectionKind::Code && s.name != ".pdata")
     {
         let section_end = (section.address + section.size) as u32;
 
@@ -188,10 +190,15 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             Some(mangled_name) => mangled_name.clone(),
             None => format!("str_{:08X}", symbol.address as u32),
         };
-        log::debug!("Setting {} ({:#010X}) to size {:#X}", symbol.name, symbol.address, entry.size);
         symbol.data_kind = entry.kind;
-        symbol.size = entry.size as u64;
+        symbol.size = entry.size.next_multiple_of(4) as u64;
         symbol.size_known = true;
+        log::debug!(
+            "Setting {} ({:#010X}) to size {:#X}",
+            symbol.name,
+            symbol.address,
+            symbol.size
+        );
         obj.symbols.replace(entry.idx, symbol)?;
     }
     Ok(())

@@ -49,19 +49,23 @@ pub struct ObjInfo {
     pub name: String,
     pub symbols: ObjSymbols,
     pub sections: ObjSections,
-    // The entry point of the executable
+    /// The entry point of the executable
     pub entry: Option<u64>,
 
-    // Known functions and their possibly known sizes,
-    // obtained from pdata/xidata/RTTI.
-    // Populated before CFA begins, and passed to CFA for more context.
+    /// Known functions and their possibly known sizes, obtained from pdata/xidata/RTTI.
+    /// Populated before CFA begins, and passed to CFA for more context.
     pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
 
     // Compiler generated info
-    pub pdata_funcs: Vec<SectionAddress>, // Functions that have an entry in .pdata.
-    // exception_datas
-    // exception_records
-    // Option<u32> exception_handler_addr
+    /// Functions that have an entry in .pdata.
+    pub pdata_funcs: Vec<SectionAddress>,
+    /// Info retrieved from exception datas that precede certain functions.
+    // key = the function's SectionAddress
+    // value = the SectionAddress for this func's exception handler, the optional SectionAddress for this func's exception record
+    pub exception_datas: BTreeMap<SectionAddress, (SectionAddress, Option<SectionAddress>)>,
+    // unwinds?
+    // catches?
+    // hell, even rtti classes?
 
     // Extracted
     pub link_order: Vec<ObjUnit>,
@@ -87,6 +91,7 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
+            exception_datas: Default::default(),
         }
     }
 
