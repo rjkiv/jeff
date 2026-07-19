@@ -740,11 +740,9 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
                 size,
                 data: vec![],
                 align: 0,
-                elf_index: 0,
                 relocations: Default::default(),
                 virtual_address: None,
                 file_offset,
-                section_known: true,
                 splits: Default::default(),
             }
         })

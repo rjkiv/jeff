@@ -13,7 +13,7 @@ use crate::{
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
         relocation_target_for, uniq_jump_table_entries,
-        vm::{is_store_op, BranchTarget, GprValue, StepResult, VM},
+        vm::{BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
     obj::{
@@ -68,9 +68,6 @@ pub struct Tracker {
     pub relocations: BTreeMap<SectionAddress, Relocation>,
     data_types: BTreeMap<SectionAddress, DataKind>,
     pub known_relocations: BTreeSet<SectionAddress>,
-
-    stores_to: BTreeSet<SectionAddress>, // for determining data vs rodata, sdata(2)/sbss(2)
-    hal_to: BTreeSet<SectionAddress>,    // for determining data vs sdata
 }
 
 impl Tracker {
@@ -80,8 +77,6 @@ impl Tracker {
             relocations: Default::default(),
             data_types: Default::default(),
             known_relocations: Default::default(),
-            stores_to: Default::default(),
-            hal_to: Default::default(),
         }
     }
 
@@ -218,9 +213,6 @@ impl Tracker {
                                 if lo_reloc.is_none() {
                                     self.relocations.insert(lo_addr, Relocation::Lo(value));
                                 }
-                                if let RelocationTarget::Address(address) = value {
-                                    self.hal_to.insert(address);
-                                }
                             }
                         }
                     }
@@ -239,9 +231,6 @@ impl Tracker {
                                 let lo_reloc = self.relocations.get(&lo_addr).cloned();
                                 if lo_reloc.is_none() {
                                     self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
-                                if let RelocationTarget::Address(address) = value {
-                                    self.hal_to.insert(address);
                                 }
                             }
                         }
@@ -270,9 +259,6 @@ impl Tracker {
                             {
                                 self.relocations.insert(ins_addr, Relocation::Lo(address));
                             }
-                            if let RelocationTarget::Address(address) = address {
-                                self.hal_to.insert(address);
-                            }
                         }
                         (Some(hi_addr), Some(lo_addr)) => {
                             let hi_reloc = self.relocations.get(&hi_addr).cloned();
@@ -290,18 +276,12 @@ impl Tracker {
                             if lo_reloc.is_none() {
                                 self.relocations.insert(lo_addr, Relocation::Lo(address));
                             }
-                            if let RelocationTarget::Address(address) = address {
-                                self.hal_to.insert(address);
-                            }
                         }
                         _ => {}
                     }
 
                     if let RelocationTarget::Address(address) = address {
                         self.data_types.insert(address, data_kind_from_op(ins.op));
-                        if is_store_op(ins.op) {
-                            self.stores_to.insert(address);
-                        }
                     }
                 }
                 Ok(ExecCbResult::Continue)
@@ -527,40 +507,6 @@ impl Tracker {
 
     #[instrument(name = "apply", skip(self, obj))]
     pub fn apply(&self, obj: &mut ObjInfo, replace: bool) -> Result<()> {
-        fn apply_section_name(section: &mut ObjSection, name: &str) {
-            let module_id = if let Some((_, b)) = section.name.split_once(':') {
-                b.parse::<u32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_name =
-                if module_id == 0 { name.to_string() } else { format!("{name}:{module_id}") };
-            log::debug!("Renaming {} to {}", section.name, new_name);
-            section.name = new_name;
-        }
-
-        for (section_index, section) in obj.sections.iter_mut() {
-            // jeff marks every section_known as true, so this will never run
-            if !section.section_known {
-                if section.kind == ObjSectionKind::Code {
-                    apply_section_name(section, ".text");
-                    continue;
-                }
-                let start = SectionAddress::new(section_index, section.address as u32);
-                let end = start + section.size as u32;
-                if self.hal_to.range(start..end).next().is_some() {
-                    if section.kind == ObjSectionKind::Bss {
-                        apply_section_name(section, ".bss");
-                    } else if self.stores_to.range(start..end).next().is_some() {
-                        apply_section_name(section, ".data");
-                    } else {
-                        apply_section_name(section, ".rdata");
-                        section.kind = ObjSectionKind::ReadOnlyData;
-                    }
-                }
-            }
-        }
-
         for (&addr, reloc) in &self.relocations {
             let Some((reloc_kind, target)) = reloc.kind_and_address() else {
                 // Skip external relocations, they already exist

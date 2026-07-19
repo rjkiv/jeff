@@ -23,8 +23,7 @@ use crate::{
     analysis::{cfa::SectionAddress, read_u32},
     obj::{
         ObjArchitecture, ObjInfo, ObjKind, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol,
-        ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope,
-        SectionIndex as ObjSectionIndex, SectionIndex, SymbolIndex,
+        ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope, SectionIndex, SymbolIndex,
     },
     util::{crypto::decrypt_aes128_cbc_no_padding, xex_imports::replace_ordinal},
 };
@@ -794,13 +793,10 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             size: section.size(),
             data: section_data,
             align: section.align(),
-            // exe indices start at 1...why? i hate you that's why
-            elf_index: section.index().0 as ObjSectionIndex,
             // everything below this line doesn't really matter for the purposes of an xex
             relocations: Default::default(),
             virtual_address: None, // Loaded from section symbol
             file_offset: section.file_range().map(|(v, _)| v).unwrap_or_default(),
-            section_known: true,
             splits: Default::default(),
         });
     }
@@ -1284,11 +1280,9 @@ pub fn process_pe(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             size: section.size(),
             data: section_data,
             align: section.align(),
-            elf_index: section.index().0 as ObjSectionIndex,
             relocations: Default::default(),
             virtual_address: None,
             file_offset: section.file_range().map(|(v, _)| v).unwrap_or_default(),
-            section_known: true,
             splits: Default::default(),
         });
     }

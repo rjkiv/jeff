@@ -84,11 +84,7 @@ pub fn parse_symbol_line(line: &str, obj: &mut ObjInfo) -> Result<Option<ObjSymb
         } else if let Some((section_index, _)) = obj.sections.by_name(&section_name)? {
             Some(section_index)
         } else if obj.kind == ObjKind::Executable {
-            let (section_index, section) = obj.sections.at_address_mut(addr)?;
-            if !section.section_known {
-                section.rename(section_name)?;
-            }
-            Some(section_index)
+            Some(obj.sections.at_address(addr)?.0)
         } else {
             bail!("Section {} not found", section_name)
         };
@@ -664,7 +660,6 @@ where R: BufRead + ?Sized {
                     obj_section.kind =
                         kind.ok_or_else(|| anyhow!("Section '{}' missing type", name))?;
                     obj_section.name = name;
-                    obj_section.section_known = true;
                 }
                 if let Some(align) = align {
                     obj_section.align = align as u64;

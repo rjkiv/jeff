@@ -889,12 +889,10 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                     size: split_end.address as u64 - current_address.address as u64,
                     data,
                     align,
-                    elf_index: out_section_idx + 1,
                     relocations: ObjRelocations::new(out_relocations)?,
                     virtual_address: Some(current_address.address as u64),
                     file_offset: section.file_offset
                         + (current_address.address as u64 - section.address),
-                    section_known: true,
                     splits: Default::default(),
                 });
             }

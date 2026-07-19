@@ -30,12 +30,9 @@ pub struct ObjSection {
     pub size: u64,
     pub data: Vec<u8>,
     pub align: u64,
-    /// REL files reference the original ELF section indices
-    pub elf_index: SectionIndex, // not needed for an xex
     pub relocations: ObjRelocations,
     pub virtual_address: Option<u64>,
     pub file_offset: u64,
-    pub section_known: bool, // this will never not be true for an xex
     pub splits: ObjSplits,
 }
 
@@ -70,17 +67,6 @@ impl ObjSections {
 
     pub fn get_mut(&mut self, index: SectionIndex) -> Option<&mut ObjSection> {
         self.sections.get_mut(index as usize)
-    }
-
-    pub fn get_elf_index(&self, elf_index: SectionIndex) -> Option<(SectionIndex, &ObjSection)> {
-        self.iter().find(|&(_, s)| s.elf_index == elf_index)
-    }
-
-    pub fn get_elf_index_mut(
-        &mut self,
-        elf_index: SectionIndex,
-    ) -> Option<(SectionIndex, &mut ObjSection)> {
-        self.iter_mut().find(|(_, s)| s.elf_index == elf_index)
     }
 
     pub fn at_address(&self, addr: u32) -> Result<(SectionIndex, &ObjSection)> {
@@ -231,7 +217,6 @@ impl ObjSection {
     pub fn rename(&mut self, name: String) -> Result<()> {
         self.kind = section_kind_for_section(&name)?;
         self.name = name;
-        self.section_known = true;
         Ok(())
     }
 }
