@@ -4,7 +4,7 @@ use powerpc::{Argument, Ins, Opcode, GPR};
 
 use crate::{
     analysis::{cfa::SectionAddress, relocation_target_for, RelocationTarget},
-    obj::ObjInfo,
+    obj::{ObjInfo, ObjKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,8 +158,15 @@ pub fn section_address_for(
     if let Some(target) = relocation_target_for(obj, ins_addr, None).ok().flatten() {
         return Some(target);
     }
-    let (section_index, _) = obj.sections.at_address(target_addr).ok()?;
-    Some(RelocationTarget::Address(SectionAddress::new(section_index, target_addr)))
+    if obj.kind == ObjKind::Executable {
+        let (section_index, _) = obj.sections.at_address(target_addr).ok()?;
+        return Some(RelocationTarget::Address(SectionAddress::new(section_index, target_addr)));
+    }
+    if obj.sections[ins_addr.section].contains(target_addr) {
+        Some(RelocationTarget::Address(SectionAddress::new(ins_addr.section, target_addr)))
+    } else {
+        None
+    }
 }
 
 impl VM {

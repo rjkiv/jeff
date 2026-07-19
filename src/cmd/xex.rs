@@ -276,11 +276,16 @@ fn split_write_obj_exe(
         .create(out_dir)
         .with_context(|| format!("Failed to create out dir '{out_dir}'"))?;
     let obj_dir = out_dir.join("obj");
-    let entry = module.obj.entry.and_then(|e| {
-        let (section_index, _) = module.obj.sections.at_address(e as u32).ok()?;
-        let symbols = module.obj.symbols.at_section_address(section_index, e as u32).collect_vec();
-        best_match_for_reloc(symbols, ObjRelocKind::PpcRel24).map(|(_, s)| s.name.clone())
-    });
+    let entry = if module.obj.kind == ObjKind::Executable {
+        module.obj.entry.and_then(|e| {
+            let (section_index, _) = module.obj.sections.at_address(e as u32).ok()?;
+            let symbols =
+                module.obj.symbols.at_section_address(section_index, e as u32).collect_vec();
+            best_match_for_reloc(symbols, ObjRelocKind::PpcRel24).map(|(_, s)| s.name.clone())
+        })
+    } else {
+        module.obj.symbols.by_name("_prolog")?.map(|(_, s)| s.name.clone())
+    };
     let mut out_config = OutputModule {
         name: module_name,
         module_id: 0,

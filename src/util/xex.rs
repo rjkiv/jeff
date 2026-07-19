@@ -22,8 +22,8 @@ use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
     obj::{
-        ObjInfo, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet,
-        ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope, SectionIndex, SymbolIndex,
+        ObjArchitecture, ObjInfo, ObjKind, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol,
+        ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope, SectionIndex, SymbolIndex,
     },
     util::{crypto::decrypt_aes128_cbc_no_padding, xex_imports::replace_ordinal},
 };
@@ -761,6 +761,8 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     println!("xex: {path}");
     let xex = XexInfo::from_file(path)?;
     let obj_file = PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file");
+    let architecture = ObjArchitecture::PowerPc;
+    let kind = ObjKind::Executable;
     let obj_name = xex.opt_header_data.original_name;
 
     let mut sections: Vec<ObjSection> = vec![];
@@ -800,7 +802,7 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     }
 
     // Create object
-    let mut obj = ObjInfo::new(obj_name.to_string(), vec![], sections);
+    let mut obj = ObjInfo::new(kind, architecture, obj_name.to_string(), vec![], sections);
     obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
     // inspect the ImportLibraries
@@ -1248,6 +1250,8 @@ pub fn process_pe(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     );
 
     let obj_file = PeFile32::parse(&*pe_bytes).expect("Failed to parse PE file");
+    let architecture = ObjArchitecture::PowerPc;
+    let kind = ObjKind::Executable;
     let obj_name = path.file_stem().unwrap_or("unknown").to_string();
 
     let mut sections: Vec<ObjSection> = vec![];
@@ -1283,7 +1287,7 @@ pub fn process_pe(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
         });
     }
 
-    let mut obj = ObjInfo::new(obj_name, vec![], sections);
+    let mut obj = ObjInfo::new(kind, architecture, obj_name, vec![], sections);
     obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
     // Add known function boundaries from .pdata

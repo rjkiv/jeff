@@ -16,6 +16,7 @@ use crate::{
     util::{
         config::{is_auto_jump_table, is_auto_label, is_auto_symbol, parse_u32},
         nested::NestedVec,
+        split::is_linker_generated_label,
     },
 };
 
@@ -591,6 +592,14 @@ impl ObjSymbol {
     pub fn referenced_by(&self, reloc_kind: ObjRelocKind) -> bool {
         if self.flags.is_relocation_ignore() || self.flags.is_stripped() {
             return false;
+        }
+
+        if is_linker_generated_label(&self.name) {
+            // Linker generated labels will only be referenced by @ha/@h/@l relocations
+            return matches!(
+                reloc_kind,
+                ObjRelocKind::PpcAddr16Ha | ObjRelocKind::PpcAddr16Hi | ObjRelocKind::PpcAddr16Lo
+            );
         }
 
         match self.kind {

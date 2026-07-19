@@ -16,7 +16,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
-        ObjDataKind, ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
+        ObjDataKind, ObjInfo, ObjKind, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
         ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex,
     },
     util::{
@@ -83,8 +83,10 @@ pub fn parse_symbol_line(line: &str, obj: &mut ObjInfo) -> Result<Option<ObjSymb
             None
         } else if let Some((section_index, _)) = obj.sections.by_name(&section_name)? {
             Some(section_index)
-        } else {
+        } else if obj.kind == ObjKind::Executable {
             Some(obj.sections.at_address(addr)?.0)
+        } else {
+            bail!("Section {} not found", section_name)
         };
         let demangled_name = demangle(&name, &DemangleOptions::default());
         let mut symbol =
@@ -679,7 +681,13 @@ where R: BufRead + ?Sized {
                 ensure!(end >= start, "Invalid split range {:#X}..{:#X}", start, end);
                 let (section_index, _) = match obj.sections.by_name(&name)? {
                     Some(v) => Ok(v),
-                    None => obj.sections.with_range(start..end),
+                    None => {
+                        if obj.kind == ObjKind::Executable {
+                            obj.sections.with_range(start..end)
+                        } else {
+                            Err(anyhow!("Section {} not found", name))
+                        }
+                    }
                 }?;
                 let section = obj.sections.get_mut(section_index).unwrap();
                 let section_end = (section.address + section.size) as u32;
@@ -811,8 +819,10 @@ impl SectionAddressRef {
             obj.sections
                 .by_name(section)?
                 .ok_or_else(|| anyhow!("Section {} not found", section))?
-        } else {
+        } else if obj.kind == ObjKind::Executable {
             obj.sections.at_address(self.address)?
+        } else {
+            bail!("Section required for relocatable object address reference: {:#X}", self.address)
         };
         ensure!(
             section.contains(self.address),

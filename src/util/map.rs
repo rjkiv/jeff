@@ -18,9 +18,9 @@ use regex::{Captures, Regex};
 
 use crate::{
     obj::{
-        section_kind_for_section, ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSections,
-        ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbols, ObjUnit,
-        SectionIndex,
+        section_kind_for_section, ObjArchitecture, ObjInfo, ObjKind, ObjSection, ObjSectionKind,
+        ObjSections, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
+        ObjSymbols, ObjUnit, SectionIndex,
     },
     util::nested::NestedVec,
 };
@@ -748,6 +748,8 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
         })
         .collect();
     let mut obj = ObjInfo {
+        kind: ObjKind::Executable,
+        architecture: ObjArchitecture::PowerPc,
         name: "".to_string(),
         symbols: ObjSymbols::new(ObjKind::Executable, vec![]),
         sections: ObjSections::new(ObjKind::Executable, sections),
