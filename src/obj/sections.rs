@@ -25,16 +25,17 @@ pub enum ObjSectionKind {
 pub struct ObjSection {
     pub name: String,
     pub kind: ObjSectionKind,
+    // these could all be u32s for an xex
     pub address: u64,
     pub size: u64,
     pub data: Vec<u8>,
     pub align: u64,
     /// REL files reference the original ELF section indices
-    pub elf_index: SectionIndex,
+    pub elf_index: SectionIndex, // not needed for an xex
     pub relocations: ObjRelocations,
     pub virtual_address: Option<u64>,
     pub file_offset: u64,
-    pub section_known: bool,
+    pub section_known: bool, // this will never not be true for an xex
     pub splits: ObjSplits,
 }
 
