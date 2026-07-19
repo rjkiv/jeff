@@ -15,7 +15,7 @@ use crate::{
         vm::{section_address_for, BranchTarget, StepResult, VM},
         RelocationTarget,
     },
-    obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
+    obj::{ObjInfo, ObjSection, ObjSymbolKind},
 };
 
 #[derive(Debug, Default, Clone)]
@@ -612,62 +612,56 @@ impl FunctionSlices {
         let Some(end) = self.end() else {
             bail!("Can't finalize function without known end: {:#010X?}", self.start())
         };
-        // TODO: rework to make compatible with relocatable objects
-        if obj.kind == ObjKind::Executable {
-            match (
-                (end.section, &obj.sections[end.section]),
-                obj.sections.at_address(end.address - 4),
-            ) {
-                ((section_index, section), Ok((other_section_index, _other_section)))
-                    if section_index == other_section_index =>
-                {
-                    // FIXME this is real bad
-                    if !self.has_conditional_blr {
-                        let ins_addr = end - 4;
-                        if let Some(ins) = disassemble(section, ins_addr.address) {
-                            if ins.op == Opcode::B {
-                                if let Some(RelocationTarget::Address(target)) = ins
-                                    .branch_dest(ins_addr.address)
-                                    .and_then(|addr| section_address_for(obj, ins_addr, addr))
-                                {
-                                    if self.function_references.contains(&target) {
-                                        for branches in self.branches.values() {
-                                            if branches.len() > 1
-                                                && branches.contains(
-                                                    self.blocks.last_key_value().unwrap().0,
-                                                )
-                                            {
-                                                self.has_conditional_blr = true;
-                                            }
+        match ((end.section, &obj.sections[end.section]), obj.sections.at_address(end.address - 4))
+        {
+            ((section_index, section), Ok((other_section_index, _other_section)))
+                if section_index == other_section_index =>
+            {
+                // FIXME this is real bad
+                if !self.has_conditional_blr {
+                    let ins_addr = end - 4;
+                    if let Some(ins) = disassemble(section, ins_addr.address) {
+                        if ins.op == Opcode::B {
+                            if let Some(RelocationTarget::Address(target)) = ins
+                                .branch_dest(ins_addr.address)
+                                .and_then(|addr| section_address_for(obj, ins_addr, addr))
+                            {
+                                if self.function_references.contains(&target) {
+                                    for branches in self.branches.values() {
+                                        if branches.len() > 1
+                                            && branches
+                                                .contains(self.blocks.last_key_value().unwrap().0)
+                                        {
+                                            self.has_conditional_blr = true;
                                         }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // MWCC optimization sometimes leaves an unreachable blr
-                    // after generating a conditional blr in the function.
-                    if self.has_conditional_blr
-                        && matches!(disassemble(section, end.address - 4), Some(ins) if !ins.is_blr())
-                        && matches!(disassemble(section, end.address), Some(ins) if ins.is_blr())
-                        && !known_functions.contains_key(&end)
-                    {
-                        log::trace!("Found trailing blr @ {:#010X}, merging with function", end);
-                        self.blocks.insert(end, Some(end + 4));
-                    }
-
-                    // Some functions with rfi also include a trailing nop
-                    if self.has_rfi
-                        && matches!(disassemble(section, end.address), Some(ins) if is_nop(ins))
-                        && !known_functions.contains_key(&end)
-                    {
-                        log::trace!("Found trailing nop @ {:#010X}, merging with function", end);
-                        self.blocks.insert(end, Some(end + 4));
-                    }
                 }
-                _ => {}
+
+                // MWCC optimization sometimes leaves an unreachable blr
+                // after generating a conditional blr in the function.
+                if self.has_conditional_blr
+                    && matches!(disassemble(section, end.address - 4), Some(ins) if !ins.is_blr())
+                    && matches!(disassemble(section, end.address), Some(ins) if ins.is_blr())
+                    && !known_functions.contains_key(&end)
+                {
+                    log::trace!("Found trailing blr @ {:#010X}, merging with function", end);
+                    self.blocks.insert(end, Some(end + 4));
+                }
+
+                // Some functions with rfi also include a trailing nop
+                if self.has_rfi
+                    && matches!(disassemble(section, end.address), Some(ins) if is_nop(ins))
+                    && !known_functions.contains_key(&end)
+                {
+                    log::trace!("Found trailing nop @ {:#010X}, merging with function", end);
+                    self.blocks.insert(end, Some(end + 4));
+                }
             }
+            _ => {}
         }
 
         self.finalized = true;

@@ -17,8 +17,8 @@ use crate::{
         RelocationTarget,
     },
     obj::{
-        ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
-        ObjSymbol, ObjSymbolKind, SectionIndex,
+        ObjDataKind, ObjInfo, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol,
+        ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -83,13 +83,13 @@ impl Tracker {
     #[instrument(name = "tracker", skip(self, obj))]
     pub fn process(&mut self, obj: &ObjInfo) -> Result<()> {
         self.process_code(obj)?;
-        if obj.kind == ObjKind::Executable {
-            for (section_index, section) in obj.sections.iter().filter(|(_, s)| {
-                matches!(s.kind, ObjSectionKind::Data | ObjSectionKind::ReadOnlyData)
-            }) {
-                log::debug!("Processing section {}, address {:#X}", section_index, section.address);
-                self.process_data(obj, section_index, section)?;
-            }
+        for (section_index, section) in obj
+            .sections
+            .iter()
+            .filter(|(_, s)| matches!(s.kind, ObjSectionKind::Data | ObjSectionKind::ReadOnlyData))
+        {
+            log::debug!("Processing section {}, address {:#X}", section_index, section.address);
+            self.process_data(obj, section_index, section)?;
         }
         self.reject_invalid_relocations(obj)?;
         Ok(())
@@ -474,10 +474,6 @@ impl Tracker {
                 panic!("Relocation already exists for {addr:#010X} (from {from:#010X})");
             }
         }
-        // Remainder of this function is for executable objects only
-        if obj.kind == ObjKind::Relocatable {
-            return None;
-        }
         // Check blocked relocation sources
         if obj.blocked_relocation_sources.contains(from) {
             return None;
@@ -517,22 +513,6 @@ impl Tracker {
             {
                 // Skip blocked relocations
                 continue;
-            }
-            if obj.kind == ObjKind::Relocatable {
-                // Sanity check: relocatable objects already have relocations,
-                // did our analyzer find one that isn't real?
-                let section = &obj.sections[addr.section];
-                if section.relocations.at(addr.address).is_none()
-                    // We _do_ want to rebuild missing R_PPC_REL24 relocations
-                    && !matches!(reloc_kind, ObjRelocKind::PpcRel24)
-                {
-                    log::warn!(
-                        "Found invalid relocation {} {:?} (target {}) in relocatable object",
-                        addr,
-                        reloc,
-                        target
-                    );
-                }
             }
             let (data_kind, inferred_alignment) = self
                 .data_types

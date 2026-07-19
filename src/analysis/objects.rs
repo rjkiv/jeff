@@ -5,7 +5,6 @@ use crate::{
     util::{
         config::is_auto_symbol,
         msvc::{encode_narrow_string_literal, encode_wide_string_literal},
-        split::is_linker_generated_label,
     },
 };
 
@@ -18,7 +17,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
         let mut replace_symbols = vec![];
         for (idx, symbol) in obj.symbols.for_section(section_index) {
             let mut symbol = symbol.clone();
-            if is_linker_generated_label(&symbol.name) || symbol.name.starts_with("..") {
+            if symbol.name.starts_with("..") {
                 continue;
             }
             let expected_size = match symbol.data_kind {
