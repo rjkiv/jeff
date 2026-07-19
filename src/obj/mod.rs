@@ -25,15 +25,12 @@ use crate::{analysis::cfa::SectionAddress, obj::addresses::AddressRanges};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum ObjKind {
-    /// Fully linked object
+    /// Full object
     Executable,
+    /// Patch for a full executable
+    ExecutablePatch,
     /// Relocatable object
     Relocatable,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum ObjArchitecture {
-    PowerPc,
 }
 
 /// Translation unit information.
@@ -49,7 +46,6 @@ pub struct ObjUnit {
 #[derive(Debug, Clone)]
 pub struct ObjInfo {
     pub kind: ObjKind,
-    pub architecture: ObjArchitecture,
     pub name: String,
     pub symbols: ObjSymbols,
     pub sections: ObjSections,
@@ -75,14 +71,12 @@ pub struct ObjInfo {
 impl ObjInfo {
     pub fn new(
         kind: ObjKind,
-        architecture: ObjArchitecture,
         name: String,
         symbols: Vec<ObjSymbol>,
         sections: Vec<ObjSection>,
     ) -> Self {
         Self {
             kind,
-            architecture,
             name,
             symbols: ObjSymbols::new(kind, symbols),
             sections: ObjSections::new(kind, sections),

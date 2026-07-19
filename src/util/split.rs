@@ -10,9 +10,9 @@ use tracing_attributes::instrument;
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
-        section_kind_for_section, ObjArchitecture, ObjInfo, ObjKind, ObjReloc, ObjRelocations,
-        ObjSection, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
-        ObjSymbolKind, ObjSymbolScope, ObjUnit, SectionIndex, SymbolIndex,
+        section_kind_for_section, ObjInfo, ObjKind, ObjReloc, ObjRelocations, ObjSection,
+        ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
+        ObjSymbolScope, ObjUnit, SectionIndex, SymbolIndex,
     },
     util::{align_up, toposort::toposort},
 };
@@ -702,13 +702,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
     for unit in &obj.link_order {
         name_to_obj.insert(unit.name.clone(), objects.len());
         object_symbols.push(vec![None; obj.symbols.count() as usize]);
-        let split_obj = ObjInfo::new(
-            ObjKind::Relocatable,
-            ObjArchitecture::PowerPc,
-            unit.name.clone(),
-            vec![],
-            vec![],
-        );
+        let split_obj = ObjInfo::new(ObjKind::Relocatable, unit.name.clone(), vec![], vec![]);
         objects.push(split_obj);
     }
 
