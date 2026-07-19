@@ -759,21 +759,18 @@ pub fn extract_exe(input: &Utf8NativePathBuf) -> Result<(String, Vec<u8>)> {
 fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
     // add known function boundaries from pdata
     // FIXME: Some of these are SEH-related labels, not function entrypoints
-    let (pdata_sec_idx, pdata_section) = obj
+    let (_pdata_sec_idx, pdata_section) = obj
         .sections
         .by_name(".pdata")?
         .expect(".pdata section not found. Is that even possible for an xex?");
 
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
-    let mut pdata_end_address = (pdata_section.address + pdata_section.size) as u32;
     let mut num_discovered_funcs = 0;
     let data = &pdata_section.data;
-    for (i, chunk) in data.chunks_exact(8).enumerate() {
+    for (_, chunk) in data.chunks_exact(8).enumerate() {
         let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
         // if we encounter 0's, that's the end of usable pdata entries
         if start_addr == 0 {
-            // mark the pdata_end_address here if we reach this point
-            pdata_end_address = pdata_section.address as u32 + (i * 8) as u32;
             break;
         }
 
@@ -853,22 +850,6 @@ fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
         }
     }
     log::info!("Found {} known funcs from pdata!", num_discovered_funcs);
-
-    // add one big mega symbol for the entire usable pdata section
-    // TODO: remove this and rework splits? pdata is entirely compiler generated, not like we'd need to adjust pdata symbols
-    // obj.add_symbol(
-    //     ObjSymbol {
-    //         name: "PDATA".to_string(),
-    //         address: pdata_section.address,
-    //         section: Some(pdata_sec_idx),
-    //         size: (pdata_end_address - pdata_section.address as u32) as u64,
-    //         size_known: true,
-    //         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-    //         kind: ObjSymbolKind::Object,
-    //         ..Default::default()
-    //     },
-    //     false,
-    // )?;
 
     // TODO: traverse exception data/records here?
 

@@ -518,6 +518,10 @@ impl Tracker {
                 // Skip blocked relocations
                 continue;
             }
+            if obj.sections[target.section].name == ".pdata" {
+                // Skip .pdata
+                continue;
+            }
             if obj.kind == ObjKind::Relocatable {
                 // Sanity check: relocatable objects already have relocations,
                 // did our analyzer find one that isn't real?
