@@ -13,12 +13,12 @@ use crate::{
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
         relocation_target_for, uniq_jump_table_entries,
-        vm::{is_store_op, BranchTarget, GprValue, StepResult, VM},
+        vm::{BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
     obj::{
         ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
-        ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, SectionIndex, SymbolIndex,
+        ObjSymbol, ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -65,47 +65,18 @@ pub enum DataKind {
 
 pub struct Tracker {
     processed_functions: BTreeSet<SectionAddress>,
-    sda2_base: Option<u32>, // r2
-    sda_base: Option<u32>,  // r13
     pub relocations: BTreeMap<SectionAddress, Relocation>,
     data_types: BTreeMap<SectionAddress, DataKind>,
-    stack_address: Option<u32>,
-    stack_end: Option<u32>,
-    db_stack_addr: Option<u32>,
-    arena_lo: Option<u32>,
-    arena_hi: Option<u32>,
     pub known_relocations: BTreeSet<SectionAddress>,
-
-    stores_to: BTreeSet<SectionAddress>, // for determining data vs rodata, sdata(2)/sbss(2)
-    sda_to: BTreeSet<SectionAddress>,    // for determining data vs sdata
-    hal_to: BTreeSet<SectionAddress>,    // for determining data vs sdata
 }
 
 impl Tracker {
-    pub fn new(obj: &ObjInfo) -> Tracker {
+    pub fn new(_obj: &ObjInfo) -> Tracker {
         Self {
             processed_functions: Default::default(),
-            sda2_base: obj.sda2_base,
-            sda_base: obj.sda_base,
             relocations: Default::default(),
             data_types: Default::default(),
-            stack_address: obj.stack_address,
-            stack_end: obj.stack_end.or_else(|| {
-                // Stack ends after all BSS sections
-                obj.sections
-                    .iter()
-                    .rfind(|&(_, s)| s.kind == ObjSectionKind::Bss)
-                    .map(|(_, s)| (s.address + s.size) as u32)
-            }),
-            db_stack_addr: obj.db_stack_addr,
-            arena_lo: obj
-                .arena_lo
-                .or_else(|| obj.db_stack_addr.map(|db_stack_addr| (db_stack_addr + 0x1F) & !0x1F)),
-            arena_hi: Some(obj.arena_hi.unwrap_or(0x81700000)),
             known_relocations: Default::default(),
-            stores_to: Default::default(),
-            sda_to: Default::default(),
-            hal_to: Default::default(),
         }
     }
 
@@ -220,20 +191,11 @@ impl Tracker {
                 match ins.op {
                     // addi rD, rA, SIMM
                     Opcode::Addi | Opcode::Addic | Opcode::Addic_ => {
-                        let source = ins.field_ra() as usize;
+                        // let source = ins.field_ra() as usize;
                         let target = ins.field_rd() as usize;
                         if let Some(value) = self.gpr_address(obj, ins_addr, &vm.gpr[target].value)
                         {
-                            if (source == 2
-                                && matches!(self.sda2_base, Some(v) if vm.gpr[2].value == GprValue::Constant(v as u64)))
-                                || (source == 13
-                                    && matches!(self.sda_base, Some(v) if vm.gpr[13].value == GprValue::Constant(v as u64)))
-                            {
-                                self.relocations.insert(ins_addr, Relocation::Sda21(value));
-                                if let RelocationTarget::Address(address) = value {
-                                    self.sda_to.insert(address);
-                                }
-                            } else if let (Some(hi_addr), Some(lo_addr)) =
+                            if let (Some(hi_addr), Some(lo_addr)) =
                                 (vm.gpr[target].hi_addr, vm.gpr[target].lo_addr)
                             {
                                 let hi_reloc = self.relocations.get(&hi_addr).cloned();
@@ -250,9 +212,6 @@ impl Tracker {
                                 let lo_reloc = self.relocations.get(&lo_addr).cloned();
                                 if lo_reloc.is_none() {
                                     self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
-                                if let RelocationTarget::Address(address) = value {
-                                    self.hal_to.insert(address);
                                 }
                             }
                         }
@@ -273,9 +232,6 @@ impl Tracker {
                                 if lo_reloc.is_none() {
                                     self.relocations.insert(lo_addr, Relocation::Lo(value));
                                 }
-                                if let RelocationTarget::Address(address) = value {
-                                    self.hal_to.insert(address);
-                                }
                             }
                         }
                     }
@@ -283,68 +239,49 @@ impl Tracker {
                 }
                 Ok(ExecCbResult::Continue)
             }
-            StepResult::LoadStore { address, source, source_reg } => {
+            StepResult::LoadStore { address, source, source_reg: _ } => {
                 if !obj.blocked_relocation_sources.contains(ins_addr) {
-                    if (source_reg == 2
-                        && matches!(self.sda2_base, Some(v) if source.value == GprValue::Constant(v as u64)))
-                        || (source_reg == 13
-                            && matches!(self.sda_base, Some(v) if source.value == GprValue::Constant(v as u64)))
-                    {
-                        self.relocations.insert(ins_addr, Relocation::Sda21(address));
-                        if let RelocationTarget::Address(address) = address {
-                            self.sda_to.insert(address);
-                        }
-                    } else {
-                        match (source.hi_addr, source.lo_addr) {
-                            (Some(hi_addr), None) => {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    debug_assert_ne!(
-                                        address,
-                                        RelocationTarget::Address(SectionAddress::new(
-                                            SectionIndex::MAX,
-                                            0
-                                        ))
-                                    );
-                                    self.relocations.insert(hi_addr, Relocation::Ha(address));
-                                }
-                                if hi_reloc.is_none()
-                                    || matches!(hi_reloc, Some(Relocation::Ha(v)) if v == address)
-                                {
-                                    self.relocations.insert(ins_addr, Relocation::Lo(address));
-                                }
-                                if let RelocationTarget::Address(address) = address {
-                                    self.hal_to.insert(address);
-                                }
+                    match (source.hi_addr, source.lo_addr) {
+                        (Some(hi_addr), None) => {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                debug_assert_ne!(
+                                    address,
+                                    RelocationTarget::Address(SectionAddress::new(
+                                        SectionIndex::MAX,
+                                        0
+                                    ))
+                                );
+                                self.relocations.insert(hi_addr, Relocation::Ha(address));
                             }
-                            (Some(hi_addr), Some(lo_addr)) => {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    debug_assert_ne!(
-                                        address,
-                                        RelocationTarget::Address(SectionAddress::new(
-                                            SectionIndex::MAX,
-                                            0
-                                        ))
-                                    );
-                                    self.relocations.insert(hi_addr, Relocation::Ha(address));
-                                }
-                                let lo_reloc = self.relocations.get(&lo_addr).cloned();
-                                if lo_reloc.is_none() {
-                                    self.relocations.insert(lo_addr, Relocation::Lo(address));
-                                }
-                                if let RelocationTarget::Address(address) = address {
-                                    self.hal_to.insert(address);
-                                }
+                            if hi_reloc.is_none()
+                                || matches!(hi_reloc, Some(Relocation::Ha(v)) if v == address)
+                            {
+                                self.relocations.insert(ins_addr, Relocation::Lo(address));
                             }
-                            _ => {}
                         }
+                        (Some(hi_addr), Some(lo_addr)) => {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                debug_assert_ne!(
+                                    address,
+                                    RelocationTarget::Address(SectionAddress::new(
+                                        SectionIndex::MAX,
+                                        0
+                                    ))
+                                );
+                                self.relocations.insert(hi_addr, Relocation::Ha(address));
+                            }
+                            let lo_reloc = self.relocations.get(&lo_addr).cloned();
+                            if lo_reloc.is_none() {
+                                self.relocations.insert(lo_addr, Relocation::Lo(address));
+                            }
+                        }
+                        _ => {}
                     }
+
                     if let RelocationTarget::Address(address) = address {
                         self.data_types.insert(address, data_kind_from_op(ins.op));
-                        if is_store_op(ins.op) {
-                            self.stores_to.insert(address);
-                        }
                     }
                 }
                 Ok(ExecCbResult::Continue)
@@ -475,7 +412,7 @@ impl Tracker {
         let mut possible_missed_branches = BTreeMap::new();
 
         let mut executor = Executor::new(obj);
-        executor.push(function_start, VM::new_with_base(self.sda2_base, self.sda_base), false);
+        executor.push(function_start, VM::new(), false);
         loop {
             executor.run(obj, |data| -> Result<ExecCbResult<()>> {
                 self.instruction_callback(
@@ -563,108 +500,13 @@ impl Tracker {
             if self.known_relocations.contains(&from) {
                 return Some(SectionAddress::new(SectionIndex::MAX, addr));
             }
-            // Check special symbols
-            if self.stack_address == Some(addr)
-                || self.stack_end == Some(addr)
-                || self.db_stack_addr == Some(addr)
-                || self.arena_lo == Some(addr)
-                || self.arena_hi == Some(addr)
-                || self.sda2_base == Some(addr)
-                || self.sda_base == Some(addr)
-            {
-                return Some(SectionAddress::new(SectionIndex::MAX, addr));
-            }
             // Not valid
             None
         }
     }
 
-    fn special_symbol(
-        &self,
-        obj: &mut ObjInfo,
-        addr: u32,
-        reloc_kind: ObjRelocKind,
-    ) -> Option<SymbolIndex> {
-        if !matches!(
-            reloc_kind,
-            ObjRelocKind::PpcAddr16Ha | ObjRelocKind::PpcAddr16Lo
-            // RSOLinkInit uses a data table containing references to _SDA_BASE_ and _SDA2_BASE_
-            | ObjRelocKind::Absolute
-        ) {
-            return None;
-        }
-        // HACK for RSOStaticLocateObject
-        // for section in &obj.sections {
-        //     if addr == section.address as u32 {
-        //         let name = format!("_f_{}", section.name.trim_start_matches('.'));
-        //         return generate_special_symbol(obj, addr, &name).ok();
-        //     }
-        // }
-        let mut check_symbol = |opt: Option<u32>, name: &str| -> Option<SymbolIndex> {
-            if let Some(value) = opt {
-                if addr == value {
-                    return generate_special_symbol(obj, value, name).ok();
-                }
-            }
-            None
-        };
-        check_symbol(self.stack_address, "_stack_addr")
-            .or_else(|| check_symbol(self.stack_end, "_stack_end"))
-            .or_else(|| check_symbol(self.arena_lo, "__ArenaLo"))
-            .or_else(|| check_symbol(self.arena_hi, "__ArenaHi"))
-            .or_else(|| check_symbol(self.db_stack_addr, "_db_stack_addr"))
-            .or_else(|| check_symbol(self.sda2_base, "_SDA2_BASE_"))
-            .or_else(|| check_symbol(self.sda_base, "_SDA_BASE_"))
-    }
-
     #[instrument(name = "apply", skip(self, obj))]
     pub fn apply(&self, obj: &mut ObjInfo, replace: bool) -> Result<()> {
-        fn apply_section_name(section: &mut ObjSection, name: &str) {
-            let module_id = if let Some((_, b)) = section.name.split_once(':') {
-                b.parse::<u32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_name =
-                if module_id == 0 { name.to_string() } else { format!("{name}:{module_id}") };
-            log::debug!("Renaming {} to {}", section.name, new_name);
-            section.name = new_name;
-        }
-
-        for (section_index, section) in obj.sections.iter_mut() {
-            if !section.section_known {
-                if section.kind == ObjSectionKind::Code {
-                    apply_section_name(section, ".text");
-                    continue;
-                }
-                let start = SectionAddress::new(section_index, section.address as u32);
-                let end = start + section.size as u32;
-                if self.sda_to.range(start..end).next().is_some() {
-                    if self.stores_to.range(start..end).next().is_some() {
-                        if section.kind == ObjSectionKind::Bss {
-                            apply_section_name(section, ".sbss");
-                        } else {
-                            apply_section_name(section, ".sdata");
-                        }
-                    } else if section.kind == ObjSectionKind::Bss {
-                        apply_section_name(section, ".sbss2");
-                    } else {
-                        apply_section_name(section, ".sdata2");
-                        section.kind = ObjSectionKind::ReadOnlyData;
-                    }
-                } else if self.hal_to.range(start..end).next().is_some() {
-                    if section.kind == ObjSectionKind::Bss {
-                        apply_section_name(section, ".bss");
-                    } else if self.stores_to.range(start..end).next().is_some() {
-                        apply_section_name(section, ".data");
-                    } else {
-                        apply_section_name(section, ".rodata");
-                        section.kind = ObjSectionKind::ReadOnlyData;
-                    }
-                }
-            }
-        }
-
         for (&addr, reloc) in &self.relocations {
             let Some((reloc_kind, target)) = reloc.kind_and_address() else {
                 // Skip external relocations, they already exist
@@ -674,6 +516,10 @@ impl Tracker {
                 || obj.blocked_relocation_targets.contains(target)
             {
                 // Skip blocked relocations
+                continue;
+            }
+            if obj.sections[target.section].name == ".pdata" {
+                // Skip .pdata
                 continue;
             }
             if obj.kind == ObjKind::Relocatable {
@@ -704,53 +550,39 @@ impl Tracker {
                     DataKind::Double => (ObjDataKind::Double, Some(8)),
                 })
                 .unwrap_or_default();
-            let (target_symbol, addend) =
-                if let Some(symbol) = self.special_symbol(obj, target.address, reloc_kind) {
-                    (symbol, 0)
-                } else if let Some((symbol_idx, symbol)) =
-                    obj.symbols.for_relocation(target, reloc_kind)?
+            let (target_symbol, addend) = if let Some((symbol_idx, symbol)) =
+                obj.symbols.for_relocation(target, reloc_kind)?
+            {
+                let symbol_address = symbol.address;
+                if symbol_address as u32 == target.address
+                    && ((data_kind != ObjDataKind::Unknown
+                        && symbol.data_kind == ObjDataKind::Unknown)
+                        || (symbol.align.is_none() && inferred_alignment.is_some()))
                 {
-                    let symbol_address = symbol.address;
-                    if symbol_address as u32 == target.address
-                        && ((data_kind != ObjDataKind::Unknown
-                            && symbol.data_kind == ObjDataKind::Unknown)
-                            || (symbol.align.is_none() && inferred_alignment.is_some()))
-                    {
-                        let mut new_symbol = symbol.clone();
-                        if symbol.data_kind == ObjDataKind::Unknown {
-                            new_symbol.data_kind = data_kind;
-                        }
-                        if symbol.align.is_none() {
-                            if let Some(inferred_alignment) = inferred_alignment {
-                                if symbol_address as u32 % inferred_alignment == 0 {
-                                    new_symbol.align = Some(inferred_alignment);
-                                }
+                    let mut new_symbol = symbol.clone();
+                    if symbol.data_kind == ObjDataKind::Unknown {
+                        new_symbol.data_kind = data_kind;
+                    }
+                    if symbol.align.is_none() {
+                        if let Some(inferred_alignment) = inferred_alignment {
+                            if symbol_address as u32 % inferred_alignment == 0 {
+                                new_symbol.align = Some(inferred_alignment);
                             }
                         }
-                        obj.symbols.replace(symbol_idx, new_symbol)?;
                     }
-                    (symbol_idx, target.address as i64 - symbol_address as i64)
-                } else {
-                    // Create a new label
-                    let name = if obj.module_id == 0 {
-                        format!("lbl_{:08X}", target.address)
-                    } else {
-                        format!(
-                            "lbl_{}_{}_{:X}",
-                            obj.module_id,
-                            obj.sections[target.section].name.trim_start_matches('.'),
-                            target.address
-                        )
-                    };
-                    let symbol_idx = obj.symbols.add_direct(ObjSymbol {
-                        name,
-                        address: target.address as u64,
-                        section: Some(target.section),
-                        data_kind,
-                        ..Default::default()
-                    })?;
-                    (symbol_idx, 0)
-                };
+                    obj.symbols.replace(symbol_idx, new_symbol)?;
+                }
+                (symbol_idx, target.address as i64 - symbol_address as i64)
+            } else {
+                let symbol_idx = obj.symbols.add_direct(ObjSymbol {
+                    name: format!("lbl_{:08X}", target.address),
+                    address: target.address as u64,
+                    section: Some(target.section),
+                    data_kind,
+                    ..Default::default()
+                })?;
+                (symbol_idx, 0)
+            };
             let reloc = ObjReloc { kind: reloc_kind, target_symbol, addend, module: None };
             let section = &mut obj.sections[addr.section];
             if replace {
@@ -833,18 +665,4 @@ fn data_kind_from_op(op: Opcode) -> DataKind {
         Opcode::Stwx => DataKind::Word,
         _ => DataKind::Unknown,
     }
-}
-
-fn generate_special_symbol(obj: &mut ObjInfo, addr: u32, name: &str) -> Result<SymbolIndex> {
-    obj.add_symbol(
-        ObjSymbol {
-            name: name.to_string(),
-            address: addr as u64,
-            size: 0,
-            size_known: true,
-            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-            ..Default::default()
-        },
-        true,
-    )
 }

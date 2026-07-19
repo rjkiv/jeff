@@ -15,16 +15,13 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
-use typed_path::Utf8NativePath;
 
 use crate::{
     obj::{
-        section_kind_for_section, ObjArchitecture, ObjInfo, ObjKind, ObjSection, ObjSectionKind,
-        ObjSections, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
-        ObjSymbols, ObjUnit, SectionIndex,
+        section_kind_for_section, ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSplit,
+        ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex,
     },
     util::nested::NestedVec,
-    vfs::open_file,
 };
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -714,188 +711,6 @@ where
     Ok(sm.result)
 }
 
-pub fn apply_map_file(
-    path: &Utf8NativePath,
-    obj: &mut ObjInfo,
-    common_bss_start: Option<u32>,
-    mw_comment_version: Option<u8>,
-) -> Result<()> {
-    let mut file = open_file(path, true)?;
-    let info = process_map(file.as_mut(), common_bss_start, mw_comment_version)?;
-    apply_map(info, obj)
-}
-
-const DEFAULT_REL_SECTIONS: &[&str] =
-    &[".init", ".text", ".ctors", ".dtors", ".rodata", ".data", ".bss"];
-
-fn normalize_section_name(name: &str) -> &str {
-    match name {
-        ".extabindex" => "extabindex",
-        ".extab" => "extab",
-        _ => name,
-    }
-}
-
-pub fn apply_map(mut result: MapInfo, obj: &mut ObjInfo) -> Result<()> {
-    if result.sections.is_empty() && obj.kind == ObjKind::Executable {
-        log::warn!("Memory map section missing, attempting to recreate");
-        for (section_name, symbol_map) in &result.section_symbols {
-            let mut address = u32::MAX;
-            let mut size = 0;
-            for symbol_entry in symbol_map.values().flatten() {
-                if symbol_entry.address < address {
-                    address = symbol_entry.address;
-                }
-                if symbol_entry.address + symbol_entry.size > address + size {
-                    size = symbol_entry.address + symbol_entry.size - address;
-                }
-            }
-            log::info!("Recreated section {} @ {:#010X} ({:#X})", section_name, address, size);
-            result.sections.push(SectionInfo {
-                name: normalize_section_name(section_name).to_string(),
-                address,
-                size,
-                file_offset: 0,
-            });
-        }
-    }
-
-    for (section_index, section) in obj.sections.iter_mut() {
-        let opt = if obj.kind == ObjKind::Executable {
-            result.sections.iter().find(|s| {
-                // Slightly fuzzy match for postprocess/broken maps (TP, SMG)
-                s.address >= section.address as u32
-                    && (s.address + s.size) <= (section.address + section.size) as u32
-            })
-        } else {
-            result.sections.iter().filter(|s| s.size > 0).nth(section_index as usize)
-        };
-        if let Some(info) = opt {
-            if section.section_known && section.name != info.name {
-                log::warn!("Section mismatch: was {}, map says {}", section.name, info.name);
-            }
-            if section.address != info.address as u64 {
-                log::warn!(
-                    "Section address mismatch: was {:#010X}, map says {:#010X}",
-                    section.address,
-                    info.address
-                );
-            }
-            if section.size != info.size as u64 {
-                log::warn!(
-                    "Section size mismatch: was {:#X}, map says {:#X}",
-                    section.size,
-                    info.size
-                );
-            }
-            section.rename(info.name.clone())?;
-        } else {
-            log::warn!("Section {} @ {:#010X} not found in map", section.name, section.address);
-            if obj.kind == ObjKind::Relocatable {
-                let new_name = match section.kind {
-                    ObjSectionKind::Code => {
-                        if section.elf_index == 0 {
-                            ".init"
-                        } else {
-                            ".text"
-                        }
-                    }
-                    ObjSectionKind::Data | ObjSectionKind::ReadOnlyData => {
-                        if section.elf_index == 4 {
-                            if result.section_symbols.get(".rodata").is_some_and(|m| !m.is_empty())
-                            {
-                                ".rodata"
-                            } else {
-                                ".data"
-                            }
-                        } else if let Some(section_name) =
-                            DEFAULT_REL_SECTIONS.get(section.elf_index as usize)
-                        {
-                            section_name
-                        } else {
-                            ".data"
-                        }
-                    }
-                    ObjSectionKind::Bss => ".bss",
-                };
-                log::warn!("Defaulting to {}", new_name);
-                section.rename(new_name.to_string())?;
-            }
-        }
-    }
-
-    // If every symbol the map has alignment 4, it's likely bogus
-    let bogus_alignment =
-        result.section_symbols.values().flatten().flat_map(|(_, m)| m).all(|s| s.align == Some(4));
-    if bogus_alignment {
-        log::warn!("Bogus alignment detected, ignoring");
-    }
-
-    // Add section symbols
-    for (section_name, symbol_map) in &result.section_symbols {
-        if section_name == ".dead" {
-            continue;
-        }
-        let section_name = normalize_section_name(section_name);
-        let (section_index, _) = obj
-            .sections
-            .by_name(section_name)?
-            .ok_or_else(|| anyhow!("Failed to locate section {section_name} from map"))?;
-        for symbol_entry in symbol_map.values().flatten() {
-            add_symbol(obj, symbol_entry, Some(section_index), bogus_alignment)?;
-        }
-    }
-
-    // Add absolute symbols
-    // TODO
-    // for symbol_entry in result.link_map_symbols.values().filter(|s| s.unit.is_none()) {
-    //     add_symbol(obj, symbol_entry, None)?;
-    // }
-
-    // Add splits
-    for (section_name, unit_order) in &result.section_units {
-        if section_name == ".dead" {
-            continue;
-        }
-        let section_name = normalize_section_name(section_name);
-        let (_, section) = obj
-            .sections
-            .iter_mut()
-            .find(|(_, s)| s.name == *section_name)
-            .ok_or_else(|| anyhow!("Failed to locate section '{}'", section_name))?;
-        let mut iter = unit_order.iter().peekable();
-        while let Some((addr, unit)) = iter.next() {
-            let next = iter
-                .peek()
-                .map(|(addr, _)| *addr)
-                .unwrap_or_else(|| (section.address + section.size) as u32);
-            let common = section_name == ".bss"
-                && matches!(result.common_bss_start, Some(start) if *addr >= start);
-            let unit = unit.replace(' ', "/");
-
-            // Disable mw_comment_version for assembly units
-            if unit.ends_with(".s") && !obj.link_order.iter().any(|u| u.name == unit) {
-                obj.link_order.push(ObjUnit {
-                    name: unit.clone(),
-                    autogenerated: false,
-                    order: None,
-                });
-            }
-
-            section.splits.push(*addr, ObjSplit {
-                unit,
-                end: next,
-                align: None,
-                common,
-                autogenerated: false,
-                skip: false,
-                rename: None,
-            });
-        }
-    }
-    Ok(())
-}
-
 pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
     let sections = result
         .sections
@@ -913,36 +728,14 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
                 size,
                 data: vec![],
                 align: 0,
-                elf_index: 0,
                 relocations: Default::default(),
                 virtual_address: None,
                 file_offset,
-                section_known: true,
                 splits: Default::default(),
             }
         })
         .collect();
-    let mut obj = ObjInfo {
-        kind: ObjKind::Executable,
-        architecture: ObjArchitecture::PowerPc,
-        name: "".to_string(),
-        symbols: ObjSymbols::new(ObjKind::Executable, vec![]),
-        sections: ObjSections::new(ObjKind::Executable, sections),
-        entry: None, // TODO result.entry_point
-        sda2_base: None,
-        sda_base: None,
-        stack_address: None,
-        stack_end: None,
-        db_stack_addr: None,
-        arena_lo: None,
-        arena_hi: None,
-        link_order: vec![],
-        blocked_relocation_sources: Default::default(),
-        blocked_relocation_targets: Default::default(),
-        known_functions: Default::default(),
-        pdata_funcs: Default::default(),
-        module_id: 0,
-    };
+    let mut obj = ObjInfo::new(ObjKind::Executable, "".to_string(), vec![], sections);
 
     // If every symbol the map has alignment 4, it's likely bogus
     let bogus_alignment =

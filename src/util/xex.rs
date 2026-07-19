@@ -6,7 +6,7 @@ use std::{
     num::NonZeroU64,
 };
 
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{bail, ensure, Result};
 use lzxd::Lzxd;
 use memchr::memmem;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -22,9 +22,8 @@ use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
     obj::{
-        ObjArchitecture, ObjInfo, ObjKind, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol,
-        ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope,
-        SectionIndex as ObjSectionIndex, SectionIndex, SymbolIndex,
+        ObjInfo, ObjKind, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet,
+        ObjSymbolFlags, ObjSymbolKind, ObjSymbolScope, SectionIndex, SymbolIndex,
     },
     util::{crypto::decrypt_aes128_cbc_no_padding, xex_imports::replace_ordinal},
 };
@@ -757,19 +756,165 @@ pub fn extract_exe(input: &Utf8NativePathBuf) -> Result<(String, Vec<u8>)> {
     Ok((xex.opt_header_data.original_name, xex.exe_bytes))
 }
 
+fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
+    // add known function boundaries from pdata
+    // FIXME: Some of these are SEH-related labels, not function entrypoints
+    let (_pdata_sec_idx, pdata_section) = obj
+        .sections
+        .by_name(".pdata")?
+        .expect(".pdata section not found. Is that even possible for an xex?");
+
+    let mut syms_to_add: Vec<ObjSymbol> = vec![];
+    let mut num_discovered_funcs = 0;
+    let data = &pdata_section.data;
+    for chunk in data.chunks_exact(8) {
+        let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
+        // if we encounter 0's, that's the end of usable pdata entries
+        if start_addr == 0 {
+            break;
+        }
+
+        // some metadata for this function, including function size
+        let word = u32::from_be_bytes(chunk[4..8].try_into()?);
+        // let num_prologue_insts = word & 0xFF; // The number of instructions in the function's prolog.
+        let num_insts_in_func = (word >> 8) & 0x3FFFFF; // The number of instructions in the function.
+        let func_type = word >> 30; // The function type.
+
+        let func_start_addr =
+            SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
+        obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
+        obj.pdata_funcs.push(func_start_addr);
+        num_discovered_funcs += 1;
+
+        // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
+        if func_type == 3 {
+            // println!("Exception handler at {:08X}, record at {:08X}", start_addr - 8, start_addr - 4);
+            syms_to_add.push(ObjSymbol {
+                name: format!("except_data_{:08X}", start_addr),
+                address: (start_addr - 8) as u64,
+                section: Some(func_start_addr.section),
+                size: 8,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Object,
+                ..Default::default()
+            });
+
+            let mut cur_func_except_data: (SectionAddress, Option<SectionAddress>) =
+                (func_start_addr, None); // func_start_addr should be overwritten anyway
+
+            // word 1: the address of the function's exception handler
+            if let Some(except_func) =
+                read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)
+            {
+                let except_func_section =
+                    SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
+                // check to see if the addr is already part of a known function - if it's not, add it to known_functions
+                if let Entry::Vacant(e) = obj.known_functions.entry(except_func_section) {
+                    e.insert(None);
+                    num_discovered_funcs += 1;
+                }
+                cur_func_except_data.0 = except_func_section;
+            } else {
+                bail!("Invalid exception handler address listed at {}!", start_addr - 8)
+            }
+            // word 2: the address of the function's exception handler data record
+            if let Some(except_record) =
+                read_u32(obj.sections.at_address(start_addr - 4)?.1, start_addr - 4)
+            {
+                // exception handlers can have no record (a nullptr in the exception data)
+                if except_record != 0 {
+                    let except_record_section = SectionAddress::new(
+                        obj.sections.at_address(except_record)?.0,
+                        except_record,
+                    );
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("except_record_{:08X}", start_addr),
+                        address: except_record as u64,
+                        section: Some(except_record_section.section),
+                        size: 4,
+                        size_known: false, // we don't know exactly how big this particular exception record may be
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                    cur_func_except_data.1 = Some(except_record_section);
+                } else {
+                    cur_func_except_data.1 = None;
+                }
+            } else {
+                bail!("Invalid exception record address listed at {}!", start_addr - 4)
+            }
+
+            obj.exception_datas.insert(func_start_addr, cur_func_except_data);
+        }
+    }
+    log::info!("Found {} known funcs from pdata!", num_discovered_funcs);
+
+    // TODO: traverse exception data/records here?
+
+    // then for each except_data/except_record symbol (might remove later idk)
+    for sym in syms_to_add {
+        obj.add_symbol(sym, false)?;
+    }
+
+    Ok(())
+}
+
+fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
+    // if this xex has an .xidata section, mark down the funcs in there
+    if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
+        let mut num_xidatas = 0;
+        for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {
+            if i == 0 {
+                continue;
+            } // the first entry appears to be all 0's...but is every xidata like this?
+            let inst1 = u32::from_be_bytes(chunk[0..4].try_into()?);
+            // if we've reached 0's, that's the end of usable xidata info
+            if inst1 == 0 {
+                break;
+            }
+
+            assert_eq!(inst1 & 0xFFFF0000, 0x3D600000, "First instruction MUST be an lis to r11!");
+            let inst2 = u32::from_be_bytes(chunk[4..8].try_into()?);
+            assert_eq!(
+                inst2 & 0xFFFF0000,
+                0x396B0000,
+                "Second instruction MUST be an addi to r11!"
+            );
+            assert_eq!(
+                u32::from_be_bytes(chunk[8..12].try_into()?),
+                0x7d6903a6,
+                "Third instruction MUST be mtspr CTR, r11!"
+            );
+            assert_eq!(
+                u32::from_be_bytes(chunk[12..16].try_into()?),
+                0x4e800420,
+                "Fourth and final instruction MUST be bctr!"
+            );
+
+            let func_addr = (xidata_sec.address as usize + (i * 16)) as u32;
+            // println!("This xidata func's address: 0x{:08X}", func_addr);
+            obj.known_functions.insert(SectionAddress::new(xidata_idx, func_addr), Some(0x10));
+            num_xidatas += 1;
+        }
+        log::info!("Found {} known funcs from xidata!", num_xidatas);
+    }
+    Ok(())
+}
+
 pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     // look at cmd\dol\split
     println!("xex: {path}");
     let xex = XexInfo::from_file(path)?;
     let obj_file = PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file");
-    let architecture = ObjArchitecture::PowerPc;
     let kind = ObjKind::Executable;
     let obj_name = xex.opt_header_data.original_name;
 
     let mut sections: Vec<ObjSection> = vec![];
     let mut embsec_counter = 0;
     for section in obj_file.sections() {
-        log::debug!("PE section {}: 0x{:X}", section.name().unwrap(), section.address());
+        log::debug!("PE section {}: 0x{:X}", section.name()?, section.address());
         let section_name = if section.name()? == ".embsec_" {
             embsec_counter += 1;
             format!(".embsec{}", embsec_counter - 1).to_string()
@@ -794,19 +939,15 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             size: section.size(),
             data: section_data,
             align: section.align(),
-            // exe indices start at 1...why? i hate you that's why
-            elf_index: section.index().0 as ObjSectionIndex,
-            // everything below this line doesn't really matter for the purposes of an xex
             relocations: Default::default(),
             virtual_address: None, // Loaded from section symbol
             file_offset: section.file_range().map(|(v, _)| v).unwrap_or_default(),
-            section_known: true,
             splits: Default::default(),
         });
     }
 
     // Create object
-    let mut obj = ObjInfo::new(kind, architecture, obj_name.to_string(), vec![], sections);
+    let mut obj = ObjInfo::new(kind, obj_name.to_string(), vec![], sections);
     obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
     // inspect the ImportLibraries
@@ -1043,147 +1184,8 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
         log::info!("Found {} imps and {} import thunks from import data!", num_imps, num_thunks);
     }
 
-    // add known function boundaries from pdata
-    // FIXME: Some of these are SEH-related labels, not function entrypoints
-    let (pdata_addr, pdata_data) = match obj.sections.by_name(".pdata")? {
-        Some((idx, pdata_section)) => {
-            (SectionAddress::new(idx, pdata_section.address as u32), pdata_section.data.clone())
-        }
-        None => return Err(anyhow!(".pdata section not found. Is that even possible for an xex?")),
-    };
-
-    let mut num = 0;
-    for (i, chunk) in pdata_data.chunks_exact(8).enumerate() {
-        let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
-        // if we encounter 0's, that's the end of usable pdata entries
-        if start_addr == 0 {
-            break;
-        }
-
-        // some metadata for this function, including function size
-        let word = u32::from_be_bytes(chunk[4..8].try_into()?);
-        // let num_prologue_insts = word & 0xFF; // The number of instructions in the function's prolog.
-        let num_insts_in_func = (word >> 8) & 0x3FFFFF; // The number of instructions in the function.
-        let func_type = word >> 30; // The function type.
-
-        let this_entry_addr = pdata_addr + (i * 8) as u32;
-        obj.add_symbol(
-            ObjSymbol {
-                name: format!("pdata@{:08X}", this_entry_addr.address),
-                address: this_entry_addr.address as u64,
-                section: Some(pdata_addr.section),
-                size: 8,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Object,
-                ..Default::default()
-            },
-            false,
-        )?;
-        let section_addr = SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
-        obj.known_functions.insert(section_addr, Some(num_insts_in_func * 4));
-        obj.pdata_funcs.push(section_addr);
-        num += 1;
-
-        // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
-        if func_type == 3 {
-            // println!("Exception handler at {:08X}, record at {:08X}", start_addr - 8, start_addr - 4);
-            obj.add_symbol(
-                ObjSymbol {
-                    name: format!("except_data_{:08X}", start_addr),
-                    address: (start_addr - 8) as u64,
-                    section: Some(section_addr.section),
-                    size: 8,
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                },
-                false,
-            )?;
-            // word 1: the address of the function's exception handler
-            if let Some(except_func) =
-                read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)
-            {
-                let except_func_section =
-                    SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
-                // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                if let Entry::Vacant(e) = obj.known_functions.entry(except_func_section) {
-                    e.insert(None);
-                    num += 1;
-                }
-            } else {
-                bail!("Invalid exception handler address listed at {}!", start_addr - 8)
-            }
-            // word 2: the address of the function's exception handler data record
-            if let Some(except_record) =
-                read_u32(obj.sections.at_address(start_addr - 4)?.1, start_addr - 4)
-            {
-                // exception handlers can have no record (a nullptr in the exception data)
-                if except_record != 0 {
-                    let except_record_section = SectionAddress::new(
-                        obj.sections.at_address(except_record)?.0,
-                        except_record,
-                    );
-                    obj.add_symbol(
-                        ObjSymbol {
-                            name: format!("except_record_{:08X}", start_addr),
-                            address: except_record as u64,
-                            section: Some(except_record_section.section),
-                            size: 4,
-                            size_known: false, // we don't know exactly how big this particular exception record may be
-                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                            kind: ObjSymbolKind::Object,
-                            ..Default::default()
-                        },
-                        false,
-                    )?;
-                }
-            } else {
-                bail!("Invalid exception record address listed at {}!", start_addr - 4)
-            }
-        }
-    }
-    log::info!("Found {} known funcs from pdata!", num);
-
-    // if this xex has an .xidata section, mark down the funcs in there
-    if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
-        let mut num_xidatas = 0;
-        for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {
-            if i == 0 {
-                continue;
-            } // the first entry appears to be all 0's...but is every xidata like this?
-            let inst1 = u32::from_be_bytes(chunk[0..4].try_into()?);
-            // if we've reached 0's, that's the end of usable xidata info
-            if inst1 == 0 {
-                break;
-            }
-
-            assert_eq!(inst1 & 0xFFFF0000, 0x3D600000, "First instruction MUST be an lis to r11!");
-            let inst2 = u32::from_be_bytes(chunk[4..8].try_into()?);
-            assert_eq!(
-                inst2 & 0xFFFF0000,
-                0x396B0000,
-                "Second instruction MUST be an addi to r11!"
-            );
-            assert_eq!(
-                u32::from_be_bytes(chunk[8..12].try_into()?),
-                0x7d6903a6,
-                "Third instruction MUST be mtspr CTR, r11!"
-            );
-            assert_eq!(
-                u32::from_be_bytes(chunk[12..16].try_into()?),
-                0x4e800420,
-                "Fourth and final instruction MUST be bctr!"
-            );
-
-            let func_addr = (xidata_sec.address as usize + (i * 16)) as u32;
-            // println!("This xidata func's address: 0x{:08X}", func_addr);
-            obj.known_functions.insert(SectionAddress::new(xidata_idx, func_addr), Some(0x10));
-            num_xidatas += 1;
-        }
-        log::info!("Found {} known funcs from xidata!", num_xidatas);
-    }
+    process_pdata(&mut obj)?;
+    process_xidata(&mut obj)?;
 
     const RTL_CHECK_STACK: [u8; 40] = [
         // _RtlCheckStack
@@ -1236,6 +1238,10 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
 }
 
 /// Check if a file is an XEX (vs a raw PE) by reading its magic bytes.
+// TODO: redo the entire file parsing system to accept a full game xex, an xex patch file, or a direct exe
+// XEX: has XEX2 header, patch bits low
+// XEX patch: has XEX2 header, patch bits high
+// direct exe: has MZ at start
 pub fn is_xex_file(path: &Utf8NativePathBuf) -> Result<bool> {
     let data = fs::read(path)?;
     ensure!(data.len() >= 4, "File too small to be a valid executable");
@@ -1254,7 +1260,6 @@ pub fn process_pe(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
     );
 
     let obj_file = PeFile32::parse(&*pe_bytes).expect("Failed to parse PE file");
-    let architecture = ObjArchitecture::PowerPc;
     let kind = ObjKind::Executable;
     let obj_name = path.file_stem().unwrap_or("unknown").to_string();
 
@@ -1284,140 +1289,18 @@ pub fn process_pe(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             size: section.size(),
             data: section_data,
             align: section.align(),
-            elf_index: section.index().0 as ObjSectionIndex,
             relocations: Default::default(),
             virtual_address: None,
             file_offset: section.file_range().map(|(v, _)| v).unwrap_or_default(),
-            section_known: true,
             splits: Default::default(),
         });
     }
 
-    let mut obj = ObjInfo::new(kind, architecture, obj_name, vec![], sections);
+    let mut obj = ObjInfo::new(kind, obj_name, vec![], sections);
     obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
-    // Add known function boundaries from .pdata
-    if let Some((pdata_idx, pdata_section)) = obj.sections.by_name(".pdata")? {
-        let pdata_addr = SectionAddress::new(pdata_idx, pdata_section.address as u32);
-        let pdata_data = pdata_section.data.clone();
-        let mut num = 0;
-        for (i, chunk) in pdata_data.chunks_exact(8).enumerate() {
-            let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
-            if start_addr == 0 {
-                break;
-            }
-            let word = u32::from_be_bytes(chunk[4..8].try_into()?);
-            let num_insts_in_func = (word >> 8) & 0x3FFFFF;
-            let func_type = word >> 30;
-
-            let this_entry_addr = pdata_addr + (i * 8) as u32;
-            obj.add_symbol(
-                ObjSymbol {
-                    name: format!("pdata@{:08X}", this_entry_addr.address),
-                    address: this_entry_addr.address as u64,
-                    section: Some(pdata_addr.section),
-                    size: 8,
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                },
-                false,
-            )?;
-            let section_addr =
-                SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
-            obj.known_functions.insert(section_addr, Some(num_insts_in_func * 4));
-            obj.pdata_funcs.push(section_addr);
-            num += 1;
-
-            if func_type == 3 {
-                obj.add_symbol(
-                    ObjSymbol {
-                        name: format!("except_data_{:08X}", start_addr),
-                        address: (start_addr - 8) as u64,
-                        section: Some(section_addr.section),
-                        size: 8,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    },
-                    false,
-                )?;
-                if let Some(except_func) =
-                    read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)
-                {
-                    let except_func_section =
-                        SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
-                    if let Entry::Vacant(e) = obj.known_functions.entry(except_func_section) {
-                        e.insert(None);
-                        num += 1;
-                    }
-                } else {
-                    bail!("Invalid exception handler address listed at {}!", start_addr - 8)
-                }
-                if let Some(except_record) =
-                    read_u32(obj.sections.at_address(start_addr - 4)?.1, start_addr - 4)
-                {
-                    if except_record != 0 {
-                        let except_record_section = SectionAddress::new(
-                            obj.sections.at_address(except_record)?.0,
-                            except_record,
-                        );
-                        obj.add_symbol(
-                            ObjSymbol {
-                                name: format!("except_record_{:08X}", start_addr),
-                                address: except_record as u64,
-                                section: Some(except_record_section.section),
-                                size: 4,
-                                size_known: false,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
-                } else {
-                    bail!("Invalid exception record address listed at {}!", start_addr - 4)
-                }
-            }
-        }
-        log::info!("Found {} known funcs from pdata!", num);
-    } else {
-        log::warn!(".pdata section not found in PE");
-    }
-
-    // If this PE has an .xidata section, mark the funcs in there
-    if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
-        let mut num_xidatas = 0;
-        for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {
-            if i == 0 {
-                continue;
-            }
-            let inst1 = u32::from_be_bytes(chunk[0..4].try_into()?);
-            if inst1 == 0 {
-                break;
-            }
-            if (inst1 & 0xFFFF0000) != 0x3D600000 {
-                break;
-            }
-            let inst2 = u32::from_be_bytes(chunk[4..8].try_into()?);
-            if (inst2 & 0xFFFF0000) != 0x396B0000 {
-                break;
-            }
-            if u32::from_be_bytes(chunk[8..12].try_into()?) != 0x7d6903a6 {
-                break;
-            }
-            if u32::from_be_bytes(chunk[12..16].try_into()?) != 0x4e800420 {
-                break;
-            }
-            let func_addr = (xidata_sec.address as usize + (i * 16)) as u32;
-            obj.known_functions.insert(SectionAddress::new(xidata_idx, func_addr), Some(0x10));
-            num_xidatas += 1;
-        }
-        log::info!("Found {} known funcs from xidata!", num_xidatas);
-    }
+    process_pdata(&mut obj)?;
+    process_xidata(&mut obj)?;
 
     // Search for _RtlCheckStack pattern
     const RTL_CHECK_STACK: [u8; 40] = [

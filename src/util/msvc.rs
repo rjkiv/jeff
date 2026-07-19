@@ -16,7 +16,7 @@ pub fn encode_num(num: i32) -> String {
     }
     if eval == 0 {
         ret.push_str("A@");
-    } else if eval >= 1 && eval <= 10 {
+    } else if (1..=10).contains(&eval) {
         ret += &*(eval - 1).to_string();
     } else {
         let mut digits = Vec::new();
@@ -40,14 +40,14 @@ pub fn encode_unsigned_num(num: u32) -> String {
     //                        ::= <hex digit>+ @  # when Number >= 10
     // <number>               ::= [?] <non-negative integer>
     let mut ret = String::new();
-    let mut eval = num;
+    let eval = num;
     if eval == 0 {
         ret.push_str("A@");
-    } else if eval >= 1 && eval <= 10 {
+    } else if (1..=10).contains(&eval) {
         ret += &*(eval - 1).to_string();
     } else {
         let mut digits = Vec::new();
-        let mut value = eval as u32;
+        let mut value = eval;
         while value != 0 {
             let nibble = (value & 0xF) as u8;
             digits.push((b'A' + nibble) as char);
@@ -72,14 +72,14 @@ fn encode_byte(out: &mut String, byte: u8) {
     // - ?[0-9]: The set of [,/\:. \n\t'-].
     // - ?$XX: A fallback which maps nibbles.
 
-    if (byte >= 'a' as u8 && byte <= 'z' as u8)
-        || (byte >= 'A' as u8 && byte <= 'Z' as u8)
-        || (byte >= '0' as u8 && byte <= '9' as u8)
-        || byte == '_' as u8
-        || byte == '$' as u8
+    if byte.is_ascii_lowercase()
+        || byte.is_ascii_uppercase()
+        || byte.is_ascii_digit()
+        || byte == b'_'
+        || byte == b'$'
     {
         out.push(byte as char);
-    } else if (byte >= 0xC1 && byte <= 0xDA) || (byte >= 0xE1 && byte <= 0xFA) {
+    } else if (0xC1..=0xDA).contains(&byte) || (0xE1..=0xFA).contains(&byte) {
         out.push('?');
         out.push((byte & 0x7F) as char);
     } else {
@@ -90,8 +90,8 @@ fn encode_byte(out: &mut String, byte: u8) {
             // fallback, map nibbles
             None => {
                 out.push_str("?$");
-                out.push(('A' as u8 + ((byte >> 4) & 0xF)) as char);
-                out.push(('A' as u8 + (byte & 0xF)) as char);
+                out.push((b'A' + ((byte >> 4) & 0xF)) as char);
+                out.push((b'A' + (byte & 0xF)) as char);
             }
         }
     }
@@ -145,8 +145,8 @@ pub fn encode_narrow_string_literal(str: &str) -> String {
     // now, encode no more than the first 32 bytes
     let num_bytes_to_mangle = min(32, cstr.len());
 
-    for i in 0..num_bytes_to_mangle {
-        encode_byte(&mut ret, cstr[i]);
+    for item in cstr.iter().take(num_bytes_to_mangle) {
+        encode_byte(&mut ret, *item);
     }
 
     // then push an @

@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+#![allow(unused)]
+// laying down the foundations for labeling multiple/virtual inheritance RTTI objects
+// haven't implemented it yet
+
 use std::{
     cell::RefCell,
     collections::{btree_map::Entry, BTreeMap},
@@ -120,7 +125,7 @@ fn find_all_rtti_structs(
             // purposefully skipping the . at the start
             // additionally, since we don't know how long the full string is,
             // we're just gonna pass in ALL the data from this section, starting with the first "?" in the name
-            let type_str = cstr_slice_to_str(&data_section.data_range(td_addr + 9, 0)?)?;
+            let type_str = cstr_slice_to_str(data_section.data_range(td_addr + 9, 0)?)?;
 
             let new_rtti_class = RTTIClass {
                 name: type_str.to_string(),
@@ -213,7 +218,7 @@ fn find_all_rtti_structs(
                     }
                     Entry::Occupied(entry) => {
                         assert!(
-                            Rc::ptr_eq(entry.get(), &rtti_class),
+                            Rc::ptr_eq(entry.get(), rtti_class),
                             "CHD {:08X} already associated with a different RTTIClass {}!",
                             next_word,
                             rtti_class.borrow().name,
@@ -263,7 +268,7 @@ fn find_all_rtti_structs(
                         signature: u32::from_be_bytes(data[i - 12..i - 8].try_into()?),
                         offset: u32::from_be_bytes(data[i - 8..i - 4].try_into()?),
                         cd_offset: u32::from_be_bytes(data[i - 4..i].try_into()?),
-                        owner: Rc::downgrade(&rtti_class),
+                        owner: Rc::downgrade(rtti_class),
                         vftable_addr,
                         num_vftable_entries,
                     };
@@ -334,7 +339,7 @@ fn find_all_rtti_structs(
                     // example:
                     // Type Descriptor class name (. omitted): ?AVFilePath@@
                     // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
-                    name: format!("??_R3{}8", the_rtti_class.borrow().name[3..].to_string()),
+                    name: format!("??_R3{}8", &the_rtti_class.borrow().name[3..]),
                     address: *chd_exe_addr as u64,
                     section: Some(rdata_sec_idx),
                     size: 16,
@@ -361,7 +366,7 @@ fn find_all_rtti_structs(
                     // example:
                     // Type Descriptor class name (. omitted): ?AVFilePath@@
                     // Class Hierarchy Descriptor full symbol: ??_R2FilePath@@8
-                    name: format!("??_R2{}8", the_rtti_class.borrow().name[3..].to_string()),
+                    name: format!("??_R2{}8", &the_rtti_class.borrow().name[3..]),
                     address: base_class_array_addr as u64,
                     section: Some(rdata_sec_idx),
                     // there's a null word after the last BCD entry, hence the +1
@@ -376,7 +381,7 @@ fn find_all_rtti_structs(
             let bca_data = &rdata_section.data[bca_data_idx as usize
                 ..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
 
-            for (_, chunk) in bca_data.chunks_exact(4).enumerate() {
+            for chunk in bca_data.chunks_exact(4) {
                 let cur_bcd_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
                 let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
                     Entry::Vacant(entry) => {
@@ -406,7 +411,7 @@ fn find_all_rtti_structs(
                             p_disp: i32::from_be_bytes(bcd_data[12..16].try_into()?),
                             v_disp: i32::from_be_bytes(bcd_data[16..20].try_into()?),
                             attributes: u32::from_be_bytes(bcd_data[20..24].try_into()?),
-                            owner: Rc::downgrade(&class_for_bcd),
+                            owner: Rc::downgrade(class_for_bcd),
                         });
                         // label the BCD here
                         state
@@ -420,7 +425,7 @@ fn find_all_rtti_structs(
                                     encode_num(bcd_ptr.p_disp),
                                     encode_num(bcd_ptr.v_disp),
                                     encode_num(bcd_ptr.attributes as i32),
-                                    class_for_bcd.borrow().name[3..].to_string()
+                                    &class_for_bcd.borrow().name[3..]
                                 ),
                                 address: cur_bcd_addr as u64,
                                 section: Some(rdata_sec_idx),
@@ -473,11 +478,12 @@ fn compute_superclass_info(
 
     for rc in &rtti.discovered_classes {
         // get the underlying RTTIClass from the Rc
-        let mut c = rc.borrow_mut();
+        // make this mutable when you start modifying potential base class members
+        let c = rc.borrow_mut();
         if let Some(chd) = &c.class_hierarchy_descriptor {
             // do the superclass analysis
             // 0 COLs/vftables - still record info/mark anything down here? not sure yet
-            if c.complete_object_locators.len() == 0 {
+            if c.complete_object_locators.is_empty() {
                 log::debug!("0 COL RTTI Object {}", c.name);
             }
             // 1 COL/vftable = zero virtual inheritance, easiest case to deal with rn
@@ -490,7 +496,7 @@ fn compute_superclass_info(
                     .entry(SectionAddress::new(rdata_sec_idx, the_sole_col.addr))
                     .or_default()
                     .push(ObjSymbol {
-                        name: format!("??_R4{}6B@", c.name[3..].to_string()),
+                        name: format!("??_R4{}6B@", &c.name[3..]),
                         address: the_sole_col.addr as u64,
                         section: Some(rdata_sec_idx),
                         size: 20,
@@ -503,7 +509,7 @@ fn compute_superclass_info(
                     .entry(SectionAddress::new(rdata_sec_idx, the_sole_col.vftable_addr))
                     .or_default()
                     .push(ObjSymbol {
-                        name: format!("??_7{}6B@", c.name[3..].to_string()),
+                        name: format!("??_7{}6B@", &c.name[3..]),
                         address: the_sole_col.vftable_addr as u64,
                         section: Some(rdata_sec_idx),
                         size: (the_sole_col.num_vftable_entries * 4) as u64,

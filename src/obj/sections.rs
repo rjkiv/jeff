@@ -25,16 +25,14 @@ pub enum ObjSectionKind {
 pub struct ObjSection {
     pub name: String,
     pub kind: ObjSectionKind,
+    // these could all be u32s for an xex
     pub address: u64,
     pub size: u64,
     pub data: Vec<u8>,
     pub align: u64,
-    /// REL files reference the original ELF section indices
-    pub elf_index: SectionIndex,
     pub relocations: ObjRelocations,
     pub virtual_address: Option<u64>,
     pub file_offset: u64,
-    pub section_known: bool,
     pub splits: ObjSplits,
 }
 
@@ -69,17 +67,6 @@ impl ObjSections {
 
     pub fn get_mut(&mut self, index: SectionIndex) -> Option<&mut ObjSection> {
         self.sections.get_mut(index as usize)
-    }
-
-    pub fn get_elf_index(&self, elf_index: SectionIndex) -> Option<(SectionIndex, &ObjSection)> {
-        self.iter().find(|&(_, s)| s.elf_index == elf_index)
-    }
-
-    pub fn get_elf_index_mut(
-        &mut self,
-        elf_index: SectionIndex,
-    ) -> Option<(SectionIndex, &mut ObjSection)> {
-        self.iter_mut().find(|(_, s)| s.elf_index == elf_index)
     }
 
     pub fn at_address(&self, addr: u32) -> Result<(SectionIndex, &ObjSection)> {
@@ -230,19 +217,16 @@ impl ObjSection {
     pub fn rename(&mut self, name: String) -> Result<()> {
         self.kind = section_kind_for_section(&name)?;
         self.name = name;
-        self.section_known = true;
         Ok(())
     }
 }
 
 pub fn section_kind_for_section(section_name: &str) -> Result<ObjSectionKind> {
     Ok(match section_name {
-        ".init" | ".text" | ".dbgtext" | ".vmtext" => ObjSectionKind::Code,
-        ".ctors" | ".dtors" | ".rodata" | ".sdata2" | "extab" | "extabindex" | ".BINARY" => {
-            ObjSectionKind::ReadOnlyData
-        }
-        ".bss" | ".sbss" | ".sbss2" => ObjSectionKind::Bss,
-        ".data" | ".sdata" => ObjSectionKind::Data,
+        ".text" => ObjSectionKind::Code,
+        ".rdata" => ObjSectionKind::ReadOnlyData,
+        ".bss" => ObjSectionKind::Bss,
+        ".data" => ObjSectionKind::Data,
         name => bail!("Unknown section {name}"),
     })
 }

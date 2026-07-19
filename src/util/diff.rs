@@ -40,7 +40,7 @@ pub fn process_code(
     arch.process_code(
         symbol.address,
         orig_data,
-        section.elf_index as usize,
+        0, // section_index goes unused anyway
         &orig_relocs,
         &Default::default(),
         config,

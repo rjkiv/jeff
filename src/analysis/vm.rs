@@ -173,23 +173,6 @@ impl VM {
     #[inline]
     pub fn new() -> Box<Self> { Box::default() }
 
-    #[inline]
-    pub fn new_from_obj(obj: &ObjInfo) -> Box<Self> {
-        Self::new_with_base(obj.sda2_base, obj.sda_base)
-    }
-
-    #[inline]
-    pub fn new_with_base(sda2_base: Option<u32>, sda_base: Option<u32>) -> Box<Self> {
-        let mut vm = Self::new();
-        if let Some(value) = sda2_base {
-            vm.gpr[2].value = GprValue::Constant(value as u64);
-        }
-        if let Some(value) = sda_base {
-            vm.gpr[13].value = GprValue::Constant(value as u64);
-        }
-        vm
-    }
-
     /// When calling a function, only preserve SDA bases
     #[inline]
     pub fn clone_for_link(&self) -> Box<Self> {
