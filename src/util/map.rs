@@ -712,17 +712,6 @@ where
     Ok(sm.result)
 }
 
-const DEFAULT_REL_SECTIONS: &[&str] =
-    &[".init", ".text", ".ctors", ".dtors", ".rodata", ".data", ".bss"];
-
-fn normalize_section_name(name: &str) -> &str {
-    match name {
-        ".extabindex" => "extabindex",
-        ".extab" => "extab",
-        _ => name,
-    }
-}
-
 pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
     let sections = result
         .sections

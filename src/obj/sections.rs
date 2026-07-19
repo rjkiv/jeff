@@ -223,12 +223,10 @@ impl ObjSection {
 
 pub fn section_kind_for_section(section_name: &str) -> Result<ObjSectionKind> {
     Ok(match section_name {
-        ".init" | ".text" | ".dbgtext" | ".vmtext" => ObjSectionKind::Code,
-        ".ctors" | ".dtors" | ".rodata" | ".sdata2" | "extab" | "extabindex" | ".BINARY" => {
-            ObjSectionKind::ReadOnlyData
-        }
-        ".bss" | ".sbss" | ".sbss2" => ObjSectionKind::Bss,
-        ".data" | ".sdata" => ObjSectionKind::Data,
+        ".text" => ObjSectionKind::Code,
+        ".rdata" => ObjSectionKind::ReadOnlyData,
+        ".bss" => ObjSectionKind::Bss,
+        ".data" => ObjSectionKind::Data,
         name => bail!("Unknown section {name}"),
     })
 }

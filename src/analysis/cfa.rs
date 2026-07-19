@@ -116,7 +116,6 @@ impl FunctionInfo {
 
 #[derive(Debug, Default)]
 pub struct AnalyzerState {
-    pub sda_bases: Option<(u32, u32)>,
     pub functions: BTreeMap<SectionAddress, FunctionInfo>,
     pub jump_tables: BTreeMap<SectionAddress, u32>,
     pub known_symbols: BTreeMap<SectionAddress, Vec<ObjSymbol>>,

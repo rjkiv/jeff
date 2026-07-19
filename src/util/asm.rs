@@ -438,35 +438,7 @@ where
         write_symbol_name(w, &symbol.name)?;
         writeln!(w)?;
     }
-
-    if entry.kind == SymbolEntryKind::Start && section.name == "extab" {
-        writeln!(w, "/*")?;
-        match parse_extab(symbols, entry, section) {
-            Ok(s) => {
-                for line in s.trim_end().lines() {
-                    writeln!(w, " * {line}")?;
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to decode extab entry {}: {}", symbol.name, e);
-                writeln!(w, " * Failed to decode extab entry: {e}")?;
-            }
-        }
-        writeln!(w, " */")?;
-    }
     Ok(())
-}
-
-fn parse_extab(symbols: &[ObjSymbol], entry: &SymbolEntry, section: &ObjSection) -> Result<String> {
-    let symbol = &symbols[entry.index as usize];
-    let data = section.symbol_data(symbol)?;
-    let decoded = cwextab::decode_extab(data)?;
-    let function_names = section
-        .relocations
-        .range(symbol.address as u32..(symbol.address + symbol.size) as u32)
-        .map(|(_, reloc)| symbols[reloc.target_symbol as usize].name.clone())
-        .collect_vec();
-    decoded.to_string(function_names).ok_or_else(|| anyhow!("Failed to print extab entry"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1000,34 +972,21 @@ where
         ".data" | ".rodata" if subsection == 0 => {
             write!(w, "{}", section.name)?;
         }
-        ".text" | ".text$yc" | ".text$yd" | ".init" => {
+        ".text" | ".text$yc" | ".text$yd" => {
             write!(w, ".section {}", section.name)?;
             write!(w, ", \"ax\"")?;
         }
-        ".data" | ".sdata" => {
+        ".data" => {
             write!(w, ".section {}", section.name)?;
             write!(w, ", \"wa\"")?;
         }
-        ".rodata" | ".sdata2" | ".pdata" | ".rdata" | ".rdata$r" | ".xidata" => {
+        ".pdata" | ".rdata" | ".rdata$r" | ".xidata" => {
             write!(w, ".section {}", section.name)?;
             write!(w, ", \"a\"")?;
         }
-        ".bss" | ".sbss" => {
+        ".bss" => {
             write!(w, ".section {}", section.name)?;
             write!(w, ", \"wa\", @nobits")?;
-        }
-        ".sbss2" => {
-            write!(w, ".section {}", section.name)?;
-            write!(w, ", \"a\", @nobits")?;
-        }
-        ".ctors" | ".dtors" | ".ctors$10" | ".dtors$10" | ".dtors$15" | "extab" | "extabindex"
-        | ".BINARY" => {
-            write!(w, ".section {}", section.name)?;
-            write!(w, ", \"a\"")?;
-        }
-        ".comment" => {
-            write!(w, ".section {}", section.name)?;
-            write!(w, ", \"\"")?;
         }
         name => {
             log::warn!("Unknown section {name}");

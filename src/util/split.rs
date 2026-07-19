@@ -236,7 +236,7 @@ fn validate_splits(obj: &ObjInfo) -> Result<()> {
 fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
     let mut splits = obj.sections.all_splits().peekable();
     while let Some((section_index, section, addr, split)) = splits.next() {
-        if section.name == ".ctors" || section.name == ".dtors" || addr == split.end {
+        if addr == split.end {
             continue;
         }
 
@@ -299,10 +299,6 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
     // Add padding symbols for gaps between symbols
     let common_bss = obj.sections.common_bss_start();
     for (section_index, section) in obj.sections.iter() {
-        if section.name == ".ctors" || section.name == ".dtors" {
-            continue;
-        }
-
         let mut to_add = vec![];
         let mut iter = obj
             .symbols
@@ -525,8 +521,6 @@ fn split_pdata(obj: &mut ObjInfo) -> Result<()> {
 
 /// Perform any necessary adjustments to allow relinking.
 /// This includes:
-/// - Ensuring .ctors & .dtors entries are split with their associated function
-/// - Ensuring extab & extabindex entries are split with their associated function
 /// - Creating splits for gaps between existing splits
 /// - Resolving a new object link order
 #[instrument(level = "debug", skip(obj))]
@@ -536,36 +530,6 @@ pub fn update_splits(
     fill_gaps: bool,
     redo_pdata_splits: bool,
 ) -> Result<()> {
-    // // Create splits for extab and extabindex entries
-    // if let Some((section_index, section)) = obj.sections.by_name("extabindex")? {
-    //     if !section.data.is_empty() {
-    //         let start = SectionAddress::new(section_index, section.address as u32);
-    //         split_extabindex(obj, start)?;
-    //     }
-    // }
-
-    // // Create splits for .ctors entries
-    // if let Some((section_index, section)) = obj.sections.by_name(".ctors")? {
-    //     if !section.data.is_empty() {
-    //         let start = SectionAddress::new(section_index, section.address as u32);
-    //         let end = start + (section.size as u32 - 4);
-    //         split_ctors_dtors(obj, start, end)?;
-    //     }
-    // }
-
-    // // Create splits for .dtors entries
-    // if let Some((section_index, section)) = obj.sections.by_name(".dtors")? {
-    //     if !section.data.is_empty() {
-    //         let mut start = SectionAddress::new(section_index, section.address as u32);
-    //         let end = start + (section.size as u32 - 4);
-    //         if obj.kind == ObjKind::Executable {
-    //             // Skip __destroy_global_chain_reference
-    //             start += 4;
-    //         }
-    //         split_ctors_dtors(obj, start, end)?;
-    //     }
-    // }
-
     // Create splits for .pdata entries
     if redo_pdata_splits {
         split_pdata(obj)?;
@@ -624,11 +588,6 @@ fn resolve_link_order(obj: &ObjInfo) -> Result<Vec<ObjUnit>> {
 
     for (_section_index, section) in obj.sections.iter() {
         let mut iter = section.splits.iter().peekable();
-        if section.name == ".ctors" || section.name == ".dtors" {
-            // Skip __init_cpp_exceptions.o
-            let skipped = iter.next();
-            log::debug!("Skipping split {:?} (next: {:?})", skipped, iter.peek());
-        }
         while let (Some((a_addr, a)), Some(&(b_addr, b))) = (iter.next(), iter.peek()) {
             if !a.common && b.common {
                 // This marks the beginning of the common BSS section.
@@ -822,9 +781,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
             for (symbol_idx, symbol) in obj
                 .symbols
                 .for_section_range(section_index, current_address.address..=split_end.address)
-                .filter(|&(_, s)| {
-                    s.section == Some(section_index) && !is_linker_generated_label(&s.name)
-                })
+                .filter(|&(_, s)| s.section == Some(section_index))
             {
                 if symbol_idxs[symbol_idx as usize].is_some() {
                     continue; // should never happen?
@@ -900,7 +857,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
     for (obj_idx, out_obj) in objects.iter_mut().enumerate() {
         let symbol_idxs = &mut object_symbols[obj_idx];
         for (_section_index, section) in out_obj.sections.iter_mut() {
-            for (reloc_address, reloc) in section.relocations.iter_mut() {
+            for (_reloc_address, reloc) in section.relocations.iter_mut() {
                 match symbol_idxs[reloc.target_symbol as usize] {
                     Some(out_sym_idx) => {
                         reloc.target_symbol = out_sym_idx;
@@ -929,34 +886,6 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                             ..Default::default()
                         })?;
                         reloc.target_symbol = out_sym_idx;
-
-                        if section.name.as_str() == "extabindex" {
-                            let Some((target_addr, target_split)) =
-                                section.splits.for_address(target_sym.address as u32)
-                            else {
-                                bail!(
-                                    "Bad extabindex relocation @ {:#010X}",
-                                    reloc_address as u64 + section.virtual_address.unwrap_or(0)
-                                );
-                            };
-                            let target_section = &obj.sections.at_address(target_addr)?.1.name;
-                            log::error!(
-                                "Bad extabindex relocation @ {:#010X}\n\
-                                \tSource object: {}:{:#010X} ({})\n\
-                                \tTarget object: {}:{:#010X} ({})\n\
-                                \tTarget symbol: {:#010X} ({})\n\
-                                This will cause the linker to crash.\n",
-                                reloc_address as u64 + section.virtual_address.unwrap_or(0),
-                                section.name,
-                                section.virtual_address.unwrap_or(0),
-                                out_obj.name,
-                                target_section,
-                                target_addr,
-                                target_split.unit,
-                                target_sym.address,
-                                target_sym.demangled_name.as_deref().unwrap_or(&target_sym.name),
-                            );
-                        }
                     }
                 }
             }
@@ -978,101 +907,15 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
         }
     }
 
-    // Extern linker generated symbols
-    for obj in &mut objects {
-        let mut replace_symbols = vec![];
-        for (symbol_idx, symbol) in obj.symbols.iter() {
-            if is_linker_generated_label(&symbol.name) && symbol.section.is_some() {
-                log::debug!("Externing {:?} in {}", symbol, obj.name);
-                replace_symbols.push((symbol_idx, ObjSymbol {
-                    name: symbol.name.clone(),
-                    demangled_name: symbol.demangled_name.clone(),
-                    ..Default::default()
-                }));
-            }
-        }
-        for (symbol_idx, symbol) in replace_symbols {
-            obj.symbols.replace(symbol_idx, symbol)?;
-        }
-    }
-
     Ok(objects)
 }
 
-/// mwld doesn't preserve the original section alignment values
+// TODO: verify this logic still lines up for MSVC on X360
 pub fn default_section_align(section: &ObjSection) -> u64 {
     match section.kind {
         ObjSectionKind::Code => 4,
-        _ => match section.name.as_str() {
-            ".ctors" | ".dtors" | "extab" | "extabindex" => 4,
-            ".sbss" => 8, // ?
-            _ => 8,
-        },
+        _ => 8,
     }
-}
-
-/// Linker-generated symbols to extern
-#[inline]
-pub fn is_linker_generated_label(name: &str) -> bool {
-    matches!(
-        name,
-        "_ctors"
-            | "_dtors"
-            | "_f_init"
-            | "_f_init_rom"
-            | "_e_init"
-            | "_fextab"
-            | "_fextab_rom"
-            | "_eextab"
-            | "_fextabindex"
-            | "_fextabindex_rom"
-            | "_eextabindex"
-            | "_f_text"
-            | "_f_text_rom"
-            | "_e_text"
-            | "_f_ctors"
-            | "_f_ctors_rom"
-            | "_e_ctors"
-            | "_f_dtors"
-            | "_f_dtors_rom"
-            | "_e_dtors"
-            | "_f_rodata"
-            | "_f_rodata_rom"
-            | "_e_rodata"
-            | "_f_data"
-            | "_f_data_rom"
-            | "_e_data"
-            | "_f_sdata"
-            | "_f_sdata_rom"
-            | "_e_sdata"
-            | "_f_sbss"
-            | "_f_sbss_rom"
-            | "_e_sbss"
-            | "_f_sdata2"
-            | "_f_sdata2_rom"
-            | "_e_sdata2"
-            | "_f_sbss2"
-            | "_f_sbss2_rom"
-            | "_e_sbss2"
-            | "_f_bss"
-            | "_f_bss_rom"
-            | "_e_bss"
-            | "_f_stack"
-            | "_f_stack_rom"
-            | "_e_stack"
-            | "_stack_addr"
-            | "_stack_end"
-            | "_db_stack_addr"
-            | "_db_stack_end"
-            | "_heap_addr"
-            | "_heap_end"
-            | "_nbfunctions"
-            | "SIZEOF_HEADERS"
-            | "_SDA_BASE_"
-            | "_SDA2_BASE_"
-            | "_ABS_SDA_BASE_"
-            | "_ABS_SDA2_BASE_"
-    )
 }
 
 /// Linker generated objects to strip entirely
@@ -1090,38 +933,9 @@ pub fn end_for_section(obj: &ObjInfo, section_index: SectionIndex) -> Result<Sec
         .sections
         .get(section_index)
         .ok_or_else(|| anyhow!("Invalid section index: {}", section_index))?;
-    let mut section_end = (section.address + section.size) as u32;
+    let section_end = (section.address + section.size) as u32;
     if section.data.is_empty() {
         return Ok(SectionAddress::new(section_index, section_end));
-    }
-    // .ctors and .dtors end with a linker-generated null pointer,
-    // adjust section size appropriately
-    if matches!(section.name.as_str(), ".ctors" | ".dtors")
-        && section.data[section.data.len() - 4..] == [0u8; 4]
-    {
-        section_end -= 4;
-    }
-    loop {
-        let last_symbol =
-            obj.symbols.for_section_range(section_index, ..section_end).rfind(|(_, s)| {
-                s.kind == ObjSymbolKind::Object
-                    && s.size_known
-                    && s.size > 0
-                    && !s.flags.is_stripped()
-            });
-        match last_symbol {
-            Some((_, symbol)) if is_linker_generated_object(&symbol.name) => {
-                log::debug!(
-                    "Found {}, adjusting section {} end {:#010X} -> {:#010X}",
-                    section.name,
-                    symbol.name,
-                    section_end,
-                    symbol.address
-                );
-                section_end = symbol.address as u32;
-            }
-            _ => break,
-        }
     }
     Ok(SectionAddress::new(section_index, section_end))
 }

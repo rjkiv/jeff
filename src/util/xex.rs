@@ -904,7 +904,6 @@ pub fn process_xex(path: &Utf8NativePathBuf) -> Result<ObjInfo> {
             size: section.size(),
             data: section_data,
             align: section.align(),
-            // everything below this line doesn't really matter for the purposes of an xex
             relocations: Default::default(),
             virtual_address: None, // Loaded from section symbol
             file_offset: section.file_range().map(|(v, _)| v).unwrap_or_default(),

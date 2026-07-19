@@ -158,9 +158,6 @@ pub struct ModuleConfig {
     pub block_relocations: Vec<BlockRelocationConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub add_relocations: Vec<AddRelocationConfig>,
-    /// Process exception tables and zero out uninitialized data.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub clean_extab: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
