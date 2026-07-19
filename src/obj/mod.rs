@@ -28,7 +28,7 @@ pub enum ObjKind {
     /// Full object
     Executable,
     /// Patch for a full executable
-    ExecutablePatch,
+    ExecutablePatch, // it's a surprise tool that will help us later
     /// Relocatable object
     Relocatable,
 }
@@ -52,8 +52,13 @@ pub struct ObjInfo {
     // The entry point of the executable
     pub entry: Option<u64>,
 
+    // Known functions and their possibly known sizes,
+    // obtained from pdata/xidata/RTTI.
+    // Populated before CFA begins, and passed to CFA for more context.
+    pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
+
     // Compiler generated info
-    // pdata_funcs
+    pub pdata_funcs: Vec<SectionAddress>, // Functions that have an entry in .pdata.
     // exception_datas
     // exception_records
     // Option<u32> exception_handler_addr
@@ -62,10 +67,6 @@ pub struct ObjInfo {
     pub link_order: Vec<ObjUnit>,
     pub blocked_relocation_sources: AddressRanges,
     pub blocked_relocation_targets: AddressRanges,
-
-    // From .ctors, .dtors and extab
-    pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
-    pub pdata_funcs: Vec<SectionAddress>,
 }
 
 impl ObjInfo {
