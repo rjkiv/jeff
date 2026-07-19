@@ -767,7 +767,7 @@ fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
     let mut num_discovered_funcs = 0;
     let data = &pdata_section.data;
-    for (_, chunk) in data.chunks_exact(8).enumerate() {
+    for chunk in data.chunks_exact(8) {
         let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
         // if we encounter 0's, that's the end of usable pdata entries
         if start_addr == 0 {

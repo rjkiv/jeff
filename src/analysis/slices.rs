@@ -509,7 +509,7 @@ impl FunctionSlices {
         }
 
         let mut executor = Executor::new(obj);
-        executor.push(start, vm.unwrap_or_else(|| VM::new()), false);
+        executor.push(start, vm.unwrap_or_default(), false);
         let result = executor.run(obj, |data| {
             self.instruction_callback(data, obj, function_start, function_end, known_functions)
         })?;
@@ -520,7 +520,7 @@ impl FunctionSlices {
         // Visit unreachable blocks
         while let Some((first, _)) = self.first_disconnected_block() {
             let vm = self.possible_blocks.remove(&first.start);
-            executor.push(first.end, vm.unwrap_or_else(|| VM::new()), true);
+            executor.push(first.end, vm.unwrap_or_default(), true);
 
             match executor.run(obj, |data| {
                 self.instruction_callback(data, obj, function_start, function_end, known_functions)

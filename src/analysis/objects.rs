@@ -162,7 +162,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                             idx: symbol_idx,
                             kind: ObjDataKind::String,
                             size,
-                            mangled_name: Some(encode_narrow_string_literal(&*str)),
+                            mangled_name: Some(encode_narrow_string_literal(&str)),
                         });
                     }
                 }
@@ -176,7 +176,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                             idx: symbol_idx,
                             kind: ObjDataKind::String16,
                             size,
-                            mangled_name: Some(encode_wide_string_literal(&*str)),
+                            mangled_name: Some(encode_wide_string_literal(&str)),
                         });
                     }
                 }
