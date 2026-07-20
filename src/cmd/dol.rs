@@ -134,6 +134,8 @@ pub struct ModuleConfig {
     pub name: Option<String>,
     #[serde(with = "unix_path_serde")]
     pub object: Utf8UnixPathBuf,
+    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    pub title_update: Option<Utf8UnixPathBuf>,
     #[serde(skip_serializing_if = "is_default")]
     pub hash: Option<String>,
     #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]

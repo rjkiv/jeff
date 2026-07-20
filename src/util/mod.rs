@@ -5,6 +5,7 @@ pub mod config;
 pub mod crypto;
 pub mod dep;
 pub mod diff;
+pub mod exe;
 pub mod file;
 pub mod map;
 pub mod map_exe;

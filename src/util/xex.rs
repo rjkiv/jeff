@@ -603,7 +603,7 @@ impl XexInfo {
         })
     }
 
-    pub fn try_get_exe(
+    fn try_get_exe(
         exe_data: &[u8],
         session_key: &[u8; 16],
         bff: &BaseFileFormat,
@@ -746,6 +746,10 @@ impl XexInfo {
             }
         }
         Ok(pe_file_adjusted)
+    }
+
+    pub fn extract_exe(&self) -> Result<(String, &Vec<u8>)> {
+        Ok((self.opt_header_data.original_name.clone(), &self.exe_bytes))
     }
 }
 

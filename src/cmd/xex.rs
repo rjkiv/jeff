@@ -40,6 +40,7 @@ use crate::{
         asm::write_asm,
         config::{apply_splits_file, apply_symbols_file, write_splits_file, write_symbols_file},
         dep::DepFile,
+        exe::InputtedExecutable,
         file::{buf_writer, FileReadInfo},
         map_exe::{apply_map_file_exe, process_map_exe},
         path::native_path,
@@ -192,15 +193,6 @@ fn split(args: SplitArgs) -> Result<()> {
 
     // Create out dirs
     DirBuilder::new().recursive(true).create(&args.out_dir)?;
-
-    // extract and write exe (only if .xex - if already .exe there is no need)
-    if is_xex_file(&config.base.object.with_encoding())? {
-        let (exe_name, exe_bytes) = extract_exe(&config.base.object.with_encoding())?;
-        let exe_path: Utf8NativePathBuf =
-            config.base.object.with_encoding().parent().unwrap().join(&exe_name);
-        info!("Extracting exe to {exe_path}");
-        std::fs::write(exe_path, exe_bytes)?;
-    }
 
     info!("Rebuilding relocations and splitting");
     // dol split_write_obj
@@ -467,11 +459,24 @@ fn write_coff_if_changed(path: &Utf8NativePath, contents: &[u8]) -> Result<()> {
 // load_analyze_dol but for xexes
 fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     let object_path: Utf8NativePathBuf = config.base.object.with_encoding();
-    let mut obj = if is_xex_file(&object_path)? {
-        process_xex(&object_path)?
-    } else {
-        process_pe(&object_path)?
-    };
+
+    let mut input = InputtedExecutable::new(&object_path)?;
+    let mut obj = input.process()?;
+
+    // extract and write exe (only if .xex - if already .exe there is no need)
+    if input.is_xex() {
+        let (exe_name, exe_bytes) = input.extract();
+        let exe_path: Utf8NativePathBuf =
+            object_path.parent().expect("No parent directory to extract to!").join(&exe_name);
+        info!("Extracting exe to {exe_path}");
+        fs::write(exe_path, exe_bytes)?;
+    }
+
+    // let mut obj = if is_xex_file(&object_path)? {
+    //     process_xex(&object_path)?
+    // } else {
+    //     process_pe(&object_path)?
+    // };
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
@@ -587,18 +592,14 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 // https://github.com/emoose/idaxex/blob/5b7de7b964e67fc049db0c61e4cba5d13ee69cec/formats/xex.hpp
 
 fn extract(args: ExtractArgs) -> Result<()> {
-    if is_xex_file(&args.xex_file)? {
-        let xex_ext = args.xex_file.extension();
-        ensure!(
-            xex_ext.is_some() && xex_ext.unwrap() == "xex",
-            "Need to provide a valid input xex!"
-        );
-        let (exe_name, exe_bytes) = extract_exe(&args.xex_file)?;
-        let xex_dir = args.xex_file.parent().unwrap();
+    let exe = InputtedExecutable::new(&args.xex_file)?;
+    if exe.is_xex() {
+        let (exe_name, exe_bytes) = exe.extract();
+        let xex_dir = args.xex_file.parent().expect("No parent directory to extract to!");
         let out_path = xex_dir.join(exe_name);
-        std::fs::write(out_path, exe_bytes)?;
+        fs::write(out_path, exe_bytes)?;
     } else {
-        println!("File is already a PE executable, no extraction needed.");
+        log::info!("File is already a PE executable, no extraction needed.");
     }
     Ok(())
 }
@@ -608,14 +609,14 @@ fn extract(args: ExtractArgs) -> Result<()> {
 fn disasm(args: DisasmArgs) -> Result<()> {
     log::info!("Loading {}", args.xex_file);
 
-    // extract_exe(&args.xex_file);
-
     // step 1. process xex (or pe), and return an ObjInfo
-    let mut obj = if is_xex_file(&args.xex_file)? {
-        process_xex(&args.xex_file)?
-    } else {
-        process_pe(&args.xex_file)?
-    };
+    let mut exe = InputtedExecutable::new(&args.xex_file)?;
+    let mut obj = exe.process()?;
+    // let mut obj = if is_xex_file(&args.xex_file)? {
+    //     process_xex(&args.xex_file)?
+    // } else {
+    //     process_pe(&args.xex_file)?
+    // };
 
     let mut state = AnalyzerState::default();
 
