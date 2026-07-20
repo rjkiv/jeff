@@ -24,6 +24,7 @@ enum ExeType {
 }
 
 // an executable binary passed in from a config.yml
+// this class exists to allow the user the option to enter either an xex or an X360 compatible exe in their yml
 pub struct InputtedExecutable {
     exe_name: String,
     exe_bytes: Vec<u8>,

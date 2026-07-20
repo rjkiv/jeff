@@ -6,15 +6,15 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use anyhow::{bail, ensure, Context, Ok, Result};
+use anyhow::{bail, Context, Ok, Result};
 use argp::FromArgs;
 use chrono::FixedOffset;
 use itertools::Itertools;
 use object::{
     read::pe::PeFile32,
     write::{Object, Relocation, SectionId, Symbol, SymbolId, SymbolSection},
-    Architecture, BinaryFormat, Endianness, Object as ReadObject, RelocationFlags, SectionKind,
-    SymbolFlags, SymbolKind, SymbolScope,
+    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
+    SymbolScope,
 };
 use tracing::{debug, info};
 use typed_path::{Utf8NativePath, Utf8NativePathBuf};
@@ -46,8 +46,8 @@ use crate::{
         path::native_path,
         split::{split_obj, update_splits},
         xex::{
-            coff_path_for_unit, extract_exe, is_xex_file, list_exe_sections, process_pe,
-            process_xex, write_coff, XexCompression, XexEncryption, XexInfo,
+            coff_path_for_unit, list_exe_sections, write_coff, XexCompression, XexEncryption,
+            XexInfo,
         },
         xpdb::try_parse_pdb,
     },
@@ -309,110 +309,6 @@ fn split_write_obj_exe(
         write_coff_if_changed(&out_path, &out_obj)?;
     }
 
-    // for coff_obj in &split_objs {
-    //     let root_name = coff_obj.name.split('.').next().unwrap();
-    //     // println!("Writing {}.obj", root_name);
-    //
-    //     // for each obj:
-    //     let mut cur_coff = Object::new(BinaryFormat::Coff, Architecture::PowerPc, Endianness::Big);
-    //     let mut sect_map: BTreeMap<SectionIndex, SectionId> = Default::default();
-    //     let mut sym_map: BTreeMap<SymbolIndex, SymbolId> = Default::default();
-    //
-    //     // insert the sections
-    //     for (idx, sect) in coff_obj.sections.iter() {
-    //         // println!("Section: {}", sect.name);
-    //         let sect_id = cur_coff.add_section(Vec::new(), sect.name.clone().into_bytes(), match sect.kind {
-    //             ObjSectionKind::Code => SectionKind::Text,
-    //             ObjSectionKind::Data => SectionKind::Data,
-    //             ObjSectionKind::ReadOnlyData => SectionKind::ReadOnlyData,
-    //             ObjSectionKind::Bss => SectionKind::UninitializedData,
-    //         });
-    //         if sect.kind != ObjSectionKind::Bss {
-    //             cur_coff.append_section_data(sect_id, &sect.data, sect.align);
-    //         }
-    //         sect_map.insert(idx, sect_id);
-    //     }
-    //
-    //     // insert the symbols
-    //     for (idx, sym) in coff_obj.symbols.iter(){
-    //         let sym_id = cur_coff.add_symbol(Symbol {
-    //             name: sym.name.clone().into_bytes(),
-    //             value: match sym.section {
-    //                 Some(idx) => match coff_obj.sections.get(idx) {
-    //                     Some(sect) => sym.address - sect.address,
-    //                     None => bail!("Could not find section for symbol {}!", sym.name),
-    //                 },
-    //                 None => 0,
-    //             },
-    //             size: 0,
-    //             kind: match sym.kind {
-    //                 ObjSymbolKind::Function => SymbolKind::Text,
-    //                 ObjSymbolKind::Object => SymbolKind::Data,
-    //                 ObjSymbolKind::Section => SymbolKind::Section,
-    //                 ObjSymbolKind::Unknown => SymbolKind::Label,
-    //             },
-    //             scope: match sym.flags.scope() {
-    //                 ObjSymbolScope::Local => SymbolScope::Compilation,
-    //                 _ => SymbolScope::Linkage,
-    //                 // ObjSymbolScope::Global => SymbolScope::Linkage,
-    //                 // ObjSymbolScope::Weak => SymbolScope::Linkage, // verify this
-    //                 // ObjSymbolScope::Unknown => SymbolScope::Unknown,
-    //             },
-    //             weak: false, // sym.flags.scope() == ObjSymbolScope::Weak,
-    //             section: match sym.section {
-    //                 Some(idx) => SymbolSection::Section(sect_map.get(&idx).unwrap().clone()),
-    //                 None => SymbolSection::Undefined,
-    //             },
-    //             flags: SymbolFlags::None,
-    //         });
-    //         sym_map.insert(idx, sym_id);
-    //     }
-    //
-    //     // insert the relocs
-    //     for (sect_idx, sect) in coff_obj.sections.iter() {
-    //         for (addr, reloc) in sect.relocations.iter() {
-    //             let sym_id = match sym_map.get(&reloc.target_symbol) {
-    //                 Some(id) => id,
-    //                 None => bail!("Could not find symbol ID for index {}", reloc.target_symbol),
-    //             };
-    //             cur_coff.add_relocation(sect_map.get(&sect_idx).unwrap().clone(), Relocation {
-    //                 offset: addr as u64,
-    //                 symbol: sym_id.clone(),
-    //                 addend: 0,
-    //                 flags: RelocationFlags::Coff { typ: reloc.to_coff() }
-    //             })?;
-    //         }
-    //     }
-    //
-    //     // finally, write the COFF
-    //     let coff_data = cur_coff.write()?;
-    //
-    //     // out_config.units.push(OutputUnit {
-    //     //     object: out_path.with_unix_encoding(),
-    //     //     name: unit.name.clone(),
-    //     //     autogenerated: unit.autogenerated,
-    //     //     code_size: split_obj.code_size(),
-    //     //     data_size: split_obj.data_size(),
-    //     // });
-    //     // if let Some(parent) = out_path.parent() {
-    //     //     DirBuilder::new().recursive(true).create(parent)?;
-    //     // }
-    //
-    //     // create any necessary folders
-    //     let mut full_path = obj_dir.clone();
-    //     full_path.push(format!("{}.obj", root_name));
-    //     if let Some(parent) = full_path.parent() {
-    //         std::fs::create_dir_all(parent)?;
-    //     }
-    //
-    //     // write the file
-    //     let file = File::create(&full_path)?;
-    //     let mut writer = BufWriter::new(file);
-    //     writer.write_all(&coff_data)?;
-    //     writer.flush()?;
-    //     // call write_if_changed here?
-    // }
-
     if config.write_asm {
         debug!("Writing disassembly");
         let asm_dir = out_dir.join("asm");
@@ -609,15 +505,9 @@ fn extract(args: ExtractArgs) -> Result<()> {
 fn disasm(args: DisasmArgs) -> Result<()> {
     log::info!("Loading {}", args.xex_file);
 
-    // step 1. process xex (or pe), and return an ObjInfo
+    // step 1. process executable, and return an ObjInfo
     let mut exe = InputtedExecutable::new(&args.xex_file)?;
     let mut obj = exe.process()?;
-    // let mut obj = if is_xex_file(&args.xex_file)? {
-    //     process_xex(&args.xex_file)?
-    // } else {
-    //     process_pe(&args.xex_file)?
-    // };
-
     let mut state = AnalyzerState::default();
 
     // step 2. find common functions (save/restore reg funcs, XAPI calls)
@@ -771,66 +661,48 @@ fn pdb(args: PdbArgs) -> Result<()> {
 }
 
 fn info(args: InfoArgs) -> Result<()> {
-    if is_xex_file(&args.input)? {
-        let xex = XexInfo::from_file(&args.input)?;
-        println!("Jeff: Retrieving Xex info...");
-        println!("shoutouts go to xorloser for the original XexTool!\n");
+    let xex = XexInfo::from_file(&args.input)?;
+    println!("Jeff: Retrieving Xex info...");
+    println!("shoutouts go to xorloser for the original XexTool!\n");
 
-        println!("Xex Info:");
-        println!("  {}", if xex.is_dev_kit { "Devkit" } else { "Retail" });
-        let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
+    println!("Xex Info:");
+    println!("  {}", if xex.is_dev_kit { "Devkit" } else { "Retail" });
+    let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
+    println!(
+        "  {}",
+        if bff.compression == XexCompression::Compressed { "Compressed" } else { "Uncompressed" }
+    );
+    println!("  {}", if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" });
+    println!();
+
+    println!("Basefile Info:");
+    println!("  Original PE Name: {}", xex.opt_header_data.original_name);
+    println!("  Load address: 0x{:08X}", xex.opt_header_data.image_base);
+    println!("  Entry point: 0x{:08X}", xex.opt_header_data.entry_point);
+    print!("  File time: 0x{:08X} - ", xex.opt_header_data.file_timestamp);
+    let dur = std::time::Duration::from_secs(xex.opt_header_data.file_timestamp as u64);
+    let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
+    let pst = FixedOffset::west_opt(8 * 3600).unwrap();
+    let dt_pst = datetime.with_timezone(&pst);
+    println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
+    println!();
+
+    println!("Static Libraries:");
+    for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
         println!(
-            "  {}",
-            if bff.compression == XexCompression::Compressed {
-                "Compressed"
-            } else {
-                "Uncompressed"
-            }
+            "  {}. {}: v{}.{}.{}.{}",
+            idx + 1,
+            lib.name,
+            lib.major,
+            lib.minor,
+            lib.build,
+            lib.qfe
         );
-        println!(
-            "  {}",
-            if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" }
-        );
-        println!();
-
-        println!("Basefile Info:");
-        println!("  Original PE Name: {}", xex.opt_header_data.original_name);
-        println!("  Load address: 0x{:08X}", xex.opt_header_data.image_base);
-        println!("  Entry point: 0x{:08X}", xex.opt_header_data.entry_point);
-        print!("  File time: 0x{:08X} - ", xex.opt_header_data.file_timestamp);
-        let dur = std::time::Duration::from_secs(xex.opt_header_data.file_timestamp as u64);
-        let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
-        let pst = FixedOffset::west_opt(8 * 3600).unwrap();
-        let dt_pst = datetime.with_timezone(&pst);
-        println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
-        println!();
-
-        println!("Static Libraries:");
-        for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
-            println!(
-                "  {}. {}: v{}.{}.{}.{}",
-                idx + 1,
-                lib.name,
-                lib.major,
-                lib.minor,
-                lib.build,
-                lib.qfe
-            );
-        }
-        println!();
-
-        // TODO: import libraries
-        list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));
-    } else {
-        println!("Jeff: Retrieving PE info...\n");
-        let pe_bytes = fs::read(&args.input)?;
-        let pe_file = PeFile32::parse(&*pe_bytes).expect("Failed to parse PE file");
-        println!("PE Info:");
-        println!("  File: {}", args.input);
-        println!("  Entry point: 0x{:08X}", pe_file.entry());
-        println!();
-        list_exe_sections(&pe_file);
     }
+    println!();
+
+    // TODO: import libraries
+    list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));
 
     Ok(())
 }
