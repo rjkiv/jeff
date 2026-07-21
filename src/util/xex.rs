@@ -537,8 +537,8 @@ pub struct XexInfo {
 }
 
 impl XexInfo {
-    pub fn from_file(path: &Utf8NativePathBuf) -> Result<Self> {
-        let std_path = path.to_path_buf();
+    pub fn from_file(base_xex_path: &Utf8NativePathBuf) -> Result<Self> {
+        let std_path = base_xex_path.to_path_buf();
         let data = fs::read(std_path).expect("Failed to read file");
 
         let xex_header = XexHeader::parse(&data)?;

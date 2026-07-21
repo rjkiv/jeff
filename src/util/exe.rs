@@ -33,16 +33,17 @@ pub struct InputtedExecutable {
 }
 
 impl InputtedExecutable {
-    pub fn new(path: &Utf8NativePathBuf) -> Result<Self> {
+    // TODO: add an Option<&Utf8NativePathBuf> representing an xexp path
+    pub fn new(base_path: &Utf8NativePathBuf) -> Result<Self> {
         let mut magic_bytes = [0u8; 4];
         {
-            let mut file = File::open(path)?;
+            let mut file = File::open(base_path)?;
             ensure!(file.metadata()?.len() >= 4, "File too small to be a valid executable");
             file.read_exact(&mut magic_bytes)?;
         }
         // if xex, call XexInfo::from_file
         if magic_bytes == *b"XEX2" {
-            let xex = XexInfo::from_file(path)?;
+            let xex = XexInfo::from_file(base_path)?;
             Ok(Self {
                 exe_name: xex.opt_header_data.original_name,
                 exe_bytes: xex.exe_bytes,
@@ -53,8 +54,8 @@ impl InputtedExecutable {
         // if exe, just pass in name/bytes and that's that
         else if magic_bytes.starts_with(b"MZ") {
             Ok(Self {
-                exe_name: path.file_name().expect("Missing executable name!").to_string(),
-                exe_bytes: fs::read(path)?,
+                exe_name: base_path.file_name().expect("Missing executable name!").to_string(),
+                exe_bytes: fs::read(base_path)?,
                 xex_import_libs: None,
                 original_type: ExeType::Exe,
             })
