@@ -356,7 +356,7 @@ fn write_coff_if_changed(path: &Utf8NativePath, contents: &[u8]) -> Result<()> {
 fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     let object_path: Utf8NativePathBuf = config.base.object.with_encoding();
 
-    let mut input = InputtedExecutable::new(&object_path)?;
+    let mut input = InputtedExecutable::new(&object_path, None)?;
     let mut obj = input.process()?;
 
     // extract and write exe (only if .xex - if already .exe there is no need)
@@ -488,7 +488,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 // https://github.com/emoose/idaxex/blob/5b7de7b964e67fc049db0c61e4cba5d13ee69cec/formats/xex.hpp
 
 fn extract(args: ExtractArgs) -> Result<()> {
-    let exe = InputtedExecutable::new(&args.xex_file)?;
+    let exe = InputtedExecutable::new(&args.xex_file, None)?;
     if exe.is_xex() {
         let (exe_name, exe_bytes) = exe.extract();
         let xex_dir = args.xex_file.parent().expect("No parent directory to extract to!");
@@ -506,7 +506,7 @@ fn disasm(args: DisasmArgs) -> Result<()> {
     log::info!("Loading {}", args.xex_file);
 
     // step 1. process executable, and return an ObjInfo
-    let mut exe = InputtedExecutable::new(&args.xex_file)?;
+    let mut exe = InputtedExecutable::new(&args.xex_file, None)?;
     let mut obj = exe.process()?;
     let mut state = AnalyzerState::default();
 

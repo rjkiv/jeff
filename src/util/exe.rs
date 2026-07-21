@@ -33,8 +33,11 @@ pub struct InputtedExecutable {
 }
 
 impl InputtedExecutable {
-    // TODO: add an Option<&Utf8NativePathBuf> representing an xexp path
-    pub fn new(base_path: &Utf8NativePathBuf) -> Result<Self> {
+    pub fn new(
+        base_path: &Utf8NativePathBuf,
+        // path to title update xexp, currently unimplemented
+        _patch_path: Option<&Utf8NativePathBuf>,
+    ) -> Result<Self> {
         let mut magic_bytes = [0u8; 4];
         {
             let mut file = File::open(base_path)?;
