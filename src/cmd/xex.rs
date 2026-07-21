@@ -661,7 +661,7 @@ fn pdb(args: PdbArgs) -> Result<()> {
 }
 
 fn info(args: InfoArgs) -> Result<()> {
-    let xex = XexInfo::from_file(&args.input)?;
+    let xex = XexInfo::from_files(&args.input, None)?;
     println!("Jeff: Retrieving Xex info...");
     println!("shoutouts go to xorloser for the original XexTool!\n");
 

@@ -36,7 +36,7 @@ impl InputtedExecutable {
     pub fn new(
         base_path: &Utf8NativePathBuf,
         // path to title update xexp, currently unimplemented
-        _patch_path: Option<&Utf8NativePathBuf>,
+        patch_path: Option<&Utf8NativePathBuf>,
     ) -> Result<Self> {
         let mut magic_bytes = [0u8; 4];
         {
@@ -46,7 +46,7 @@ impl InputtedExecutable {
         }
         // if xex, call XexInfo::from_file
         if magic_bytes == *b"XEX2" {
-            let xex = XexInfo::from_file(base_path)?;
+            let xex = XexInfo::from_files(base_path, patch_path)?;
             Ok(Self {
                 exe_name: xex.opt_header_data.original_name,
                 exe_bytes: xex.exe_bytes,

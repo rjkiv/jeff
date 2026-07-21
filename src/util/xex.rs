@@ -498,31 +498,6 @@ const DEVKIT_KEY: [u8; 16] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-pub struct XexSessionKeys {
-    pub session_key_retail: [u8; 16],
-    pub session_key_devkit: [u8; 16],
-}
-
-impl XexSessionKeys {
-    fn derive_keys(file_key: &[u8; 16]) -> Result<Self> {
-        let retail_derived_key: [u8; 16] =
-            decrypt_aes128_cbc_no_padding(&RETAIL_KEY, file_key)?.try_into().unwrap();
-        let devkit_derived_key: [u8; 16] =
-            decrypt_aes128_cbc_no_padding(&DEVKIT_KEY, file_key)?.try_into().unwrap();
-        // print!("Retail session key: ");
-        // for k in retail_derived_key {
-        //     print!("{:02X} ", k);
-        // }
-        // print!("\n");
-        // print!("Devkit session key: ");
-        // for k in devkit_derived_key {
-        //     print!("{:02X} ", k);
-        // }
-        // print!("\n");
-        Ok(Self { session_key_retail: retail_derived_key, session_key_devkit: devkit_derived_key })
-    }
-}
-
 // ----------------------------------------------------------------------
 // XEXINFO
 // ----------------------------------------------------------------------
@@ -537,52 +512,92 @@ pub struct XexInfo {
 }
 
 impl XexInfo {
-    pub fn from_file(base_xex_path: &Utf8NativePathBuf) -> Result<Self> {
-        let std_path = base_xex_path.to_path_buf();
-        let data = fs::read(std_path).expect("Failed to read file");
+    pub fn from_files(
+        base_path: &Utf8NativePathBuf,
+        patch_path: Option<&Utf8NativePathBuf>,
+    ) -> Result<Self> {
+        // parse the base xex first
+        let base_data = fs::read(base_path.to_path_buf()).expect("Failed to read file");
 
-        let xex_header = XexHeader::parse(&data)?;
-        let xex_optional_header_data = XexOptionalHeaderData::parse(&data)?;
-        let xex_loader_info = XexLoaderInfo::parse(&data, xex_header.security_info_offset)?;
-        let xex_session_keys = XexSessionKeys::derive_keys(&xex_loader_info.file_key)?;
+        let xex_header = XexHeader::parse(&base_data)?;
+        assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
+        let xex_optional_header_data = XexOptionalHeaderData::parse(&base_data)?;
+        let xex_loader_info = XexLoaderInfo::parse(&base_data, xex_header.security_info_offset)?;
+
+        let retail_key: [u8; 16] =
+            decrypt_aes128_cbc_no_padding(&RETAIL_KEY, &xex_loader_info.file_key)?
+                .try_into()
+                .expect("Failed to deduce a retail key!");
+
+        let devkit_key: [u8; 16] =
+            decrypt_aes128_cbc_no_padding(&DEVKIT_KEY, &xex_loader_info.file_key)?
+                .try_into()
+                .expect("Failed to deduce a devkit key!");
+
         let confirmed_session_key: [u8; 16];
         let is_dev_kit: bool;
         let exe_bytes: Vec<u8>;
 
         // this is where we'd parse xexsection related info...but it might not be needed?
 
-        let pe_vec = &data[xex_header.pe_offset as usize..data.len()].to_vec();
-        let bff = xex_optional_header_data.base_file_format.as_ref().unwrap();
-        match XexInfo::try_get_exe(
-            pe_vec,
-            &xex_session_keys.session_key_retail,
-            bff,
-            xex_loader_info.image_size,
-        ) {
-            Ok(exe) => {
-                // println!("This xex was built in retail mode!");
-                confirmed_session_key = xex_session_keys.session_key_retail;
-                is_dev_kit = false;
-                exe_bytes = exe;
+        let pe_vec = &base_data[xex_header.pe_offset as usize..base_data.len()].to_vec();
+        let Some(bff) = &xex_optional_header_data.base_file_format else {
+            panic!("We need to have a BaseFileFormat at this point!")
+        };
+
+        let try_get_exe = |key| {
+            let exe_bytes = XexInfo::decompress(pe_vec, &key, bff, xex_loader_info.image_size)?;
+            ensure!(exe_bytes.starts_with(b"MZ"));
+            Ok(exe_bytes)
+        };
+
+        if let Ok(exe_bytes_retail) = try_get_exe(retail_key) {
+            confirmed_session_key = retail_key;
+            is_dev_kit = false;
+            exe_bytes = exe_bytes_retail;
+        } else if let Ok(exe_bytes_devkit) = try_get_exe(devkit_key) {
+            confirmed_session_key = devkit_key;
+            is_dev_kit = true;
+            exe_bytes = exe_bytes_devkit;
+        } else {
+            bail!("Could not deduce exe type!");
+        }
+
+        // adjust the byte offsets, because virtual addresses have been thrown off in the initial exe reconstruction process
+        let pe_file =
+            PeFile32::parse(&*exe_bytes).expect("Failed to parse newly pulled out exe file");
+        let mut pe_file_adjusted: Vec<u8> = vec![];
+        let mut first_flag = false;
+
+        for sec in pe_file.section_table().iter() {
+            if !first_flag {
+                for i in 0..sec.pointer_to_raw_data.get(endian::LittleEndian) {
+                    pe_file_adjusted.push(exe_bytes[i as usize]);
+                }
+                first_flag = true;
             }
-            Err(_) => {
-                match XexInfo::try_get_exe(
-                    pe_vec,
-                    &xex_session_keys.session_key_devkit,
-                    bff,
-                    xex_loader_info.image_size,
-                ) {
-                    Ok(exe) => {
-                        // println!("This xex was built in devkit mode!");
-                        confirmed_session_key = xex_session_keys.session_key_devkit;
-                        is_dev_kit = true;
-                        exe_bytes = exe;
-                    }
-                    Err(_) => {
-                        bail!("Could not deduce exe type!");
+            // if this section is NOT bss (no uninitialized data)
+            if (sec.characteristics.get(endian::LittleEndian) & 0x80) == 0 {
+                assert_eq!(
+                    pe_file_adjusted.len() as u32,
+                    sec.pointer_to_raw_data.get(endian::LittleEndian),
+                    "Unexpected PE size at this point!"
+                );
+                for j in 0..sec.size_of_raw_data.get(endian::LittleEndian) {
+                    let offset = (j + sec.virtual_address.get(endian::LittleEndian)) as usize;
+                    if offset >= exe_bytes.len() {
+                        pe_file_adjusted.push(0);
+                    } else {
+                        pe_file_adjusted.push(exe_bytes[offset]);
                     }
                 }
             }
+        }
+
+        // we have an adjusted, base exe at this point
+        // if we've got a patch xex, parse it and apply it on top
+        if let Some(_patch_path) = patch_path {
+            todo!("Parse and apply patch xexp!");
         }
 
         Ok(Self {
@@ -591,22 +606,22 @@ impl XexInfo {
             loader_info: xex_loader_info,
             session_key: confirmed_session_key,
             is_dev_kit,
-            exe_bytes,
+            exe_bytes: pe_file_adjusted,
         })
     }
 
-    fn try_get_exe(
-        exe_data: &[u8],
+    fn decompress(
+        input: &[u8],
         session_key: &[u8; 16],
         bff: &BaseFileFormat,
         img_size: u32,
     ) -> Result<Vec<u8>> {
         let compressed: Cow<[u8]> = match bff.encryption {
-            XexEncryption::No => Cow::Borrowed(exe_data),
-            XexEncryption::Yes => Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, exe_data)?),
+            XexEncryption::No => Cow::Borrowed(input),
+            XexEncryption::Yes => Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, input)?),
         };
 
-        let mut pe_image: Vec<u8> = vec![0; img_size as usize];
+        let mut output_bytes: Vec<u8> = vec![0; img_size as usize];
         let mut pos_in: usize = 0;
         let mut pos_out: usize = 0;
 
@@ -617,14 +632,14 @@ impl XexInfo {
                         if pos_in + i >= compressed.len() {
                             break;
                         }
-                        pe_image[i + pos_out] = compressed[pos_in + i];
+                        output_bytes[i + pos_out] = compressed[pos_in + i];
                     }
                     pos_out += (bc.data_size + bc.zero_size) as usize;
                     pos_in += bc.data_size as usize;
                 }
             }
             XexCompression::None | XexCompression::DeltaCompressed => {
-                pe_image = compressed.to_vec();
+                output_bytes = compressed.to_vec();
             }
             XexCompression::Compressed => {
                 let comp = bff.normal.as_ref().unwrap();
@@ -668,7 +683,7 @@ impl XexInfo {
                         }
                         let chunk_data = &block[off..off + chunk_len];
                         off += chunk_len;
-                        let expected = min(window_size, pe_image.len().saturating_sub(pos_out));
+                        let expected = min(window_size, output_bytes.len().saturating_sub(pos_out));
                         if expected == 0 {
                             break;
                         }
@@ -692,8 +707,8 @@ impl XexInfo {
                             );
                         }
 
-                        let copy_len = min(decompressed.len(), pe_image.len() - pos_out);
-                        pe_image[pos_out..pos_out + copy_len]
+                        let copy_len = min(decompressed.len(), output_bytes.len() - pos_out);
+                        output_bytes[pos_out..pos_out + copy_len]
                             .copy_from_slice(&decompressed[..copy_len]);
                         pos_out += copy_len;
                     }
@@ -704,40 +719,7 @@ impl XexInfo {
                 }
             }
         }
-
-        ensure!(pe_image[0] == b'M' && pe_image[1] == b'Z', "This is not a valid exe!");
-
-        // adjust the byte offsets, because virtual addresses have been thrown off in the initial exe reconstruction process
-        let pe_file =
-            PeFile32::parse(&*pe_image).expect("Failed to parse newly pulled out exe file");
-        let mut pe_file_adjusted: Vec<u8> = vec![];
-        let mut first_flag = false;
-
-        for sec in pe_file.section_table().iter() {
-            if !first_flag {
-                for i in 0..sec.pointer_to_raw_data.get(endian::LittleEndian) {
-                    pe_file_adjusted.push(pe_image[i as usize]);
-                }
-                first_flag = true;
-            }
-            // if this section is NOT bss (no uninitialized data)
-            if (sec.characteristics.get(endian::LittleEndian) & 0x80) == 0 {
-                assert_eq!(
-                    pe_file_adjusted.len() as u32,
-                    sec.pointer_to_raw_data.get(endian::LittleEndian),
-                    "Unexpected PE size at this point!"
-                );
-                for j in 0..sec.size_of_raw_data.get(endian::LittleEndian) {
-                    let offset = (j + sec.virtual_address.get(endian::LittleEndian)) as usize;
-                    if offset >= pe_image.len() {
-                        pe_file_adjusted.push(0);
-                    } else {
-                        pe_file_adjusted.push(pe_image[offset]);
-                    }
-                }
-            }
-        }
-        Ok(pe_file_adjusted)
+        Ok(output_bytes)
     }
 }
 
