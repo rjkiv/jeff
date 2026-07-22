@@ -36,7 +36,7 @@ impl InputtedExecutable {
     pub fn new(
         base_path: &Utf8NativePathBuf,
         // path to title update xexp, currently unimplemented
-        patch_path: Option<&Utf8NativePathBuf>,
+        patch_path: Option<Utf8NativePathBuf>,
     ) -> Result<Self> {
         let mut magic_bytes = [0u8; 4];
         {

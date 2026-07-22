@@ -284,6 +284,70 @@ impl XexOptionalHeaderData {
                 }
                 XexOptionalHeaderID::DeltaPatchDescriptor => {
                     log::debug!("TODO: handle patch descriptor");
+                    println!(
+                        "Target version: v{}.{}.{}.{}",
+                        header.data[0], header.data[1], header.data[2], header.data[3]
+                    );
+                    println!(
+                        "Source version: v{}.{}.{}.{}",
+                        header.data[4], header.data[5], header.data[6], header.data[7]
+                    );
+                    let mut pos = 8;
+                    print!("Source digest: ");
+                    for i in 0..20 {
+                        print!("{:02X} ", header.data[pos]);
+                        pos += 1;
+                    }
+                    // at this point, pos = 28 = 0x1C
+                    print!("\n");
+                    print!("Source image key: ");
+                    for i in 0..16 {
+                        print!("{:02X} ", header.data[pos]);
+                        pos += 1;
+                    }
+                    print!("\n");
+                    // at this point, pos = 44 = 0x2C
+                    println!(
+                        "Word at pos={:X}: {:08X} (target header size)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta headers source offset)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta headers source size)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta headers target offset)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta image source offset)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta image source size)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
+                    pos += 4;
+                    println!(
+                        "Word at pos={:X}: {:08X} (delta image target offset)",
+                        pos,
+                        read_word(&header.data, pos)
+                    );
                 }
                 XexOptionalHeaderID::BoundingPath => {
                     log::debug!("TODO: handle bounding path");
@@ -514,11 +578,12 @@ pub struct XexInfo {
 impl XexInfo {
     pub fn from_files(
         base_path: &Utf8NativePathBuf,
-        patch_path: Option<&Utf8NativePathBuf>,
+        patch_path: Option<Utf8NativePathBuf>,
     ) -> Result<Self> {
         // parse the base xex first
         let base_data = fs::read(base_path.to_path_buf()).expect("Failed to read file");
 
+        // TODO: get rid of this struct, we can just use the raw vars here and don't use them anywhere else
         let xex_header = XexHeader::parse(&base_data)?;
         assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
         let xex_optional_header_data = XexOptionalHeaderData::parse(&base_data)?;
@@ -596,8 +661,32 @@ impl XexInfo {
 
         // we have an adjusted, base exe at this point
         // if we've got a patch xex, parse it and apply it on top
-        if let Some(_patch_path) = patch_path {
-            todo!("Parse and apply patch xexp!");
+        if let Some(patch_path) = patch_path {
+            // parse the base xex first
+            let xexp_data = fs::read(patch_path.to_path_buf()).expect("Failed to read file");
+            let xexp_header = XexHeader::parse(&xexp_data)?;
+            assert_ne!(xexp_header.module_flags & 16, 0, "Not an xex patch file!");
+            let xexp_optional_header_data = XexOptionalHeaderData::parse(&xexp_data)?;
+            let xexp_loader_info =
+                XexLoaderInfo::parse(&xexp_data, xexp_header.security_info_offset)?;
+            if xexp_header.module_flags & 32 != 0 {
+                todo!("Full patch not implemented yet! If your game has a full patch file, please let me know on Github issues!");
+            }
+            if xexp_header.module_flags & 64 != 0 {
+                println!("Delta patch!");
+                let patch_vec =
+                    &xexp_data[xexp_header.pe_offset as usize..xexp_data.len()].to_vec();
+                let Some(bff) = &xexp_optional_header_data.base_file_format else {
+                    panic!("We need to have a BaseFileFormat at this point!")
+                };
+                let patch_decompressed = XexInfo::decompress(
+                    patch_vec,
+                    &confirmed_session_key,
+                    bff,
+                    xexp_header.security_info_offset,
+                )?;
+                println!("Decompressed patch size: {}", patch_decompressed.len());
+            }
         }
 
         Ok(Self {
