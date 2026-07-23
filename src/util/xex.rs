@@ -2,7 +2,6 @@ use std::{borrow::Cow, cmp::min, collections::BTreeMap, fs};
 
 use anyhow::{bail, ensure, Result};
 use lzxd::Lzxd;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use object::{
     endian,
     read::pe::PeFile32,
@@ -17,188 +16,14 @@ use crate::{
         ObjInfo, ObjRelocKind, ObjSectionKind, ObjSymbolKind, ObjSymbolScope, SectionIndex,
         SymbolIndex,
     },
-    util::crypto::decrypt_aes128_cbc_no_padding,
+    util::{
+        crypto::decrypt_aes128_cbc_no_padding,
+        read::read_word,
+        xex_optional_headers::{
+            parse_xex_optional_headers, BaseFileFormat, XexCompression, XexOptionalHeader,
+        },
+    },
 };
-
-// quick and ez ways to read data from a block of bytes
-pub fn read_halfword(data: &[u8], index: usize) -> u16 {
-    u16::from_be_bytes([data[index], data[index + 1]])
-}
-
-pub fn read_word(data: &[u8], index: usize) -> u32 {
-    u32::from_be_bytes([data[index], data[index + 1], data[index + 2], data[index + 3]])
-}
-
-// ----------------------------------------------------------------------
-// BASEFILEFORMAT
-// ----------------------------------------------------------------------
-
-pub struct BasicCompression {
-    pub data_size: u32,
-    pub zero_size: u32,
-}
-
-pub struct NormalCompression {
-    pub window_size: u32,
-    pub block_size: u32,
-    pub block_hash: [u8; 20],
-}
-
-pub enum XexCompression {
-    None,
-    Raw { basics: Vec<BasicCompression> },
-    Compressed { normal: NormalCompression },
-    DeltaCompressed { normal: NormalCompression },
-}
-
-pub struct BaseFileFormat {
-    pub encrypted: bool,
-    pub compression: XexCompression,
-}
-
-impl BaseFileFormat {
-    fn parse(data: &[u8]) -> Result<Self> {
-        let encrypted: bool;
-        match read_halfword(data, 0) {
-            0 => encrypted = false,
-            1 => encrypted = true,
-            _ => unreachable!(),
-        };
-        let compression = match read_halfword(data, 2) {
-            0 => XexCompression::None,
-            1 => {
-                let mut basics: Vec<BasicCompression> = vec![];
-                let count = (data.len() - 4) / 8;
-                for i in 0..count {
-                    basics.push(BasicCompression {
-                        data_size: read_word(data, 4 + i * 8),
-                        zero_size: read_word(data, 8 + i * 8),
-                    });
-                }
-                XexCompression::Raw { basics }
-            }
-            2 => XexCompression::Compressed {
-                normal: NormalCompression {
-                    window_size: read_word(data, 4),
-                    block_size: read_word(data, 8),
-                    block_hash: data[12..32].try_into()?,
-                },
-            },
-            3 => XexCompression::DeltaCompressed {
-                normal: NormalCompression {
-                    window_size: read_word(data, 4),
-                    block_size: read_word(data, 8),
-                    block_hash: data[12..32].try_into()?,
-                },
-            },
-            _ => unreachable!(),
-        };
-
-        Ok(Self { encrypted, compression })
-    }
-}
-
-// ----------------------------------------------------------------------
-// IMPORTLIBRARIES
-// ----------------------------------------------------------------------
-
-pub struct ImportLibraries {
-    pub libraries: Vec<ImportLibrary>,
-}
-
-pub struct ImportFunction {
-    pub address: u32,
-    pub ordinal: u32,
-    pub thunk: u32,
-}
-
-pub struct ImportLibrary {
-    pub name: String,
-    pub records: Vec<u32>,
-    pub functions: Vec<ImportFunction>,
-}
-
-impl ImportLibraries {
-    fn parse(data: &[u8]) -> Result<Self> {
-        let string_size = read_word(data, 0);
-        let lib_count = read_word(data, 4);
-
-        // populate the string table
-        let mut string_table: Vec<String> = vec![];
-        let mut pos: usize = 8;
-        let mut cur_str = String::new();
-        let cap: usize = (string_size + 8) as usize;
-        while pos < cap {
-            if data[pos] != 0 {
-                cur_str += &(data[pos] as char).to_string();
-            } else {
-                // the values in between strings SHOULD be just zeros
-                // but some games have super small non-zero values (tomb raider legend)
-                while data[pos + 1] < 5 && pos < cap - 1 {
-                    pos += 1;
-                }
-                string_table.push(cur_str.clone());
-                cur_str.clear();
-            }
-            pos += 1;
-        }
-
-        // actually parse the import libraries
-        pos = cap;
-        let mut libraries: Vec<ImportLibrary> = vec![];
-        for _ in 0..lib_count {
-            pos += 0x24;
-            let name_idx = read_halfword(data, pos) as usize;
-            let count = read_halfword(data, pos + 2) as usize;
-            pos += 4;
-            let lib_name = &string_table[name_idx];
-            let mut records: Vec<u32> = vec![];
-            for i in 0..count {
-                records.push(read_word(data, pos + (i * 4)));
-            }
-            pos += count * 4;
-            libraries.push(ImportLibrary {
-                name: lib_name.clone(),
-                records,
-                functions: Vec::new(),
-            });
-        }
-        Ok(Self { libraries })
-    }
-}
-
-// ----------------------------------------------------------------------
-// RESOURCEINFO
-// ----------------------------------------------------------------------
-
-pub struct ResourceInfos {
-    pub info: Vec<ResourceInfo>,
-}
-
-pub struct ResourceInfo {
-    pub title_id: String,
-    pub rsrc_start: u32,
-    pub rsrc_end: u32,
-}
-
-impl ResourceInfos {
-    pub fn parse(data: &[u8]) -> Result<Self> {
-        ensure!(
-            data.len() % 16 == 0,
-            "Resource info has unexpected length! (expected a multiple of 16)"
-        );
-        let _num_resources = data.len() / 16;
-        let mut info: Vec<ResourceInfo> = vec![];
-        for chunk in data.chunks_exact(16) {
-            let title_id = String::from_utf8(chunk[0..8].to_vec())?;
-            let rsrc_start = u32::from_be_bytes(chunk[8..12].try_into()?);
-            let rsrc_end = rsrc_start + u32::from_be_bytes(chunk[12..16].try_into()?);
-            info.push(ResourceInfo { title_id, rsrc_start, rsrc_end });
-        }
-        Ok(Self { info })
-    }
-}
-
 // ----------------------------------------------------------------------
 // XEXHEADER
 // ----------------------------------------------------------------------
@@ -221,267 +46,6 @@ impl XexHeader {
         // reserved is at data index 12, but it's unused so who cares
         let security_info_offset = read_word(data, 16);
         Ok(Self { module_flags, pe_offset, security_info_offset })
-    }
-}
-
-// ----------------------------------------------------------------------
-// STATICLIBRARY
-// ----------------------------------------------------------------------
-
-pub struct StaticLibrary {
-    pub name: String,
-    pub major: u16,
-    pub minor: u16,
-    pub build: u16,
-    pub qfe: u8,
-    pub approval_type: u8,
-}
-
-// ----------------------------------------------------------------------
-// XEXOPTIONALHEADERDATA
-// ----------------------------------------------------------------------
-
-pub struct XexOptionalHeaderData {
-    // Vec<XexOptionalHeader>? should we keep the vector of optional headers we find?
-    pub original_name: String,
-    pub entry_point: u32,
-    pub image_base: u32,
-    pub file_timestamp: u32,
-    pub resource_info: Option<ResourceInfos>,
-    pub base_file_format: Option<BaseFileFormat>,
-    // PatchDescriptor
-    pub static_libs: Vec<StaticLibrary>,
-    pub import_libs: Option<ImportLibraries>,
-}
-
-impl XexOptionalHeaderData {
-    fn parse(data: &[u8]) -> Result<Self> {
-        // read in the optional headers
-        let num_optional_headers = read_word(data, 20);
-        let mut opt_headers: Vec<XexOptionalHeader> = vec![];
-        for n in 0..num_optional_headers {
-            opt_headers.push(XexOptionalHeader::new(data, (24 + n * 8) as usize));
-        }
-
-        // some games (kameo cough cough) don't include an original name
-        // so, we'll provide this as a default
-        let mut original_name = String::from("output.exe");
-        let mut entry_point = 0;
-        let mut image_base = 0;
-        let mut file_timestamp = 0;
-        let mut import_libs = None;
-        let mut resource_info = None;
-        let mut base_file_format = None;
-        let mut static_libs: Vec<StaticLibrary> = vec![];
-
-        // and now, process them
-        for header in opt_headers {
-            ensure!(!header.data.is_empty(), "No data found in optional header!");
-            match header.id {
-                XexOptionalHeaderID::ResourceInfo => {
-                    resource_info = Some(ResourceInfos::parse(&header.data)?);
-                }
-                XexOptionalHeaderID::BaseFileFormat => {
-                    base_file_format = Some(BaseFileFormat::parse(&header.data)?);
-                }
-                XexOptionalHeaderID::DeltaPatchDescriptor => {
-                    log::debug!("TODO: handle patch descriptor");
-                    // "size" field is header.data.len(), plus 4
-                    println!(
-                        "Target version: v{}.{}.{}.{}",
-                        header.data[0], header.data[1], header.data[2], header.data[3]
-                    );
-                    println!(
-                        "Source version: v{}.{}.{}.{}",
-                        header.data[4], header.data[5], header.data[6], header.data[7]
-                    );
-                    let mut pos = 8;
-                    print!("Source digest: ");
-                    for i in 0..20 {
-                        print!("{:02X} ", header.data[pos]);
-                        pos += 1;
-                    }
-                    // at this point, pos = 28 = 0x1C
-                    print!("\n");
-                    print!("Source image key: ");
-                    for i in 0..16 {
-                        print!("{:02X} ", header.data[pos]);
-                        pos += 1;
-                    }
-                    print!("\n");
-                    // at this point, pos = 44 = 0x2C
-                    println!(
-                        "Word at pos={:X}: {:08X} (target header size)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta headers source offset)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta headers source size)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta headers target offset)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta image source offset)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta image source size)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                    pos += 4;
-                    println!(
-                        "Word at pos={:X}: {:08X} (delta image target offset)",
-                        pos,
-                        read_word(&header.data, pos)
-                    );
-                }
-                XexOptionalHeaderID::BoundingPath => {
-                    log::debug!("TODO: handle bounding path");
-                }
-                XexOptionalHeaderID::EntryPoint => {
-                    entry_point = read_word(&header.data, 0);
-                }
-                XexOptionalHeaderID::ImageBaseAddress => {
-                    image_base = read_word(&header.data, 0);
-                }
-                XexOptionalHeaderID::ImportLibraries => {
-                    import_libs = Some(ImportLibraries::parse(&header.data)?);
-                }
-                XexOptionalHeaderID::OriginalPEName => {
-                    // trim off the 0's
-                    let mut name = header.data.clone();
-                    if let Some(i) = name.iter().rposition(|&x| x != 0) {
-                        let new_len = i + 1;
-                        name.truncate(new_len);
-                    }
-                    original_name = String::from_utf8(name)?;
-                }
-                XexOptionalHeaderID::ChecksumTimestamp => {
-                    file_timestamp = read_word(&header.data, 0);
-                }
-                XexOptionalHeaderID::StaticLibraries => {
-                    let num_libs = header.data.len() / 16;
-                    for i in 0..num_libs {
-                        let start = i * 16;
-                        let mut name = header.data[start..start + 8].to_vec();
-                        name.retain(|&x| x != 0);
-                        static_libs.push(StaticLibrary {
-                            name: String::from_utf8(name)?,
-                            major: read_halfword(&header.data, start + 8),
-                            minor: read_halfword(&header.data, start + 10),
-                            build: read_halfword(&header.data, start + 12),
-                            qfe: header.data[start + 15],
-                            approval_type: header.data[start + 14],
-                        });
-                    }
-                }
-                _ => {
-                    log::warn!("unhandled header ID {:?}", header.id);
-                }
-            }
-        }
-        // at the very minimum, we should have a base file format, as that contains encryption/compression information
-        ensure!(base_file_format.is_some(), "Base file format not found!");
-        Ok(Self {
-            original_name,
-            entry_point,
-            image_base,
-            file_timestamp,
-            resource_info,
-            base_file_format,
-            static_libs,
-            import_libs,
-        })
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive)]
-#[repr(u32)]
-pub enum XexOptionalHeaderID {
-    ResourceInfo = 0x2FF,
-    BaseFileFormat = 0x3FF,
-    BaseReference = 0x405,
-    DeltaPatchDescriptor = 0x5FF,
-    BoundingPath = 0x80FF,
-    DeviceID = 0x8105,
-    OriginalBaseAddress = 0x10001,
-    EntryPoint = 0x10100,
-    ImageBaseAddress = 0x10201,
-    ImportLibraries = 0x103FF,
-    ChecksumTimestamp = 0x18002,
-    EnabledForCallcap = 0x18102,
-    EnabledForFastcap = 0x18200,
-    OriginalPEName = 0x183FF,
-    StaticLibraries = 0x200FF,
-    TLSInfo = 0x20104,
-    DefaultStackSize = 0x20200,
-    DefaultFilesystemCacheSize = 0x20301,
-    DefaultHeapSize = 0x20401,
-    PageHeapSizeAndFlags = 0x28002,
-    SystemFlags = 0x30000,
-    Unknown30100 = 0x30100,
-    ExecutionID = 0x40006,
-    ServiceIDList = 0x401FF,
-    TitleWorkspaceSize = 0x40201,
-    GameRatings = 0x40310,
-    LANKey = 0x40404,
-    Xbox360Logo = 0x405FF,
-    MultidiscMediaIDs = 0x406FF,
-    AlternateTitleIDs = 0x407FF,
-    AdditionalTitleMemory = 0x40801,
-    ExportsByName = 0xE10402,
-}
-
-pub struct XexOptionalHeader {
-    pub id: XexOptionalHeaderID,
-    pub value: u32,
-    pub data: Vec<u8>,
-}
-
-impl XexOptionalHeader {
-    pub fn new(data: &[u8], index: usize) -> Self {
-        let mut hdr = Self {
-            id: XexOptionalHeaderID::try_from(read_word(data, index)).unwrap(),
-            value: read_word(data, index + 4),
-            data: Vec::new(),
-        };
-
-        let id_as_u32: u32 = hdr.id.into();
-        let mask = id_as_u32 & 0xFF;
-        if mask == 0xFF {
-            // seek the binstream to hdr.value, read the word (that's your len)
-            let len = read_word(data, hdr.value as usize);
-            let start: usize = (hdr.value + 4) as usize;
-            let end: usize = (hdr.value + len) as usize;
-            hdr.data = data[start..end].to_vec();
-        } else if mask < 2 {
-            // data = value as a Vec<u8>
-            // println!("for ID 0x{:X}, value = 0x{:X}", id_as_u32, hdr.value);
-            hdr.data = data[index + 4..index + 8].to_vec();
-        } else {
-            let len = mask * 4;
-            let start: usize = (hdr.value + 4) as usize;
-            let end: usize = (hdr.value + len) as usize;
-            hdr.data = data[start..end].to_vec();
-        }
-        hdr
     }
 }
 
@@ -571,7 +135,7 @@ const DEVKIT_KEY: [u8; 16] = [
 
 pub struct XexInfo {
     pub header: XexHeader,
-    pub opt_header_data: XexOptionalHeaderData,
+    pub optional_headers: Vec<XexOptionalHeader>,
     pub loader_info: XexLoaderInfo,
     pub session_key: [u8; 16],
     pub is_dev_kit: bool,
@@ -592,7 +156,8 @@ impl XexInfo {
 
         let xex_header = XexHeader::parse(&base_data)?;
         assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
-        let xex_optional_header_data = XexOptionalHeaderData::parse(&base_data)?;
+
+        let xex_optional_headers = parse_xex_optional_headers(&base_data)?;
         let xex_loader_info = XexLoaderInfo::parse(&base_data, xex_header.security_info_offset)?;
 
         let retail_key: [u8; 16] =
@@ -612,7 +177,11 @@ impl XexInfo {
         // this is where we'd parse xexsection related info...but it might not be needed?
 
         let pe_vec = &base_data[xex_header.pe_offset as usize..base_data.len()].to_vec();
-        let Some(bff) = &xex_optional_header_data.base_file_format else {
+
+        let Some(bff) = xex_optional_headers.iter().find_map(|h| match h {
+            XexOptionalHeader::BaseFileFormat { format } => Some(format),
+            _ => None,
+        }) else {
             panic!("We need to have a BaseFileFormat at this point!")
         };
 
@@ -634,44 +203,15 @@ impl XexInfo {
             bail!("Could not deduce exe type!");
         }
 
-        // adjust the byte offsets, because virtual addresses have been thrown off in the initial exe reconstruction process
-        let pe_file =
-            PeFile32::parse(&*exe_bytes).expect("Failed to parse newly pulled out exe file");
-        let mut pe_file_adjusted: Vec<u8> = vec![];
-        let mut first_flag = false;
-
-        for sec in pe_file.section_table().iter() {
-            if !first_flag {
-                for i in 0..sec.pointer_to_raw_data.get(endian::LittleEndian) {
-                    pe_file_adjusted.push(exe_bytes[i as usize]);
-                }
-                first_flag = true;
-            }
-            // if this section is NOT bss (no uninitialized data)
-            if (sec.characteristics.get(endian::LittleEndian) & 0x80) == 0 {
-                assert_eq!(
-                    pe_file_adjusted.len() as u32,
-                    sec.pointer_to_raw_data.get(endian::LittleEndian),
-                    "Unexpected PE size at this point!"
-                );
-                for j in 0..sec.size_of_raw_data.get(endian::LittleEndian) {
-                    let offset = (j + sec.virtual_address.get(endian::LittleEndian)) as usize;
-                    if offset >= exe_bytes.len() {
-                        pe_file_adjusted.push(0);
-                    } else {
-                        pe_file_adjusted.push(exe_bytes[offset]);
-                    }
-                }
-            }
-        }
+        let pe_file_finalized = XexInfo::finalize_exe(&exe_bytes);
 
         Ok(Self {
             header: xex_header,
-            opt_header_data: xex_optional_header_data,
+            optional_headers: xex_optional_headers,
             loader_info: xex_loader_info,
             session_key: confirmed_session_key,
             is_dev_kit,
-            exe_bytes: pe_file_adjusted,
+            exe_bytes: pe_file_finalized,
         })
     }
 
@@ -787,6 +327,43 @@ impl XexInfo {
             }
         };
         Ok(output_bytes)
+    }
+
+    fn finalize_exe(exe_bytes: &Vec<u8>) -> Vec<u8> {
+        let pe_file = PeFile32::parse(exe_bytes.as_slice())
+            .expect("Failed to parse newly pulled out exe file");
+        let mut pe_file_adjusted: Vec<u8> = vec![];
+        let mut first_flag = false;
+
+        // adjust the byte offsets, because virtual addresses have been thrown off in the initial exe reconstruction process
+        for sec in pe_file.section_table().iter() {
+            if !first_flag {
+                for i in 0..sec.pointer_to_raw_data.get(endian::LittleEndian) {
+                    pe_file_adjusted.push(exe_bytes[i as usize]);
+                }
+                first_flag = true;
+            }
+            // if this section is NOT bss (no uninitialized data)
+            if (sec.characteristics.get(endian::LittleEndian) & 0x80) == 0 {
+                assert_eq!(
+                    pe_file_adjusted.len() as u32,
+                    sec.pointer_to_raw_data.get(endian::LittleEndian),
+                    "Unexpected PE size at this point!"
+                );
+                for j in 0..sec.size_of_raw_data.get(endian::LittleEndian) {
+                    let offset = (j + sec.virtual_address.get(endian::LittleEndian)) as usize;
+                    if offset >= exe_bytes.len() {
+                        pe_file_adjusted.push(0);
+                    } else {
+                        pe_file_adjusted.push(exe_bytes[offset]);
+                    }
+                }
+            }
+        }
+
+        // TODO: fill out the ImportLibrary info and unstrip here
+
+        pe_file_adjusted
     }
 }
 

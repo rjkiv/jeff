@@ -45,7 +45,8 @@ use crate::{
         map_exe::{apply_map_file_exe, process_map_exe},
         path::native_path,
         split::{split_obj, update_splits},
-        xex::{coff_path_for_unit, list_exe_sections, write_coff, XexCompression, XexInfo},
+        xex::{coff_path_for_unit, list_exe_sections, write_coff, XexInfo},
+        xex_optional_headers::{XexCompression, XexOptionalHeader},
         xpdb::try_parse_pdb,
     },
 };
@@ -667,7 +668,14 @@ fn info(args: InfoArgs) -> Result<()> {
 
     println!("Xex Info:");
     println!("  {}", if xex.is_dev_kit { "Devkit" } else { "Retail" });
-    let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
+
+    let Some(bff) = xex.optional_headers.iter().find_map(|h| match h {
+        XexOptionalHeader::BaseFileFormat { format } => Some(format),
+        _ => None,
+    }) else {
+        panic!("We need to have a BaseFileFormat at this point!")
+    };
+
     println!(
         "  {}",
         if matches!(bff.compression, XexCompression::Compressed { normal: _ }) {
@@ -680,30 +688,43 @@ fn info(args: InfoArgs) -> Result<()> {
     println!();
 
     println!("Basefile Info:");
-    println!("  Original PE Name: {}", xex.opt_header_data.original_name);
-    println!("  Load address: 0x{:08X}", xex.opt_header_data.image_base);
-    println!("  Entry point: 0x{:08X}", xex.opt_header_data.entry_point);
-    print!("  File time: 0x{:08X} - ", xex.opt_header_data.file_timestamp);
-    let dur = std::time::Duration::from_secs(xex.opt_header_data.file_timestamp as u64);
-    let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
-    let pst = FixedOffset::west_opt(8 * 3600).unwrap();
-    let dt_pst = datetime.with_timezone(&pst);
-    println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
-    println!();
-
-    println!("Static Libraries:");
-    for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
-        println!(
-            "  {}. {}: v{}.{}.{}.{}",
-            idx + 1,
-            lib.name,
-            lib.major,
-            lib.minor,
-            lib.build,
-            lib.qfe
-        );
+    for header in xex.optional_headers {
+        match header {
+            XexOptionalHeader::OriginalPEName { name } => {
+                println!("  Original PE Name: {}", name);
+            }
+            XexOptionalHeader::ImageBaseAddress { image_base } => {
+                println!("  Load address: 0x{:08X}", image_base);
+            }
+            XexOptionalHeader::EntryPoint { entry } => {
+                println!("  Entry point: 0x{:08X}", entry);
+            }
+            XexOptionalHeader::ChecksumTimestamp { timestamp } => {
+                print!("  File time: 0x{:08X} - ", timestamp);
+                let dur = std::time::Duration::from_secs(timestamp as u64);
+                let datetime = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + dur);
+                let pst = FixedOffset::west_opt(8 * 3600).unwrap();
+                let dt_pst = datetime.with_timezone(&pst);
+                println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
+            }
+            _ => continue,
+        }
     }
     println!();
+    //
+    // println!("Static Libraries:");
+    // for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
+    //     println!(
+    //         "  {}. {}: v{}.{}.{}.{}",
+    //         idx + 1,
+    //         lib.name,
+    //         lib.major,
+    //         lib.minor,
+    //         lib.build,
+    //         lib.qfe
+    //     );
+    // }
+    // println!();
 
     // TODO: import libraries
     list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));

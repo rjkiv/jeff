@@ -1,6 +1,6 @@
-use anyhow::{bail, ensure, Result};
+use anyhow::{ensure, Result};
 
-use crate::util::xex::{read_halfword, read_word};
+use crate::util::read::{read_halfword, read_word};
 
 pub struct ResourceInfo {
     pub title_id: String,
@@ -31,12 +31,13 @@ pub struct BaseFileFormat {
     pub compression: XexCompression,
 }
 
+#[derive(Clone)]
 pub struct ImportFunction {
     pub address: u32,
     pub ordinal: u32,
     pub thunk: u32,
 }
-
+#[derive(Clone)]
 pub struct ImportLibrary {
     pub name: String,
     pub records: Vec<u32>,
@@ -259,6 +260,9 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                     });
                 }
                 xex_optional_headers.push(XexOptionalHeader::ImportLibraries { libraries });
+            }
+            0x18002 => {
+                log::debug!("TODO: implement ChecksumTimestamp")
             }
             0x18102 => {
                 log::debug!("TODO: implement EnabledForCallcap")
