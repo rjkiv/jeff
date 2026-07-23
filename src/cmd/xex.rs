@@ -89,9 +89,9 @@ pub struct ExtractArgs {
     #[argp(positional, from_str_fn(native_path))]
     /// input base xex file
     xex_file: Utf8NativePathBuf,
-    #[argp(positional, from_str_fn(native_path))]
-    /// patch xexp file
-    xexp_file: Option<Utf8NativePathBuf>,
+    // #[argp(positional, from_str_fn(native_path))]
+    // /// patch xexp file
+    // xexp_file: Option<Utf8NativePathBuf>,
 }
 
 #[derive(FromArgs, PartialEq, Eq, Debug)]
@@ -489,7 +489,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 // https://github.com/emoose/idaxex/blob/5b7de7b964e67fc049db0c61e4cba5d13ee69cec/formats/xex.hpp
 
 fn extract(args: ExtractArgs) -> Result<()> {
-    let exe = InputtedExecutable::new(&args.xex_file, args.xexp_file)?;
+    let exe = InputtedExecutable::new(&args.xex_file, None)?;
     if exe.is_xex() {
         let (exe_name, exe_bytes) = exe.extract();
         let xex_dir = args.xex_file.parent().expect("No parent directory to extract to!");
