@@ -707,24 +707,25 @@ fn info(args: InfoArgs) -> Result<()> {
                 let dt_pst = datetime.with_timezone(&pst);
                 println!("{}", dt_pst.format("%a %b %d %H:%M:%S %Y"));
             }
+            XexOptionalHeader::StaticLibraries { libraries } => {
+                println!("Static Libraries:");
+                for (idx, lib) in libraries.iter().enumerate() {
+                    println!(
+                        "  {}. {}: v{}.{}.{}.{}",
+                        idx + 1,
+                        lib.name,
+                        lib.major,
+                        lib.minor,
+                        lib.build,
+                        lib.qfe
+                    );
+                }
+                println!();
+            }
             _ => continue,
         }
     }
     println!();
-    //
-    // println!("Static Libraries:");
-    // for (idx, lib) in xex.opt_header_data.static_libs.iter().enumerate() {
-    //     println!(
-    //         "  {}. {}: v{}.{}.{}.{}",
-    //         idx + 1,
-    //         lib.name,
-    //         lib.major,
-    //         lib.minor,
-    //         lib.build,
-    //         lib.qfe
-    //     );
-    // }
-    // println!();
 
     // TODO: import libraries
     list_exe_sections(&PeFile32::parse(&*xex.exe_bytes).expect("Failed to parse object file"));
