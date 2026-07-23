@@ -24,3 +24,12 @@ where
     reader.read_exact(ret.as_mut().as_mut_bytes())?;
     Ok(ret)
 }
+
+// quick and ez ways to read data from a block of bytes
+pub fn read_halfword(data: &[u8], index: usize) -> u16 {
+    u16::from_be_bytes([data[index], data[index + 1]])
+}
+
+pub fn read_word(data: &[u8], index: usize) -> u32 {
+    u32::from_be_bytes([data[index], data[index + 1], data[index + 2], data[index + 3]])
+}

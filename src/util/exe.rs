@@ -12,15 +12,17 @@ use crate::{
         ObjSymbolKind, SymbolIndex,
     },
     util::{
-        xex::{read_word, ImportFunction, ImportLibraries, XexInfo},
+        read::read_word,
+        xex::XexInfo,
         xex_imports::replace_ordinal,
+        xex_optional_headers::{ImportFunction, ImportLibrary, XexOptionalHeader},
     },
 };
 
 // the type of the executable binary initially passed in
 enum ExeType {
-    Xex,
     Exe,
+    Xex { import_libraries: Option<Vec<ImportLibrary>> },
 }
 
 // an executable binary passed in from a config.yml
@@ -28,15 +30,14 @@ enum ExeType {
 pub struct InputtedExecutable {
     exe_name: String,
     exe_bytes: Vec<u8>,
-    xex_import_libs: Option<ImportLibraries>,
-    original_type: ExeType,
+    exe_type: ExeType,
 }
 
 impl InputtedExecutable {
     pub fn new(
         base_path: &Utf8NativePathBuf,
         // path to title update xexp, currently unimplemented
-        _patch_path: Option<&Utf8NativePathBuf>,
+        patch_path: Option<Utf8NativePathBuf>,
     ) -> Result<Self> {
         let mut magic_bytes = [0u8; 4];
         {
@@ -46,12 +47,28 @@ impl InputtedExecutable {
         }
         // if xex, call XexInfo::from_file
         if magic_bytes == *b"XEX2" {
-            let xex = XexInfo::from_file(base_path)?;
+            let xex = XexInfo::from_files(base_path, patch_path)?;
+
+            let orig_name = xex
+                .optional_headers
+                .iter()
+                .find_map(|h| match h {
+                    XexOptionalHeader::OriginalPEName { name } if !name.is_empty() => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| String::from("output.exe"));
+
+            let import_libraries = xex.optional_headers.iter().find_map(|h| match h {
+                XexOptionalHeader::ImportLibraries { libraries } => Some(libraries.clone()),
+                _ => None,
+            });
+
             Ok(Self {
-                exe_name: xex.opt_header_data.original_name,
+                exe_name: orig_name,
                 exe_bytes: xex.exe_bytes,
-                xex_import_libs: xex.opt_header_data.import_libs,
-                original_type: ExeType::Xex,
+                exe_type: ExeType::Xex { import_libraries },
             })
         }
         // if exe, just pass in name/bytes and that's that
@@ -59,15 +76,14 @@ impl InputtedExecutable {
             Ok(Self {
                 exe_name: base_path.file_name().expect("Missing executable name!").to_string(),
                 exe_bytes: fs::read(base_path)?,
-                xex_import_libs: None,
-                original_type: ExeType::Exe,
+                exe_type: ExeType::Exe,
             })
         } else {
             bail!("Unrecognized executable type!");
         }
     }
 
-    pub fn is_xex(&self) -> bool { matches!(self.original_type, ExeType::Xex) }
+    pub fn is_xex(&self) -> bool { matches!(self.exe_type, ExeType::Xex { import_libraries: _ }) }
 
     pub fn extract(&self) -> (String, &Vec<u8>) { (self.exe_name.clone(), &self.exe_bytes) }
 
@@ -115,9 +131,9 @@ impl InputtedExecutable {
         obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
         // inspect the ImportLibraries if we have them
-        if let Some(imports) = self.xex_import_libs.as_mut() {
+        if let ExeType::Xex { import_libraries: Some(imports) } = &mut self.exe_type {
             // first, retrieve the ImportFunctions
-            for lib in imports.libraries.iter_mut() {
+            for lib in imports.iter_mut() {
                 for record in lib.records.iter() {
                     // so what needs to happen here:
                     // record = a virtual memory address
@@ -225,7 +241,7 @@ impl InputtedExecutable {
             }
 
             // now, process them (add funcs/symbols and unstrip)
-            for lib in imports.libraries.iter() {
+            for lib in imports.iter() {
                 // println!("Imports for {}:", lib.name);
                 for func in lib.functions.iter() {
                     // println!("  Func: addr 0x{:08X}, ordinal 0x{:04X}, thunk 0x{:08X}", func.address, func.ordinal, func.thunk);
@@ -294,7 +310,7 @@ impl InputtedExecutable {
                         let sym_name = format!(
                             "__imp_{}",
                             replace_ordinal(
-                                &imports.libraries[((cur_imp & 0x00FF0000) >> 16) as usize].name,
+                                &imports[((cur_imp & 0x00FF0000) >> 16) as usize].name,
                                 (cur_imp & 0xFFFF) as usize
                             )
                         );
@@ -339,7 +355,7 @@ impl InputtedExecutable {
                         let cur_addr = SectionAddress::new(thunk_idx, i);
                         if !obj.known_functions.contains_key(&cur_addr) {
                             let sym_name = replace_ordinal(
-                                &imports.libraries[((cur_thunk & 0x00FF0000) >> 16) as usize].name,
+                                &imports[((cur_thunk & 0x00FF0000) >> 16) as usize].name,
                                 (cur_thunk & 0xFFFF) as usize,
                             );
                             // println!("Found missing thunk {} at 0x{:08X}", sym_name, i);

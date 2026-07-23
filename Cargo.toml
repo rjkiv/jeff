@@ -50,7 +50,6 @@ memmap2 = "0.9.11"
 multimap = "0.10"
 nodtool = "1.4.4"
 #nodtool = { path = "../nod-rs/nodtool" }
-num_enum = "0.7"
 #objdiff-core = { version = "2.2", features = ["ppc"] }
 #objdiff-core = { path = "../objdiff/objdiff-core", features = ["ppc"] }
 objdiff-core = { git = "https://github.com/rjkiv/objdiff.git", branch = "main2.2.0", features = ["ppc"] }
