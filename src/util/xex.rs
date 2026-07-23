@@ -149,14 +149,12 @@ impl XexInfo {
     ) -> Result<Self> {
         let base_data = fs::read(base_path.to_path_buf()).expect("Failed to read file");
 
-        if let Some(patch_path) = patch_path {
+        if let Some(_patch_path) = patch_path {
             // this is where you apply the patch xexp on top of the base xex, resulting in a new data Vec<u8> to process
-            // make it a func? apply_patch that returns a Result<Vec<u8>>?
+            // see apply_patch below
         }
 
         let xex_header = XexHeader::parse(&base_data)?;
-        assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
-
         let xex_optional_headers = parse_xex_optional_headers(&base_data)?;
         let xex_loader_info = XexLoaderInfo::parse(&base_data, xex_header.security_info_offset)?;
 
@@ -328,6 +326,25 @@ impl XexInfo {
         };
         Ok(output_bytes)
     }
+
+    // fn apply_patch(
+    //     base_path: &Utf8NativePathBuf,
+    //     patch_path: &Utf8NativePathBuf,
+    // ) -> Result<Vec<u8>> {
+    //     // see: https://github.com/zeroKilo/XEXLoaderWV/blob/master/XEXLoaderWV/src/main/java/xexloaderwv/XEXLoaderWVLoader.java#L128
+    //
+    //     // Parses everything in the base xex, including the PE image
+    //     let base_data = fs::read(base_path.to_path_buf()).expect("Failed to read file");
+    //     let xex_header = XexHeader::parse(&base_data)?;
+    //     assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
+    //
+    //     // Parses everything in the patch xexp...up until the "PE image"
+    //
+    //     todo!("actually fill this function out");
+    //
+    //     let mut patched_xex_bytes: Vec<u8> = Vec::new();
+    //     Ok(patched_xex_bytes)
+    // }
 
     fn finalize_exe(exe_bytes: &Vec<u8>) -> Vec<u8> {
         let pe_file = PeFile32::parse(exe_bytes.as_slice())

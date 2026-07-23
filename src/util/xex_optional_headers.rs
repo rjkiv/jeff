@@ -53,8 +53,39 @@ pub struct StaticLibrary {
     pub approval_type: u8,
 }
 
+pub struct DeltaPatch {
+    pub old_addr: u32,
+    pub new_addr: u32,
+    pub uncompressed_len: u16,
+    pub compressed_len: u16,
+    pub patch_data: Vec<u8>,
+}
+
+impl DeltaPatch {
+    pub fn parse(data: &[u8], offset: usize) -> Self {
+        let compressed_len = read_halfword(data, offset + 10);
+        Self {
+            old_addr: read_word(data, offset),
+            new_addr: read_word(data, offset + 4),
+            uncompressed_len: read_halfword(data, offset + 8),
+            compressed_len,
+            patch_data: data[offset + 12..offset + 12 + compressed_len as usize].to_vec(),
+        }
+    }
+}
 pub struct DeltaPatchDescriptor {
-    pub size: u32,
+    // pub target_version: [u8; 4],
+    // pub source_version: [u8; 4],
+    // pub source_digest: [u8; 20],
+    // pub source_image_key: [u8; 16],
+    pub size_of_target_headers: u32,
+    pub delta_headers_source_offset: u32,
+    pub delta_headers_source_size: u32,
+    pub delta_headers_target_offset: u32,
+    pub delta_image_source_offset: u32,
+    pub delta_image_source_size: u32,
+    pub delta_image_target_offset: u32,
+    pub delta_patch: DeltaPatch,
 }
 
 struct XexOptionalHeaderData {
@@ -93,7 +124,7 @@ pub enum XexOptionalHeader {
     ResourceInfo { info: Vec<ResourceInfo> },
     BaseFileFormat { format: BaseFileFormat },
     // BaseReference = 0x405,
-    // DeltaPatchDescriptor = 0x5FF,
+    DeltaPatchDescriptor { descriptor: DeltaPatchDescriptor },
     // BoundingPath = 0x80FF,
     // DeviceID = 0x8105,
     // OriginalBaseAddress = 0x10001,
@@ -152,10 +183,9 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                 xex_optional_headers.push(XexOptionalHeader::ResourceInfo { info });
             }
             0x3FF => {
-                let encrypted: bool;
-                match read_halfword(&header.data, 0) {
-                    0 => encrypted = false,
-                    1 => encrypted = true,
+                let encrypted = match read_halfword(&header.data, 0) {
+                    0 => false,
+                    1 => true,
                     _ => unreachable!(),
                 };
                 let compression = match read_halfword(&header.data, 2) {
@@ -195,7 +225,18 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                 log::debug!("TODO: implement BaseReference")
             }
             0x5FF => {
-                log::debug!("TODO: implement DeltaPatchDescriptor")
+                xex_optional_headers.push(XexOptionalHeader::DeltaPatchDescriptor {
+                    descriptor: DeltaPatchDescriptor {
+                        size_of_target_headers: read_word(&header.data, 44),
+                        delta_headers_source_offset: read_word(&header.data, 48),
+                        delta_headers_source_size: read_word(&header.data, 52),
+                        delta_headers_target_offset: read_word(&header.data, 56),
+                        delta_image_source_offset: read_word(&header.data, 60),
+                        delta_image_source_size: read_word(&header.data, 64),
+                        delta_image_target_offset: read_word(&header.data, 68),
+                        delta_patch: DeltaPatch::parse(&header.data, 72),
+                    },
+                });
             }
             0x80FF => {
                 log::debug!("TODO: implement BoundingPath")
@@ -207,15 +248,15 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                 log::debug!("TODO: implement OriginalBaseAddress")
             }
             0x10100 => {
-                let entry = read_word(&header.data, 0);
-                xex_optional_headers.push(XexOptionalHeader::EntryPoint { entry });
+                xex_optional_headers
+                    .push(XexOptionalHeader::EntryPoint { entry: read_word(&header.data, 0) });
             }
             0x10201 => {
-                let image_base = read_word(&header.data, 0);
-                xex_optional_headers.push(XexOptionalHeader::ImageBaseAddress { image_base });
+                xex_optional_headers.push(XexOptionalHeader::ImageBaseAddress {
+                    image_base: read_word(&header.data, 0),
+                });
             }
             0x103FF => {
-                log::debug!("Import libraries!");
                 let string_size = read_word(&header.data, 0);
                 let lib_count = read_word(&header.data, 4);
 
@@ -262,7 +303,9 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                 xex_optional_headers.push(XexOptionalHeader::ImportLibraries { libraries });
             }
             0x18002 => {
-                log::debug!("TODO: implement ChecksumTimestamp")
+                xex_optional_headers.push(XexOptionalHeader::ChecksumTimestamp {
+                    timestamp: read_word(&header.data, 0),
+                });
             }
             0x18102 => {
                 log::debug!("TODO: implement EnabledForCallcap")
