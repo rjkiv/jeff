@@ -44,38 +44,30 @@ pub struct NormalCompression {
     pub block_hash: [u8; 20],
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive)]
-#[repr(u16)]
-pub enum XexEncryption {
-    No = 0,
-    Yes = 1,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive)]
-#[repr(u16)]
 pub enum XexCompression {
-    None = 0,
-    Raw = 1,
-    Compressed = 2,
-    DeltaCompressed = 3,
+    None,
+    Raw { basics: Vec<BasicCompression> },
+    Compressed { normal: NormalCompression },
+    DeltaCompressed { normal: NormalCompression },
 }
 
 pub struct BaseFileFormat {
-    pub encryption: XexEncryption,
+    pub encrypted: bool,
     pub compression: XexCompression,
-    pub basics: Vec<BasicCompression>,
-    pub normal: Option<NormalCompression>,
 }
 
 impl BaseFileFormat {
     fn parse(data: &[u8]) -> Result<Self> {
-        let encryption = XexEncryption::try_from(read_halfword(data, 0))?;
-        let compression = XexCompression::try_from(read_halfword(data, 2))?;
-        let mut basics: Vec<BasicCompression> = vec![];
-        let mut normal = None;
-        match compression {
-            XexCompression::None => {}
-            XexCompression::Raw => {
+        let encrypted: bool;
+        match read_halfword(data, 0) {
+            0 => encrypted = false,
+            1 => encrypted = true,
+            _ => unreachable!(),
+        };
+        let compression = match read_halfword(data, 2) {
+            0 => XexCompression::None,
+            1 => {
+                let mut basics: Vec<BasicCompression> = vec![];
                 let count = (data.len() - 4) / 8;
                 for i in 0..count {
                     basics.push(BasicCompression {
@@ -83,16 +75,26 @@ impl BaseFileFormat {
                         zero_size: read_word(data, 8 + i * 8),
                     });
                 }
+                XexCompression::Raw { basics }
             }
-            XexCompression::Compressed | XexCompression::DeltaCompressed => {
-                normal = Some(NormalCompression {
+            2 => XexCompression::Compressed {
+                normal: NormalCompression {
                     window_size: read_word(data, 4),
                     block_size: read_word(data, 8),
                     block_hash: data[12..32].try_into()?,
-                });
-            }
-        }
-        Ok(Self { encryption, compression, basics, normal })
+                },
+            },
+            3 => XexCompression::DeltaCompressed {
+                normal: NormalCompression {
+                    window_size: read_word(data, 4),
+                    block_size: read_word(data, 8),
+                    block_hash: data[12..32].try_into()?,
+                },
+            },
+            _ => unreachable!(),
+        };
+
+        Ok(Self { encrypted, compression })
     }
 }
 
@@ -284,6 +286,7 @@ impl XexOptionalHeaderData {
                 }
                 XexOptionalHeaderID::DeltaPatchDescriptor => {
                     log::debug!("TODO: handle patch descriptor");
+                    // "size" field is header.data.len(), plus 4
                     println!(
                         "Target version: v{}.{}.{}.{}",
                         header.data[0], header.data[1], header.data[2], header.data[3]
@@ -580,10 +583,13 @@ impl XexInfo {
         base_path: &Utf8NativePathBuf,
         patch_path: Option<Utf8NativePathBuf>,
     ) -> Result<Self> {
-        // parse the base xex first
         let base_data = fs::read(base_path.to_path_buf()).expect("Failed to read file");
 
-        // TODO: get rid of this struct, we can just use the raw vars here and don't use them anywhere else
+        if let Some(patch_path) = patch_path {
+            // this is where you apply the patch xexp on top of the base xex, resulting in a new data Vec<u8> to process
+            // make it a func? apply_patch that returns a Result<Vec<u8>>?
+        }
+
         let xex_header = XexHeader::parse(&base_data)?;
         assert_ne!(xex_header.module_flags & 1, 0, "Not a base game xex!");
         let xex_optional_header_data = XexOptionalHeaderData::parse(&base_data)?;
@@ -659,36 +665,6 @@ impl XexInfo {
             }
         }
 
-        // we have an adjusted, base exe at this point
-        // if we've got a patch xex, parse it and apply it on top
-        if let Some(patch_path) = patch_path {
-            // parse the base xex first
-            let xexp_data = fs::read(patch_path.to_path_buf()).expect("Failed to read file");
-            let xexp_header = XexHeader::parse(&xexp_data)?;
-            assert_ne!(xexp_header.module_flags & 16, 0, "Not an xex patch file!");
-            let xexp_optional_header_data = XexOptionalHeaderData::parse(&xexp_data)?;
-            let xexp_loader_info =
-                XexLoaderInfo::parse(&xexp_data, xexp_header.security_info_offset)?;
-            if xexp_header.module_flags & 32 != 0 {
-                todo!("Full patch not implemented yet! If your game has a full patch file, please let me know on Github issues!");
-            }
-            if xexp_header.module_flags & 64 != 0 {
-                println!("Delta patch!");
-                let patch_vec =
-                    &xexp_data[xexp_header.pe_offset as usize..xexp_data.len()].to_vec();
-                let Some(bff) = &xexp_optional_header_data.base_file_format else {
-                    panic!("We need to have a BaseFileFormat at this point!")
-                };
-                let patch_decompressed = XexInfo::decompress(
-                    patch_vec,
-                    &confirmed_session_key,
-                    bff,
-                    xexp_header.security_info_offset,
-                )?;
-                println!("Decompressed patch size: {}", patch_decompressed.len());
-            }
-        }
-
         Ok(Self {
             header: xex_header,
             opt_header_data: xex_optional_header_data,
@@ -705,18 +681,21 @@ impl XexInfo {
         bff: &BaseFileFormat,
         img_size: u32,
     ) -> Result<Vec<u8>> {
-        let compressed: Cow<[u8]> = match bff.encryption {
-            XexEncryption::No => Cow::Borrowed(input),
-            XexEncryption::Yes => Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, input)?),
+        let compressed: Cow<[u8]> = match bff.encrypted {
+            false => Cow::Borrowed(input),
+            true => Cow::Owned(decrypt_aes128_cbc_no_padding(session_key, input)?),
         };
 
         let mut output_bytes: Vec<u8> = vec![0; img_size as usize];
         let mut pos_in: usize = 0;
         let mut pos_out: usize = 0;
 
-        match bff.compression {
-            XexCompression::Raw => {
-                for bc in &bff.basics {
+        match &bff.compression {
+            XexCompression::None => {
+                output_bytes = compressed.to_vec();
+            }
+            XexCompression::Raw { basics } => {
+                for bc in basics {
                     for i in 0..(bc.data_size as usize) {
                         if pos_in + i >= compressed.len() {
                             break;
@@ -727,11 +706,7 @@ impl XexInfo {
                     pos_in += bc.data_size as usize;
                 }
             }
-            XexCompression::None | XexCompression::DeltaCompressed => {
-                output_bytes = compressed.to_vec();
-            }
-            XexCompression::Compressed => {
-                let comp = bff.normal.as_ref().unwrap();
+            XexCompression::Compressed { normal: comp } => {
                 let window_size = comp.window_size as usize;
                 let lzx_window = lzxd::WindowSize::KB32;
                 let mut lzxd_state = Lzxd::new(lzx_window);
@@ -807,7 +782,10 @@ impl XexInfo {
                     bail!("LZX: produced zero output bytes");
                 }
             }
-        }
+            XexCompression::DeltaCompressed { normal: _ } => {
+                output_bytes = compressed.to_vec();
+            }
+        };
         Ok(output_bytes)
     }
 }

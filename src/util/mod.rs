@@ -20,6 +20,7 @@ pub mod take_seek;
 pub mod toposort;
 pub mod xex;
 pub mod xex_imports;
+pub mod xex_optional_headers;
 pub mod xpdb;
 
 #[inline]

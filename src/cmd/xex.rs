@@ -45,10 +45,7 @@ use crate::{
         map_exe::{apply_map_file_exe, process_map_exe},
         path::native_path,
         split::{split_obj, update_splits},
-        xex::{
-            coff_path_for_unit, list_exe_sections, write_coff, XexCompression, XexEncryption,
-            XexInfo,
-        },
+        xex::{coff_path_for_unit, list_exe_sections, write_coff, XexCompression, XexInfo},
         xpdb::try_parse_pdb,
     },
 };
@@ -673,9 +670,13 @@ fn info(args: InfoArgs) -> Result<()> {
     let bff = xex.opt_header_data.base_file_format.as_ref().unwrap();
     println!(
         "  {}",
-        if bff.compression == XexCompression::Compressed { "Compressed" } else { "Uncompressed" }
+        if matches!(bff.compression, XexCompression::Compressed { normal: _ }) {
+            "Compressed"
+        } else {
+            "Uncompressed"
+        }
     );
-    println!("  {}", if bff.encryption == XexEncryption::No { "Unencrypted" } else { "Encrypted" });
+    println!("  {}", if !bff.encrypted { "Unencrypted" } else { "Encrypted" });
     println!();
 
     println!("Basefile Info:");
