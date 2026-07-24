@@ -387,7 +387,6 @@ impl XexInfo {
         let pe_file = PeFile32::parse(pe_file_adjusted.as_slice())
             .expect("Failed to parse adjusted exe file");
 
-        // TODO: fill out the ImportLibrary info and unstrip here
         if let Some(import_libs) = import_libs {
             for lib in import_libs.iter_mut() {
                 for record in &lib.records {
@@ -431,6 +430,7 @@ impl XexInfo {
                     }
                 }
             }
+            // TODO: unstrip here
         }
 
         pe_file_adjusted

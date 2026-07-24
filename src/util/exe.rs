@@ -60,8 +60,8 @@ impl InputtedExecutable {
                 })
                 .unwrap_or_else(|| String::from("output.exe"));
 
-            let import_libraries = xex.optional_headers.iter().find_map(|h| match h {
-                XexOptionalHeader::ImportLibraries { libraries } => Some(libraries.clone()),
+            let import_libraries = xex.optional_headers.into_iter().find_map(|h| match h {
+                XexOptionalHeader::ImportLibraries { libraries } => Some(libraries),
                 _ => None,
             });
 
