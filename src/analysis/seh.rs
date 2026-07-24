@@ -14,6 +14,8 @@ struct CScopeTableEntry {
     pub target: u32,
 }
 
+pub const EXCEPTION_DATA_PREFIX: &str = "__exceptdata$";
+
 pub fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
     // add known function boundaries from pdata
     // FIXME: Some of these are SEH-related labels, not function entrypoints
@@ -60,7 +62,7 @@ pub fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
         if func_type == 3 {
             // println!("Exception handler at {:08X}, record at {:08X}", start_addr - 8, start_addr - 4);
             syms_to_add.push(ObjSymbol {
-                name: format!("except_data_{:08X}", start_addr),
+                name: format!("{}{:08X}", EXCEPTION_DATA_PREFIX, start_addr),
                 address: (start_addr - 8) as u64,
                 section: Some(func_start_addr.section),
                 size: 8,

@@ -10,6 +10,7 @@ use itertools::Itertools;
 
 use crate::{
     analysis::{
+        seh::EXCEPTION_DATA_PREFIX,
         skip_alignment,
         slices::{FunctionSlices, TailCallResult},
     },
@@ -124,6 +125,8 @@ pub struct AnalyzerState {
 
 impl AnalyzerState {
     pub fn apply(&self, obj: &mut ObjInfo) -> Result<()> {
+        // TODO: somewhere in this function is where you'd dynamically apply the actual function symbols to structures like __ehfuncinfo, except_data, __scopetable, etc
+
         for (&section_index, section_name) in &self.known_sections {
             obj.sections[section_index].rename(section_name.clone())?;
         }
@@ -139,7 +142,7 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            obj.add_symbol(
+            let sym_idx = obj.add_symbol(
                 ObjSymbol {
                     name: format!("fn_{:08X}", start.address),
                     address: start.address as u64,
@@ -151,6 +154,32 @@ impl AnalyzerState {
                 },
                 false,
             )?;
+            let sym_addr = {
+                let sym = &obj.symbols[sym_idx];
+                SectionAddress::new(sym.section.unwrap(), sym.address as u32)
+            };
+            if obj.funcs_with_c_handlers.contains_key(&sym_addr)
+                || obj.funcs_with_cxx_handlers.contains_key(&sym_addr)
+            {
+                // println!("Must replace except data symbol for {:?}!", sym_addr);
+                let except_data_addr = sym_addr - 8;
+
+                let new_sym_idx = {
+                    obj.symbols
+                        .at_section_address(except_data_addr.section, except_data_addr.address)
+                        .next()
+                        .expect("No except data to replace!")
+                        .0
+                };
+                let mut new_sym = obj.symbols[new_sym_idx].clone();
+                new_sym.name = format!("{}{}", EXCEPTION_DATA_PREFIX, obj.symbols[sym_idx].name);
+                obj.symbols.replace(new_sym_idx, new_sym)?;
+            }
+            // obj.symbols[sym_idx].name gives the actual name of the function at start.address
+            // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
+            // if this func is in either the c or cxx handlers maps, we know there's an except_data symbol
+
+            // use obj.symbols.at_section_address to get the old symbol, and replace it with the symbol at start.address's actual name
         }
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {
@@ -245,10 +274,10 @@ impl AnalyzerState {
         // Also check the beginning of every code section
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             let this_sec_start = SectionAddress::new(section_index, section.address as u32);
-            if obj
-                .symbols
-                .by_name(&format!("except_data_{:08X}", this_sec_start.address + 8))?
-                .is_some()
+            let possible_func_addr =
+                SectionAddress::new(section_index, (section.address + 8) as u32);
+            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
+                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
             {
                 continue;
             }
@@ -508,10 +537,10 @@ impl AnalyzerState {
                         };
                         if second > addr {
                             // don't try to add a function where there's an exception symbol
-                            if obj
-                                .symbols
-                                .by_name(&format!("except_data_{:08X}", addr.address + 8))?
-                                .is_some()
+                            let possible_func_addr =
+                                SectionAddress::new(section_index, addr.address + 8);
+                            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
+                                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
                             {
                                 continue;
                             }
