@@ -60,9 +60,10 @@ pub struct ObjInfo {
     /// Functions that have an entry in .pdata.
     pub pdata_funcs: Vec<SectionAddress>,
     /// Info retrieved from exception datas that precede certain functions.
-    // key = the function's SectionAddress
-    // value = the SectionAddress for this func's exception handler, the optional SectionAddress for this func's exception record
-    pub exception_datas: BTreeMap<SectionAddress, (SectionAddress, Option<SectionAddress>)>,
+    // funcs with C except handlers
+    pub funcs_with_c_handlers: BTreeMap<SectionAddress, SectionAddress>,
+    // funcs with CXX except handlers
+    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, SectionAddress>,
     // unwinds?
     // catches?
     // hell, even rtti classes?
@@ -91,7 +92,8 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
-            exception_datas: Default::default(),
+            funcs_with_c_handlers: Default::default(),
+            funcs_with_cxx_handlers: Default::default(),
         }
     }
 

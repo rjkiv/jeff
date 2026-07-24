@@ -1,4 +1,4 @@
-use std::{collections::btree_map::Entry, fs, fs::File, io::Read, num::NonZeroU64};
+use std::{fs, fs::File, io::Read, num::NonZeroU64};
 
 use anyhow::{bail, ensure, Result};
 use memchr::memmem;
@@ -6,7 +6,7 @@ use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
-    analysis::{cfa::SectionAddress, read_u32},
+    analysis::{cfa::SectionAddress, seh::process_pdata},
     obj::{
         ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
         ObjSymbolKind, SymbolIndex,
@@ -401,111 +401,6 @@ impl InputtedExecutable {
 
         Ok(obj)
     }
-}
-
-fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
-    // add known function boundaries from pdata
-    // FIXME: Some of these are SEH-related labels, not function entrypoints
-    let (_pdata_sec_idx, pdata_section) = obj
-        .sections
-        .by_name(".pdata")?
-        .expect(".pdata section not found. Is that even possible for an xex?");
-
-    let mut syms_to_add: Vec<ObjSymbol> = vec![];
-    let mut num_discovered_funcs = 0;
-    let data = &pdata_section.data;
-    for chunk in data.chunks_exact(8) {
-        let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
-        // if we encounter 0's, that's the end of usable pdata entries
-        if start_addr == 0 {
-            break;
-        }
-
-        // some metadata for this function, including function size
-        let word = u32::from_be_bytes(chunk[4..8].try_into()?);
-        // let num_prologue_insts = word & 0xFF; // The number of instructions in the function's prolog.
-        let num_insts_in_func = (word >> 8) & 0x3FFFFF; // The number of instructions in the function.
-        let func_type = word >> 30; // The function type.
-
-        let func_start_addr =
-            SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
-        obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-        obj.pdata_funcs.push(func_start_addr);
-        num_discovered_funcs += 1;
-
-        // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
-        if func_type == 3 {
-            // println!("Exception handler at {:08X}, record at {:08X}", start_addr - 8, start_addr - 4);
-            syms_to_add.push(ObjSymbol {
-                name: format!("except_data_{:08X}", start_addr),
-                address: (start_addr - 8) as u64,
-                section: Some(func_start_addr.section),
-                size: 8,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Object,
-                ..Default::default()
-            });
-
-            let mut cur_func_except_data: (SectionAddress, Option<SectionAddress>) =
-                (func_start_addr, None); // func_start_addr should be overwritten anyway
-
-            // word 1: the address of the function's exception handler
-            if let Some(except_func) =
-                read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)
-            {
-                let except_func_section =
-                    SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
-                // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                if let Entry::Vacant(e) = obj.known_functions.entry(except_func_section) {
-                    e.insert(None);
-                    num_discovered_funcs += 1;
-                }
-                cur_func_except_data.0 = except_func_section;
-            } else {
-                bail!("Invalid exception handler address listed at {}!", start_addr - 8)
-            }
-            // word 2: the address of the function's exception handler data record
-            if let Some(except_record) =
-                read_u32(obj.sections.at_address(start_addr - 4)?.1, start_addr - 4)
-            {
-                // exception handlers can have no record (a nullptr in the exception data)
-                if except_record != 0 {
-                    let except_record_section = SectionAddress::new(
-                        obj.sections.at_address(except_record)?.0,
-                        except_record,
-                    );
-                    syms_to_add.push(ObjSymbol {
-                        name: format!("except_record_{:08X}", start_addr),
-                        address: except_record as u64,
-                        section: Some(except_record_section.section),
-                        size: 4,
-                        size_known: false, // we don't know exactly how big this particular exception record may be
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    });
-                    cur_func_except_data.1 = Some(except_record_section);
-                } else {
-                    cur_func_except_data.1 = None;
-                }
-            } else {
-                bail!("Invalid exception record address listed at {}!", start_addr - 4)
-            }
-
-            obj.exception_datas.insert(func_start_addr, cur_func_except_data);
-        }
-    }
-    log::info!("Found {} known funcs from pdata!", num_discovered_funcs);
-
-    // TODO: traverse exception data/records here?
-
-    // then for each except_data/except_record symbol (might remove later idk)
-    for sym in syms_to_add {
-        obj.add_symbol(sym, false)?;
-    }
-
-    Ok(())
 }
 
 fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
