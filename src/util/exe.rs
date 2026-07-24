@@ -15,7 +15,7 @@ use crate::{
         read::read_word,
         xex::XexInfo,
         xex_imports::replace_ordinal,
-        xex_optional_headers::{ImportFunction, ImportLibrary, XexOptionalHeader},
+        xex_optional_headers::{ImportLibrary, XexOptionalHeader},
     },
 };
 
@@ -131,42 +131,7 @@ impl InputtedExecutable {
         obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
         // inspect the ImportLibraries if we have them
-        if let ExeType::Xex { import_libraries: Some(imports) } = &mut self.exe_type {
-            // first, retrieve the ImportFunctions
-            for lib in imports.iter_mut() {
-                for record in lib.records.iter() {
-                    // so what needs to happen here:
-                    // record = a virtual memory address
-                    // get the value inside it, it should be something like (example: 01 00 01 94)
-                    // the last 3 bytes (00 01 94) is the ordinal, the first byte (01) is the itype
-                    // if 0, it's a func, if 1, it's a thunk
-
-                    let sec = obj.sections.at_address(*record)?.1;
-                    let offset_within_sec = record - sec.address as u32;
-                    let value = read_word(&sec.data, offset_within_sec as usize);
-                    let ordinal = value & 0xFFFF;
-                    let itype = value >> 24;
-                    match itype {
-                        0 => {
-                            lib.functions.push(ImportFunction {
-                                address: *record,
-                                ordinal,
-                                thunk: 0,
-                            });
-                        }
-                        1 => {
-                            if let Some(func) = lib.functions.last_mut() {
-                                // println!("Record 0x{:08X}, ordinal 0x{:04X}, thunk 0x{:08X}", func.address, ordinal, *record);
-                                func.thunk = *record;
-                            }
-                        }
-                        _ => {
-                            unreachable!()
-                        } // shouldn't ever reach this branch, will always be 0 or 1
-                    }
-                }
-            }
-
+        if let ExeType::Xex { import_libraries: Some(imports) } = &self.exe_type {
             let mut num_imps = 0;
             let mut num_thunks = 0;
             let mut min_imp_addr: Option<u32> = None;
@@ -382,8 +347,10 @@ impl InputtedExecutable {
             );
         }
 
-        process_pdata(&mut obj)?;
+        // you would be amazed just how much we can infer from an Xbox 360 exe before CFA can even begin
+        process_pdata(&mut obj)?; // process_exception_info (inside pdata func)
         process_xidata(&mut obj)?;
+        // process_rtti
 
         const RTL_CHECK_STACK: [u8; 40] = [
             // _RtlCheckStack

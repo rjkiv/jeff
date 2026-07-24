@@ -6,8 +6,8 @@ use object::{
     endian,
     read::pe::PeFile32,
     write::{SectionId, SymbolId},
-    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
-    SymbolScope,
+    Architecture, BinaryFormat, Endianness, Object, ObjectSection, RelocationFlags, SectionKind,
+    SymbolFlags, SymbolKind, SymbolScope,
 };
 use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 
@@ -20,7 +20,8 @@ use crate::{
         crypto::decrypt_aes128_cbc_no_padding,
         read::read_word,
         xex_optional_headers::{
-            parse_xex_optional_headers, BaseFileFormat, XexCompression, XexOptionalHeader,
+            parse_xex_optional_headers, BaseFileFormat, ImportFunction, ImportLibrary,
+            XexCompression, XexOptionalHeader,
         },
     },
 };
@@ -155,7 +156,7 @@ impl XexInfo {
         }
 
         let xex_header = XexHeader::parse(&base_data)?;
-        let xex_optional_headers = parse_xex_optional_headers(&base_data)?;
+        let mut xex_optional_headers = parse_xex_optional_headers(&base_data)?;
         let xex_loader_info = XexLoaderInfo::parse(&base_data, xex_header.security_info_offset)?;
 
         let retail_key: [u8; 16] =
@@ -201,7 +202,12 @@ impl XexInfo {
             bail!("Could not deduce exe type!");
         }
 
-        let pe_file_finalized = XexInfo::finalize_exe(&exe_bytes);
+        let import_libs = xex_optional_headers.iter_mut().find_map(|h| match h {
+            XexOptionalHeader::ImportLibraries { libraries } => Some(libraries),
+            _ => None,
+        });
+
+        let pe_file_finalized = XexInfo::finalize_exe(&exe_bytes, import_libs);
 
         Ok(Self {
             header: xex_header,
@@ -346,7 +352,7 @@ impl XexInfo {
     //     Ok(patched_xex_bytes)
     // }
 
-    fn finalize_exe(exe_bytes: &Vec<u8>) -> Vec<u8> {
+    fn finalize_exe(exe_bytes: &Vec<u8>, import_libs: Option<&mut Vec<ImportLibrary>>) -> Vec<u8> {
         let pe_file = PeFile32::parse(exe_bytes.as_slice())
             .expect("Failed to parse newly pulled out exe file");
         let mut pe_file_adjusted: Vec<u8> = vec![];
@@ -378,7 +384,54 @@ impl XexInfo {
             }
         }
 
+        let pe_file = PeFile32::parse(pe_file_adjusted.as_slice())
+            .expect("Failed to parse adjusted exe file");
+
         // TODO: fill out the ImportLibrary info and unstrip here
+        if let Some(import_libs) = import_libs {
+            for lib in import_libs.iter_mut() {
+                for record in &lib.records {
+                    // so what needs to happen here:
+                    // record = a virtual memory address
+                    // get the value inside it, it should be something like (example: 01 00 01 94)
+                    // the last 3 bytes (00 01 94) is the ordinal, the first byte (01) is the itype
+                    // if 0, it's a func, if 1, it's a thunk
+
+                    let section = pe_file
+                        .sections()
+                        .find(|s| {
+                            let start = s.address() as u32;
+                            let end = (s.address() + s.size()) as u32;
+                            *record >= start && *record < end
+                        })
+                        .expect("Section for this ImportLibrary not found!");
+                    let offset_within_sec = record - section.address() as u32;
+                    let section_data = section.uncompressed_data().expect("where data");
+                    let value = read_word(&section_data, offset_within_sec as usize);
+                    // println!("value: {:08X}", value);
+                    let ordinal = value & 0xFFFF;
+                    let itype = value >> 24;
+                    match itype {
+                        0 => {
+                            lib.functions.push(ImportFunction {
+                                address: *record,
+                                ordinal,
+                                thunk: 0,
+                            });
+                        }
+                        1 => {
+                            if let Some(func) = lib.functions.last_mut() {
+                                // println!("Record 0x{:08X}, ordinal 0x{:04X}, thunk 0x{:08X}", func.address, ordinal, *record);
+                                func.thunk = *record;
+                            }
+                        }
+                        _ => {
+                            unreachable!()
+                        } // shouldn't ever reach this branch, will always be 0 or 1
+                    }
+                }
+            }
+        }
 
         pe_file_adjusted
     }
