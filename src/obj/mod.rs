@@ -21,7 +21,10 @@ pub use symbols::{
     ObjSymbolScope, ObjSymbols, SymbolIndex,
 };
 
-use crate::{analysis::cfa::SectionAddress, obj::addresses::AddressRanges};
+use crate::{
+    analysis::{cfa::SectionAddress, seh::CScopeTableInfo},
+    obj::addresses::AddressRanges,
+};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum ObjKind {
@@ -61,7 +64,8 @@ pub struct ObjInfo {
     pub pdata_funcs: Vec<SectionAddress>,
     /// Info retrieved from exception datas that precede certain functions.
     // funcs with C except handlers
-    pub funcs_with_c_handlers: BTreeMap<SectionAddress, SectionAddress>,
+    pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
+
     // funcs with CXX except handlers
     pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, SectionAddress>,
     // unwinds?

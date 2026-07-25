@@ -10,7 +10,7 @@ use itertools::Itertools;
 
 use crate::{
     analysis::{
-        seh::EXCEPTION_DATA_PREFIX,
+        seh::CHandlerType,
         skip_alignment,
         slices::{FunctionSlices, TailCallResult},
     },
@@ -158,26 +158,58 @@ impl AnalyzerState {
                 let sym = &obj.symbols[sym_idx];
                 SectionAddress::new(sym.section.unwrap(), sym.address as u32)
             };
-            if obj.funcs_with_c_handlers.contains_key(&sym_addr)
-                || obj.funcs_with_cxx_handlers.contains_key(&sym_addr)
-            {
-                // println!("Must replace except data symbol for {:?}!", sym_addr);
-                let except_data_addr = sym_addr - 8;
-
-                let new_sym_idx = {
-                    obj.symbols
-                        .at_section_address(except_data_addr.section, except_data_addr.address)
-                        .next()
-                        .expect("No except data to replace!")
-                        .0
-                };
-                let mut new_sym = obj.symbols[new_sym_idx].clone();
-                new_sym.name = format!("{}{}", EXCEPTION_DATA_PREFIX, obj.symbols[sym_idx].name);
-                obj.symbols.replace(new_sym_idx, new_sym)?;
-            }
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
             // if this func is in either the c or cxx handlers maps, we know there's an except_data symbol
+
+            // if this func has a C exception, add/replace C scope table symbols
+            if let Some(c_scope_table_info) = obj.funcs_with_c_handlers.get(&sym_addr) {
+                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
+                syms_to_add.push(ObjSymbol {
+                    name: format!("__scopetable${}", obj.symbols[sym_idx].name),
+                    address: c_scope_table_info.addr.address as u64,
+                    section: Some(c_scope_table_info.addr.section),
+                    size: (c_scope_table_info.handler_addrs.len() * 16 + 4) as u64,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Object,
+                    ..Default::default()
+                });
+
+                let mut handler_idx = 0;
+                for handler in &c_scope_table_info.handler_addrs {
+                    // replace the symbols with new names, they'll be fully analyzed functions at this point
+                    match handler {
+                        CHandlerType::Except { addr } => {
+                            let (except_func_idx, except_func_sym) = obj
+                                .symbols
+                                .at_section_address(addr.section, addr.address)
+                                .next()
+                                .expect("how was this not analyzed");
+                            let mut new_sym = except_func_sym.clone();
+                            new_sym.name =
+                                format!("__except{}${}", handler_idx, obj.symbols[sym_idx].name);
+                            obj.symbols.replace(except_func_idx, new_sym)?;
+                        }
+                        CHandlerType::Finally { addr } => {
+                            let (except_func_idx, except_func_sym) = obj
+                                .symbols
+                                .at_section_address(addr.section, addr.address)
+                                .next()
+                                .expect("how was this not analyzed");
+                            let mut new_sym = except_func_sym.clone();
+                            new_sym.name =
+                                format!("__finally{}${}", handler_idx, obj.symbols[sym_idx].name);
+                            obj.symbols.replace(except_func_idx, new_sym)?;
+                        }
+                    }
+                    handler_idx += 1;
+                }
+
+                for sym in syms_to_add {
+                    obj.add_symbol(sym, true)?;
+                }
+            }
 
             // use obj.symbols.at_section_address to get the old symbol, and replace it with the symbol at start.address's actual name
         }

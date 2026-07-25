@@ -130,6 +130,22 @@ impl InputtedExecutable {
             ObjInfo::new(ObjKind::Executable, self.exe_name.to_string(), vec![], sections);
         obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
+        if let Some(entry) = obj.entry {
+            // label entry as mainCRTStartup
+            obj.add_symbol(
+                ObjSymbol {
+                    name: String::from("mainCRTStartup"),
+                    address: entry,
+                    section: Some(obj.sections.at_address(entry as u32)?.0),
+                    size_known: false,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Function,
+                    ..Default::default()
+                },
+                false,
+            )?;
+        }
+
         // inspect the ImportLibraries if we have them
         if let ExeType::Xex { import_libraries: Some(imports) } = &self.exe_type {
             let mut num_imps = 0;
