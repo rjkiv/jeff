@@ -239,19 +239,23 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            obj.add_symbol(
-                ObjSymbol {
-                    name: format!("jumptable_{:08X}", addr.address),
-                    address: addr.address as u64,
-                    section: Some(addr.section),
-                    size: size as u64,
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Local.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                },
-                false,
-            )?;
+            // because MSVC likes to stick absolute jump tables in the middle of functions,
+            // and if we label those it'll cause conflicts with the function boundaries itself
+            if section.kind != ObjSectionKind::Code {
+                obj.add_symbol(
+                    ObjSymbol {
+                        name: format!("jumptable_{:08X}", addr.address),
+                        address: addr.address as u64,
+                        section: Some(addr.section),
+                        size: size as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Local.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
         }
         for (&_addr, symbols) in &self.known_symbols {
             for symbol in symbols {
