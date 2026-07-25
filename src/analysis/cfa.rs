@@ -124,8 +124,6 @@ pub struct AnalyzerState {
 
 impl AnalyzerState {
     pub fn apply(&self, obj: &mut ObjInfo) -> Result<()> {
-        // TODO: somewhere in this function is where you'd dynamically apply the actual function symbols to structures like __ehfuncinfo, except_data, __scopetable, etc
-
         for (&section_index, section_name) in &self.known_sections {
             obj.sections[section_index].rename(section_name.clone())?;
         }
@@ -171,7 +169,6 @@ impl AnalyzerState {
             };
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
-            // if this func is in either the c or cxx handlers maps, we know there's an except_data symbol
 
             // if this func has a C exception, add/replace C scope table symbols
             if let Some(c_scope_table_info) = obj.funcs_with_c_handlers.get(&sym_addr) {
@@ -180,6 +177,8 @@ impl AnalyzerState {
                     name: format!("__scopetable${}", obj.symbols[sym_idx].name),
                     address: c_scope_table_info.addr.address as u64,
                     section: Some(c_scope_table_info.addr.section),
+                    // size of scope table: 16 * num_scope_entries + 4
+                    // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
                     size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
@@ -244,8 +243,6 @@ impl AnalyzerState {
                     obj.add_symbol(sym, true)?;
                 }
             }
-
-            // use obj.symbols.at_section_address to get the old symbol, and replace it with the symbol at start.address's actual name
         }
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {

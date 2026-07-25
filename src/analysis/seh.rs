@@ -20,10 +20,6 @@ pub struct CScopeTableInfo {
     // DWORD 2 - End; // where the try ends
     // DWORD 3 - Handler; // the __finally handler if Target is 0, else, the __except handler
     // DWORD 4 - Target; // the code inside the __except block
-
-    // size of scope table: 16 * num_scope_entries + 4
-    // 16 = size of scope table entry
-    // 4 = the word that contains the number of scope entries
 }
 
 // info on CXX exception info structs: https://www.openrce.org/articles/full_view/21
@@ -212,6 +208,12 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         // if an __ehfuncinfo is owned by more than one SectionAddress,
                         // the first is for the function itself, and the rest are its catches
                         obj.catches.insert(func_start_addr);
+
+                        // check to see if the addr is already part of a known function - if it's not, add it to known_functions
+                        if let Entry::Vacant(e) = obj.known_functions.entry(func_start_addr) {
+                            e.insert(None);
+                            num_discovered_funcs += 1;
+                        }
                     } else {
                         // parse the C++ __ehfuncinfo that's located at cur_func_except_record
                         assert_eq!(
@@ -264,9 +266,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             let try_map_addr =
                                 read_word(&rdata_section.data, (offset_into_sec + 16) as usize);
                             if try_map_addr != 0 {
+                                assert!(num_tries > 0);
                                 // if there's at least 1 try, that means there's at least 1 catch
                                 obj.funcs_with_catches.insert(func_start_addr);
-                                // TODO: if try_map_addr is some, parse the entries
+                                // TODO: we know there's a try map at this point, parse the entries
                                 Some(SectionAddress::new(rdata_sec_idx, try_map_addr))
                             } else {
                                 None
@@ -301,14 +304,11 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             }
         }
     }
-    log::info!("Found {} known funcs from pdata!", num_discovered_funcs);
-    if c_handler_addr.is_some() {
-        log::info!("Found {} funcs with C exception handlers!", obj.funcs_with_c_handlers.len());
-        log::info!(
-            "Found {} funcs with CXX exception handlers!",
-            obj.funcs_with_cxx_handlers.len()
-        );
-    }
+    log::info!("Found {} known funcs from SEH!", num_discovered_funcs);
+    // if c_handler_addr.is_some() {
+    //     log::info!("\tC   exception handlers: {}", obj.excepts.len() + obj.finallys.len());
+    //     log::info!("\tC++ exception handlers: {}", obj.unwinds.len() + obj.catches.len());
+    // }
 
     // add Cxx handler symbol here
     if let Some(cxx_handler) = cxx_handler_addr {
