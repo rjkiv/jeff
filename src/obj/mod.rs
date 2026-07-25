@@ -8,6 +8,7 @@ use std::{
     cmp::{max, min},
     collections::{BTreeMap, BTreeSet},
     hash::Hash,
+    rc::Rc,
 };
 
 use anyhow::{anyhow, bail, ensure, Result};
@@ -22,7 +23,10 @@ pub use symbols::{
 };
 
 use crate::{
-    analysis::{cfa::SectionAddress, seh::CScopeTableInfo},
+    analysis::{
+        cfa::SectionAddress,
+        seh::{CScopeTableInfo, CXXEhFuncInfo},
+    },
     obj::addresses::AddressRanges,
 };
 
@@ -63,13 +67,19 @@ pub struct ObjInfo {
     /// Functions that have an entry in .pdata.
     pub pdata_funcs: Vec<SectionAddress>,
     /// Info retrieved from exception datas that precede certain functions.
+    // C:
     // funcs with C except handlers
     pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
+    pub excepts: BTreeSet<SectionAddress>,
+    pub finallys: BTreeSet<SectionAddress>,
 
-    // funcs with CXX except handlers
-    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, SectionAddress>,
+    // C++:
+    // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
+    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, Rc<CXXEhFuncInfo>>,
     // unwinds?
-    // catches?
+    pub catches: BTreeSet<SectionAddress>,
+    // funcs that have at least 1 catch
+    pub funcs_with_catches: BTreeSet<SectionAddress>,
     // hell, even rtti classes?
 
     // Extracted
@@ -97,7 +107,11 @@ impl ObjInfo {
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
             funcs_with_c_handlers: Default::default(),
+            excepts: Default::default(),
+            finallys: Default::default(),
             funcs_with_cxx_handlers: Default::default(),
+            funcs_with_catches: Default::default(),
+            catches: Default::default(),
         }
     }
 

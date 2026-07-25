@@ -10,7 +10,6 @@ use itertools::Itertools;
 
 use crate::{
     analysis::{
-        seh::CHandlerType,
         skip_alignment,
         slices::{FunctionSlices, TailCallResult},
     },
@@ -142,9 +141,17 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
+            let func_name;
+            if obj.excepts.contains(&start) {
+                func_name = format!("__except${:08X}", start.address);
+            } else if obj.finallys.contains(&start) {
+                func_name = format!("__finally${:08X}", start.address);
+            } else {
+                func_name = format!("fn_{:08X}", start.address);
+            }
             let sym_idx = obj.add_symbol(
                 ObjSymbol {
-                    name: format!("fn_{:08X}", start.address),
+                    name: func_name,
                     address: start.address as u64,
                     section: Some(start.section),
                     size: (end.address - start.address) as u64,
@@ -169,43 +176,30 @@ impl AnalyzerState {
                     name: format!("__scopetable${}", obj.symbols[sym_idx].name),
                     address: c_scope_table_info.addr.address as u64,
                     section: Some(c_scope_table_info.addr.section),
-                    size: (c_scope_table_info.handler_addrs.len() * 16 + 4) as u64,
+                    size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Object,
                     ..Default::default()
                 });
-
-                let mut handler_idx = 0;
-                for handler in &c_scope_table_info.handler_addrs {
-                    // replace the symbols with new names, they'll be fully analyzed functions at this point
-                    match handler {
-                        CHandlerType::Except { addr } => {
-                            let (except_func_idx, except_func_sym) = obj
-                                .symbols
-                                .at_section_address(addr.section, addr.address)
-                                .next()
-                                .expect("how was this not analyzed");
-                            let mut new_sym = except_func_sym.clone();
-                            new_sym.name =
-                                format!("__except{}${}", handler_idx, obj.symbols[sym_idx].name);
-                            obj.symbols.replace(except_func_idx, new_sym)?;
-                        }
-                        CHandlerType::Finally { addr } => {
-                            let (except_func_idx, except_func_sym) = obj
-                                .symbols
-                                .at_section_address(addr.section, addr.address)
-                                .next()
-                                .expect("how was this not analyzed");
-                            let mut new_sym = except_func_sym.clone();
-                            new_sym.name =
-                                format!("__finally{}${}", handler_idx, obj.symbols[sym_idx].name);
-                            obj.symbols.replace(except_func_idx, new_sym)?;
-                        }
-                    }
-                    handler_idx += 1;
+                for sym in syms_to_add {
+                    obj.add_symbol(sym, true)?;
                 }
-
+            }
+            // if this func has a C++ exception, add/replace ehfuncinfo symbols
+            else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&sym_addr) {
+                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
+                syms_to_add.push(ObjSymbol {
+                    name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
+                    address: cxx_eh_func_info.addr.address as u64,
+                    section: Some(cxx_eh_func_info.addr.section),
+                    // if this exception record has any try/catches, there's no extra 0 at the end
+                    size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Object,
+                    ..Default::default()
+                });
                 for sym in syms_to_add {
                     obj.add_symbol(sym, true)?;
                 }
@@ -573,6 +567,7 @@ impl AnalyzerState {
                                 SectionAddress::new(section_index, addr.address + 8);
                             if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
                                 || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
+                                || obj.catches.contains(&possible_func_addr)
                             {
                                 continue;
                             }
