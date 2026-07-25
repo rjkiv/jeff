@@ -8,7 +8,6 @@ use std::{
     cmp::{max, min},
     collections::{BTreeMap, BTreeSet},
     hash::Hash,
-    rc::Rc,
 };
 
 use anyhow::{anyhow, bail, ensure, Result};
@@ -75,7 +74,7 @@ pub struct ObjInfo {
 
     // C++:
     // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
-    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, Rc<CXXEhFuncInfo>>,
+    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
     // unwinds?
     pub catches: BTreeSet<SectionAddress>,
     // funcs that have at least 1 catch

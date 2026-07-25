@@ -1,7 +1,4 @@
-use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    rc::Rc,
-};
+use std::collections::{btree_map::Entry, BTreeSet};
 
 use anyhow::{bail, Result};
 
@@ -68,7 +65,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     let mut cxx_handler_addr: Option<SectionAddress> = None;
 
     // lookup map for __ehfuncinfo tables by their SectionAddresses
-    let mut cxx_eh_lookup: BTreeMap<SectionAddress, Rc<CXXEhFuncInfo>> = BTreeMap::new();
+    let mut cxx_eh_lookup: BTreeSet<SectionAddress> = BTreeSet::new();
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
     let mut num_discovered_funcs = 0;
     let data = &pdata_section.data;
@@ -209,7 +206,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     };
 
                     // if we've already parsed this __ehfuncinfo before, don't bother parsing it again
-                    if cxx_eh_lookup.contains_key(&cur_func_except_record) {
+                    if cxx_eh_lookup.contains(&cur_func_except_record) {
                         // if an __ehfuncinfo is owned by more than one SectionAddress,
                         // the first is for the function itself, and the rest are its catches
                         obj.catches.insert(func_start_addr);
@@ -251,16 +248,15 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         };
                         // if try_map_addr is some, parse the entries
 
-                        let this_eh_func_info = Rc::new(CXXEhFuncInfo {
+                        // add to the lookup
+                        cxx_eh_lookup.insert(cur_func_except_record);
+                        obj.funcs_with_cxx_handlers.insert(func_start_addr, CXXEhFuncInfo {
                             addr: cur_func_except_record,
                             num_unwinds,
                             unwind_map_addr,
                             num_tries,
                             try_map_addr,
                         });
-                        // add to the lookup
-                        cxx_eh_lookup.insert(cur_func_except_record, this_eh_func_info.clone());
-                        obj.funcs_with_cxx_handlers.insert(func_start_addr, this_eh_func_info);
                     }
                 }
             }
