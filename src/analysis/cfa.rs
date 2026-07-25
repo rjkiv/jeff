@@ -148,6 +148,8 @@ impl AnalyzerState {
                 func_name = format!("__finally${:08X}", start.address);
             } else if obj.unwinds.contains(&start) {
                 func_name = format!("__unwind${:08X}", start.address);
+            } else if obj.catches.contains(&start) {
+                func_name = format!("__catch${:08X}", start.address);
             } else {
                 func_name = format!("fn_{:08X}", start.address);
             }
@@ -208,6 +210,30 @@ impl AnalyzerState {
                         address: unwind_map_addr.address as u64,
                         section: Some(unwind_map_addr.section),
                         size: (cxx_eh_func_info.num_unwinds * 8) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
+                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
+                        address: try_map_addr.address as u64,
+                        section: Some(try_map_addr.section),
+                        size: (cxx_eh_func_info.num_tries * 0x14) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
+                if let Some(ip_to_state_map_addr) = cxx_eh_func_info.ip_to_state_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
+                        address: ip_to_state_map_addr.address as u64,
+                        section: Some(ip_to_state_map_addr.section),
+                        size: (cxx_eh_func_info.num_ip_to_states * 8) as u64,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,

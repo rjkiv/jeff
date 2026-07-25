@@ -38,6 +38,8 @@ pub struct CXXEhFuncInfo {
     pub num_tries: u32,
     pub try_map_addr: Option<SectionAddress>,
     // iptostate map addr, and number of entries - parsing this map likely not needed for the purposes of labeling functions/eh objects
+    pub num_ip_to_states: u32,
+    pub ip_to_state_map_addr: Option<SectionAddress>,
 }
 
 pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
@@ -264,12 +266,24 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             if try_map_addr != 0 {
                                 // if there's at least 1 try, that means there's at least 1 catch
                                 obj.funcs_with_catches.insert(func_start_addr);
+                                // TODO: if try_map_addr is some, parse the entries
                                 Some(SectionAddress::new(rdata_sec_idx, try_map_addr))
                             } else {
                                 None
                             }
                         };
-                        // if try_map_addr is some, parse the entries
+
+                        let num_ip_to_states =
+                            read_word(&rdata_section.data, (offset_into_sec + 20) as usize);
+                        let ip_to_state_map_addr = {
+                            let ip_to_state_map_addr =
+                                read_word(&rdata_section.data, (offset_into_sec + 24) as usize);
+                            if ip_to_state_map_addr != 0 {
+                                Some(SectionAddress::new(rdata_sec_idx, ip_to_state_map_addr))
+                            } else {
+                                None
+                            }
+                        };
 
                         // add to the lookup
                         cxx_eh_lookup.insert(cur_func_except_record);
@@ -279,6 +293,8 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             unwind_map_addr,
                             num_tries,
                             try_map_addr,
+                            num_ip_to_states,
+                            ip_to_state_map_addr,
                         });
                     }
                 }
