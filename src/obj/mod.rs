@@ -75,7 +75,7 @@ pub struct ObjInfo {
     // C++:
     // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
     pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
-    // unwinds?
+    pub unwinds: BTreeSet<SectionAddress>,
     pub catches: BTreeSet<SectionAddress>,
     // funcs that have at least 1 catch
     pub funcs_with_catches: BTreeSet<SectionAddress>,
@@ -110,6 +110,7 @@ impl ObjInfo {
             finallys: Default::default(),
             funcs_with_cxx_handlers: Default::default(),
             funcs_with_catches: Default::default(),
+            unwinds: Default::default(),
             catches: Default::default(),
         }
     }

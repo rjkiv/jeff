@@ -226,12 +226,35 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             let unwind_map_addr =
                                 read_word(&rdata_section.data, (offset_into_sec + 8) as usize);
                             if unwind_map_addr != 0 {
+                                // at this point, we know an unwind map exists - parse its entries
+                                assert!(num_unwinds > 0);
+                                let unwind_sec_offset =
+                                    unwind_map_addr - rdata_section.address as u32;
+                                for i in 0..num_unwinds {
+                                    let maybe_unwind_addr = read_word(
+                                        &rdata_section.data,
+                                        (unwind_sec_offset + (i * 8 + 4)) as usize,
+                                    );
+                                    if maybe_unwind_addr != 0 {
+                                        let addr = SectionAddress::new(
+                                            obj.sections.at_address(maybe_unwind_addr)?.0,
+                                            maybe_unwind_addr,
+                                        );
+                                        // check to see if the addr is already part of a known function - if it's not, add it to known_functions
+                                        if let Entry::Vacant(e) = obj.known_functions.entry(addr) {
+                                            e.insert(None);
+                                            num_discovered_funcs += 1;
+                                        }
+                                        // add to our unwind list
+                                        obj.unwinds.insert(addr);
+                                    }
+                                }
+
                                 Some(SectionAddress::new(rdata_sec_idx, unwind_map_addr))
                             } else {
                                 None
                             }
                         };
-                        // if unwind_map_addr is some, parse the entries
 
                         let num_tries =
                             read_word(&rdata_section.data, (offset_into_sec + 12) as usize);

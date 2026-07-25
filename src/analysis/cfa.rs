@@ -146,6 +146,8 @@ impl AnalyzerState {
                 func_name = format!("__except${:08X}", start.address);
             } else if obj.finallys.contains(&start) {
                 func_name = format!("__finally${:08X}", start.address);
+            } else if obj.unwinds.contains(&start) {
+                func_name = format!("__unwind${:08X}", start.address);
             } else {
                 func_name = format!("fn_{:08X}", start.address);
             }
@@ -200,6 +202,18 @@ impl AnalyzerState {
                     kind: ObjSymbolKind::Object,
                     ..Default::default()
                 });
+                if let Some(unwind_map_addr) = cxx_eh_func_info.unwind_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
+                        address: unwind_map_addr.address as u64,
+                        section: Some(unwind_map_addr.section),
+                        size: (cxx_eh_func_info.num_unwinds * 8) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
                 for sym in syms_to_add {
                     obj.add_symbol(sym, true)?;
                 }
