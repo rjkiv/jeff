@@ -21,7 +21,13 @@ pub use symbols::{
     ObjSymbolScope, ObjSymbols, SymbolIndex,
 };
 
-use crate::{analysis::cfa::SectionAddress, obj::addresses::AddressRanges};
+use crate::{
+    analysis::{
+        cfa::SectionAddress,
+        seh::{CScopeTableInfo, CXXEhFuncInfo},
+    },
+    obj::addresses::AddressRanges,
+};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum ObjKind {
@@ -60,11 +66,19 @@ pub struct ObjInfo {
     /// Functions that have an entry in .pdata.
     pub pdata_funcs: Vec<SectionAddress>,
     /// Info retrieved from exception datas that precede certain functions.
-    // key = the function's SectionAddress
-    // value = the SectionAddress for this func's exception handler, the optional SectionAddress for this func's exception record
-    pub exception_datas: BTreeMap<SectionAddress, (SectionAddress, Option<SectionAddress>)>,
-    // unwinds?
-    // catches?
+    // C:
+    // funcs with C except handlers
+    pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
+    pub excepts: BTreeSet<SectionAddress>,
+    pub finallys: BTreeSet<SectionAddress>,
+
+    // C++:
+    // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
+    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
+    pub unwinds: BTreeSet<SectionAddress>,
+    pub catches: BTreeSet<SectionAddress>,
+    // funcs that have at least 1 catch
+    pub funcs_with_catches: BTreeSet<SectionAddress>,
     // hell, even rtti classes?
 
     // Extracted
@@ -91,7 +105,13 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
-            exception_datas: Default::default(),
+            funcs_with_c_handlers: Default::default(),
+            excepts: Default::default(),
+            finallys: Default::default(),
+            funcs_with_cxx_handlers: Default::default(),
+            funcs_with_catches: Default::default(),
+            unwinds: Default::default(),
+            catches: Default::default(),
         }
     }
 

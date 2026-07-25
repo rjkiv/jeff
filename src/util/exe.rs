@@ -1,4 +1,4 @@
-use std::{collections::btree_map::Entry, fs, fs::File, io::Read, num::NonZeroU64};
+use std::{fs, fs::File, io::Read, num::NonZeroU64};
 
 use anyhow::{bail, ensure, Result};
 use memchr::memmem;
@@ -6,7 +6,7 @@ use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
-    analysis::{cfa::SectionAddress, read_u32},
+    analysis::{cfa::SectionAddress, seh::process_seh},
     obj::{
         ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
         ObjSymbolKind, SymbolIndex,
@@ -15,7 +15,7 @@ use crate::{
         read::read_word,
         xex::XexInfo,
         xex_imports::replace_ordinal,
-        xex_optional_headers::{ImportFunction, ImportLibrary, XexOptionalHeader},
+        xex_optional_headers::{ImportLibrary, XexOptionalHeader},
     },
 };
 
@@ -60,8 +60,8 @@ impl InputtedExecutable {
                 })
                 .unwrap_or_else(|| String::from("output.exe"));
 
-            let import_libraries = xex.optional_headers.iter().find_map(|h| match h {
-                XexOptionalHeader::ImportLibraries { libraries } => Some(libraries.clone()),
+            let import_libraries = xex.optional_headers.into_iter().find_map(|h| match h {
+                XexOptionalHeader::ImportLibraries { libraries } => Some(libraries),
                 _ => None,
             });
 
@@ -130,43 +130,24 @@ impl InputtedExecutable {
             ObjInfo::new(ObjKind::Executable, self.exe_name.to_string(), vec![], sections);
         obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
 
+        if let Some(entry) = obj.entry {
+            // label entry as mainCRTStartup
+            obj.add_symbol(
+                ObjSymbol {
+                    name: String::from("mainCRTStartup"),
+                    address: entry,
+                    section: Some(obj.sections.at_address(entry as u32)?.0),
+                    size_known: false,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Function,
+                    ..Default::default()
+                },
+                false,
+            )?;
+        }
+
         // inspect the ImportLibraries if we have them
-        if let ExeType::Xex { import_libraries: Some(imports) } = &mut self.exe_type {
-            // first, retrieve the ImportFunctions
-            for lib in imports.iter_mut() {
-                for record in lib.records.iter() {
-                    // so what needs to happen here:
-                    // record = a virtual memory address
-                    // get the value inside it, it should be something like (example: 01 00 01 94)
-                    // the last 3 bytes (00 01 94) is the ordinal, the first byte (01) is the itype
-                    // if 0, it's a func, if 1, it's a thunk
-
-                    let sec = obj.sections.at_address(*record)?.1;
-                    let offset_within_sec = record - sec.address as u32;
-                    let value = read_word(&sec.data, offset_within_sec as usize);
-                    let ordinal = value & 0xFFFF;
-                    let itype = value >> 24;
-                    match itype {
-                        0 => {
-                            lib.functions.push(ImportFunction {
-                                address: *record,
-                                ordinal,
-                                thunk: 0,
-                            });
-                        }
-                        1 => {
-                            if let Some(func) = lib.functions.last_mut() {
-                                // println!("Record 0x{:08X}, ordinal 0x{:04X}, thunk 0x{:08X}", func.address, ordinal, *record);
-                                func.thunk = *record;
-                            }
-                        }
-                        _ => {
-                            unreachable!()
-                        } // shouldn't ever reach this branch, will always be 0 or 1
-                    }
-                }
-            }
-
+        if let ExeType::Xex { import_libraries: Some(imports) } = &self.exe_type {
             let mut num_imps = 0;
             let mut num_thunks = 0;
             let mut min_imp_addr: Option<u32> = None;
@@ -382,8 +363,10 @@ impl InputtedExecutable {
             );
         }
 
-        process_pdata(&mut obj)?;
+        // you would be amazed just how much we can infer from an Xbox 360 exe before CFA can even begin
+        process_seh(&mut obj)?;
         process_xidata(&mut obj)?;
+        // process_rtti
 
         const RTL_CHECK_STACK: [u8; 40] = [
             // _RtlCheckStack
@@ -434,111 +417,6 @@ impl InputtedExecutable {
 
         Ok(obj)
     }
-}
-
-fn process_pdata(obj: &mut ObjInfo) -> Result<()> {
-    // add known function boundaries from pdata
-    // FIXME: Some of these are SEH-related labels, not function entrypoints
-    let (_pdata_sec_idx, pdata_section) = obj
-        .sections
-        .by_name(".pdata")?
-        .expect(".pdata section not found. Is that even possible for an xex?");
-
-    let mut syms_to_add: Vec<ObjSymbol> = vec![];
-    let mut num_discovered_funcs = 0;
-    let data = &pdata_section.data;
-    for chunk in data.chunks_exact(8) {
-        let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
-        // if we encounter 0's, that's the end of usable pdata entries
-        if start_addr == 0 {
-            break;
-        }
-
-        // some metadata for this function, including function size
-        let word = u32::from_be_bytes(chunk[4..8].try_into()?);
-        // let num_prologue_insts = word & 0xFF; // The number of instructions in the function's prolog.
-        let num_insts_in_func = (word >> 8) & 0x3FFFFF; // The number of instructions in the function.
-        let func_type = word >> 30; // The function type.
-
-        let func_start_addr =
-            SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
-        obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-        obj.pdata_funcs.push(func_start_addr);
-        num_discovered_funcs += 1;
-
-        // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
-        if func_type == 3 {
-            // println!("Exception handler at {:08X}, record at {:08X}", start_addr - 8, start_addr - 4);
-            syms_to_add.push(ObjSymbol {
-                name: format!("except_data_{:08X}", start_addr),
-                address: (start_addr - 8) as u64,
-                section: Some(func_start_addr.section),
-                size: 8,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Object,
-                ..Default::default()
-            });
-
-            let mut cur_func_except_data: (SectionAddress, Option<SectionAddress>) =
-                (func_start_addr, None); // func_start_addr should be overwritten anyway
-
-            // word 1: the address of the function's exception handler
-            if let Some(except_func) =
-                read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)
-            {
-                let except_func_section =
-                    SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
-                // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                if let Entry::Vacant(e) = obj.known_functions.entry(except_func_section) {
-                    e.insert(None);
-                    num_discovered_funcs += 1;
-                }
-                cur_func_except_data.0 = except_func_section;
-            } else {
-                bail!("Invalid exception handler address listed at {}!", start_addr - 8)
-            }
-            // word 2: the address of the function's exception handler data record
-            if let Some(except_record) =
-                read_u32(obj.sections.at_address(start_addr - 4)?.1, start_addr - 4)
-            {
-                // exception handlers can have no record (a nullptr in the exception data)
-                if except_record != 0 {
-                    let except_record_section = SectionAddress::new(
-                        obj.sections.at_address(except_record)?.0,
-                        except_record,
-                    );
-                    syms_to_add.push(ObjSymbol {
-                        name: format!("except_record_{:08X}", start_addr),
-                        address: except_record as u64,
-                        section: Some(except_record_section.section),
-                        size: 4,
-                        size_known: false, // we don't know exactly how big this particular exception record may be
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    });
-                    cur_func_except_data.1 = Some(except_record_section);
-                } else {
-                    cur_func_except_data.1 = None;
-                }
-            } else {
-                bail!("Invalid exception record address listed at {}!", start_addr - 4)
-            }
-
-            obj.exception_datas.insert(func_start_addr, cur_func_except_data);
-        }
-    }
-    log::info!("Found {} known funcs from pdata!", num_discovered_funcs);
-
-    // TODO: traverse exception data/records here?
-
-    // then for each except_data/except_record symbol (might remove later idk)
-    for sym in syms_to_add {
-        obj.add_symbol(sym, false)?;
-    }
-
-    Ok(())
 }
 
 fn process_xidata(obj: &mut ObjInfo) -> Result<()> {

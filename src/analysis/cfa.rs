@@ -139,9 +139,21 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            obj.add_symbol(
+            let func_name;
+            if obj.excepts.contains(&start) {
+                func_name = format!("__except${:08X}", start.address);
+            } else if obj.finallys.contains(&start) {
+                func_name = format!("__finally${:08X}", start.address);
+            } else if obj.unwinds.contains(&start) {
+                func_name = format!("__unwind${:08X}", start.address);
+            } else if obj.catches.contains(&start) {
+                func_name = format!("__catch${:08X}", start.address);
+            } else {
+                func_name = format!("fn_{:08X}", start.address);
+            }
+            let sym_idx = obj.add_symbol(
                 ObjSymbol {
-                    name: format!("fn_{:08X}", start.address),
+                    name: func_name,
                     address: start.address as u64,
                     section: Some(start.section),
                     size: (end.address - start.address) as u64,
@@ -151,6 +163,86 @@ impl AnalyzerState {
                 },
                 false,
             )?;
+            let sym_addr = {
+                let sym = &obj.symbols[sym_idx];
+                SectionAddress::new(sym.section.unwrap(), sym.address as u32)
+            };
+            // obj.symbols[sym_idx].name gives the actual name of the function at start.address
+            // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
+
+            // if this func has a C exception, add/replace C scope table symbols
+            if let Some(c_scope_table_info) = obj.funcs_with_c_handlers.get(&sym_addr) {
+                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
+                syms_to_add.push(ObjSymbol {
+                    name: format!("__scopetable${}", obj.symbols[sym_idx].name),
+                    address: c_scope_table_info.addr.address as u64,
+                    section: Some(c_scope_table_info.addr.section),
+                    // size of scope table: 16 * num_scope_entries + 4
+                    // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
+                    size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Object,
+                    ..Default::default()
+                });
+                for sym in syms_to_add {
+                    obj.add_symbol(sym, true)?;
+                }
+            }
+            // if this func has a C++ exception, add/replace ehfuncinfo symbols
+            else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&sym_addr) {
+                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
+                syms_to_add.push(ObjSymbol {
+                    name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
+                    address: cxx_eh_func_info.addr.address as u64,
+                    section: Some(cxx_eh_func_info.addr.section),
+                    // if this exception record has any try/catches, there's no extra 0 at the end
+                    size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Object,
+                    ..Default::default()
+                });
+                if let Some(unwind_map_addr) = cxx_eh_func_info.unwind_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
+                        address: unwind_map_addr.address as u64,
+                        section: Some(unwind_map_addr.section),
+                        size: (cxx_eh_func_info.num_unwinds * 8) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
+                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
+                        address: try_map_addr.address as u64,
+                        section: Some(try_map_addr.section),
+                        size: (cxx_eh_func_info.num_tries * 0x14) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
+                if let Some(ip_to_state_map_addr) = cxx_eh_func_info.ip_to_state_map_addr {
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
+                        address: ip_to_state_map_addr.address as u64,
+                        section: Some(ip_to_state_map_addr.section),
+                        size: (cxx_eh_func_info.num_ip_to_states * 8) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    });
+                }
+                for sym in syms_to_add {
+                    obj.add_symbol(sym, true)?;
+                }
+            }
         }
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {
@@ -170,19 +262,23 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            obj.add_symbol(
-                ObjSymbol {
-                    name: format!("jumptable_{:08X}", addr.address),
-                    address: addr.address as u64,
-                    section: Some(addr.section),
-                    size: size as u64,
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Local.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                },
-                false,
-            )?;
+            // because MSVC likes to stick absolute jump tables in the middle of functions,
+            // and if we label those it'll cause conflicts with the function boundaries itself
+            if section.kind != ObjSectionKind::Code {
+                obj.add_symbol(
+                    ObjSymbol {
+                        name: format!("jumptable_{:08X}", addr.address),
+                        address: addr.address as u64,
+                        section: Some(addr.section),
+                        size: size as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Local.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
         }
         for (&_addr, symbols) in &self.known_symbols {
             for symbol in symbols {
@@ -245,10 +341,10 @@ impl AnalyzerState {
         // Also check the beginning of every code section
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             let this_sec_start = SectionAddress::new(section_index, section.address as u32);
-            if obj
-                .symbols
-                .by_name(&format!("except_data_{:08X}", this_sec_start.address + 8))?
-                .is_some()
+            let possible_func_addr =
+                SectionAddress::new(section_index, (section.address + 8) as u32);
+            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
+                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
             {
                 continue;
             }
@@ -508,10 +604,11 @@ impl AnalyzerState {
                         };
                         if second > addr {
                             // don't try to add a function where there's an exception symbol
-                            if obj
-                                .symbols
-                                .by_name(&format!("except_data_{:08X}", addr.address + 8))?
-                                .is_some()
+                            let possible_func_addr =
+                                SectionAddress::new(section_index, addr.address + 8);
+                            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
+                                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
+                                || obj.catches.contains(&possible_func_addr)
                             {
                                 continue;
                             }

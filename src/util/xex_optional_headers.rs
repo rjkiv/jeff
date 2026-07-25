@@ -31,13 +31,12 @@ pub struct BaseFileFormat {
     pub compression: XexCompression,
 }
 
-#[derive(Clone)]
 pub struct ImportFunction {
     pub address: u32,
     pub ordinal: u32,
     pub thunk: u32,
 }
-#[derive(Clone)]
+
 pub struct ImportLibrary {
     pub name: String,
     pub records: Vec<u32>,
