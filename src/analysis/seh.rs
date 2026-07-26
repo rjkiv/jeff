@@ -5,7 +5,6 @@ use anyhow::{bail, Result};
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
     obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind},
-    util::read::read_word,
 };
 
 // info on the C scope table: https://blog.talosintelligence.com/exceptional-behavior-windows-81-x64-seh/
@@ -27,12 +26,13 @@ pub struct CScopeTableInfo {
 pub struct CXXEhFuncInfo {
     // The address of the __ehfuncinfo$ itself
     pub addr: SectionAddress,
-    // unwind map addr, and number of entries - __unwindtable$
-    pub num_unwinds: u32,
+    // unwind map addr and its entries - __unwindtable$
     pub unwind_map_addr: Option<SectionAddress>,
+    pub unwinds: Vec<Option<SectionAddress>>,
     // try map addr, and number of entries - __tryblocktable$, which contains __catchsym$
     pub num_tries: u32,
     pub try_map_addr: Option<SectionAddress>,
+    pub catches: Vec<Option<SectionAddress>>,
     // iptostate map addr, and number of entries - parsing this map likely not needed for the purposes of labeling functions/eh objects
     pub num_ip_to_states: u32,
     pub ip_to_state_map_addr: Option<SectionAddress>,
@@ -62,8 +62,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         });
     let mut cxx_handler_addr: Option<SectionAddress> = None;
 
-    // lookup map for __ehfuncinfo tables by their SectionAddresses
-    let mut cxx_eh_lookup: BTreeSet<SectionAddress> = BTreeSet::new();
+    let mut catch_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     // addrs that are confirmed to be unwinds/catches/excepts/finallys
     let mut known_exception_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
@@ -88,6 +87,11 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // unwinds/catches/etc will always come AFTER their main function,
         // so at this point, we should've parsed the main function for its exception structures.
         if known_exception_addrs.contains(&func_start_addr) {
+            if catch_addrs.contains(&func_start_addr) {
+                let end_addr = func_start_addr + (num_insts_in_func * 4);
+                // println!("Mark this catch's end addr {:08X} down!", end_addr);
+                obj.catches.insert(func_start_addr, end_addr);
+            }
             continue;
         }
 
@@ -220,108 +224,120 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         None => cxx_handler_addr = Some(cur_func_except_handler),
                     };
 
-                    // if we've already parsed this __ehfuncinfo before, don't bother parsing it again
-                    if cxx_eh_lookup.contains(&cur_func_except_record) {
-                        // if an __ehfuncinfo is owned by more than one SectionAddress,
-                        // the first is for the function itself, and the rest are its catches
-                        obj.catches.insert(func_start_addr);
-
-                        // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                        if let Entry::Vacant(e) = obj.known_functions.entry(func_start_addr) {
-                            e.insert(None);
-                            num_discovered_funcs += 1;
-                        }
-                    } else {
-                        // parse the C++ __ehfuncinfo that's located at cur_func_except_record
-                        assert_eq!(
-                            rdata_sec_idx, cur_func_except_record.section,
-                            "Except record not in .rdata?"
-                        );
-                        let offset_into_sec =
-                            cur_func_except_record.address - rdata_section.address as u32;
-                        let magic = read_word(&rdata_section.data, offset_into_sec as usize);
-                        assert_eq!(magic, 0x19930522, "Bad __ehfuncinfo magic!");
-                        let num_unwinds =
-                            read_word(&rdata_section.data, (offset_into_sec + 4) as usize);
-                        let unwind_map_addr = {
-                            let unwind_map_addr =
-                                read_word(&rdata_section.data, (offset_into_sec + 8) as usize);
-                            if unwind_map_addr != 0 {
-                                // at this point, we know an unwind map exists - parse its entries
-                                assert!(num_unwinds > 0);
-                                let unwind_sec_offset =
-                                    unwind_map_addr - rdata_section.address as u32;
-                                for i in 0..num_unwinds {
-                                    let maybe_unwind_addr = read_word(
-                                        &rdata_section.data,
-                                        (unwind_sec_offset + (i * 8 + 4)) as usize,
+                    // parse the C++ __ehfuncinfo that's located at cur_func_except_record
+                    assert_eq!(
+                        rdata_sec_idx, cur_func_except_record.section,
+                        "Except record not in .rdata?"
+                    );
+                    // the first word needs to be __ehfuncinfo magic, otherwise this isn't a valid exception record
+                    assert_eq!(
+                        read_u32(rdata_section, cur_func_except_record.address)
+                            .expect("No exception record here!"),
+                        0x19930522,
+                        "Bad __ehfuncinfo magic!"
+                    );
+                    let num_unwinds = read_u32(rdata_section, cur_func_except_record.address + 4)
+                        .expect("No unwind count here");
+                    let mut unwinds: Vec<Option<SectionAddress>> = Vec::new();
+                    let unwind_map_addr = {
+                        let unwind_map_addr =
+                            read_u32(rdata_section, cur_func_except_record.address + 8)
+                                .expect("No unwind map here!");
+                        if unwind_map_addr != 0 {
+                            // at this point, we know an unwind map exists - parse its entries
+                            assert!(num_unwinds > 0);
+                            for i in 0..num_unwinds {
+                                let maybe_unwind_addr =
+                                    read_u32(rdata_section, unwind_map_addr + (i * 8) + 4)
+                                        .expect("No unwind entry here!");
+                                if maybe_unwind_addr != 0 {
+                                    let addr = SectionAddress::new(
+                                        obj.sections.at_address(maybe_unwind_addr)?.0,
+                                        maybe_unwind_addr,
                                     );
-                                    if maybe_unwind_addr != 0 {
-                                        let addr = SectionAddress::new(
-                                            obj.sections.at_address(maybe_unwind_addr)?.0,
-                                            maybe_unwind_addr,
-                                        );
-                                        // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                                        if let Entry::Vacant(e) = obj.known_functions.entry(addr) {
-                                            e.insert(None);
-                                            num_discovered_funcs += 1;
-                                        }
-                                        // add to our unwind list
-                                        obj.unwinds.insert(addr);
-                                    }
+                                    known_exception_addrs.insert(addr);
+                                    unwinds.push(Some(addr));
+                                    obj.unwinds.insert(addr);
+                                } else {
+                                    unwinds.push(None);
                                 }
-
-                                Some(SectionAddress::new(rdata_sec_idx, unwind_map_addr))
-                            } else {
-                                None
                             }
-                        };
-
-                        let num_tries =
-                            read_word(&rdata_section.data, (offset_into_sec + 12) as usize);
-                        let try_map_addr = {
-                            let try_map_addr =
-                                read_word(&rdata_section.data, (offset_into_sec + 16) as usize);
-                            if try_map_addr != 0 {
-                                assert!(num_tries > 0);
-                                // if there's at least 1 try, that means there's at least 1 catch
-                                obj.funcs_with_catches.insert(func_start_addr);
-                                // TODO: we know there's a try map at this point, parse the entries
-                                Some(SectionAddress::new(rdata_sec_idx, try_map_addr))
-                            } else {
-                                None
+                            Some(SectionAddress::new(rdata_sec_idx, unwind_map_addr))
+                        } else {
+                            None
+                        }
+                    };
+                    assert_eq!(unwinds.len(), num_unwinds as usize);
+                    let num_tries = read_u32(rdata_section, cur_func_except_record.address + 12)
+                        .expect("No try count here!");
+                    let mut catches: Vec<Option<SectionAddress>> = Vec::new();
+                    let try_map_addr = {
+                        let try_map_addr =
+                            read_u32(rdata_section, cur_func_except_record.address + 16)
+                                .expect("No try count here!");
+                        if try_map_addr != 0 {
+                            // at this point, we know a try map exists - parse its entries
+                            assert!(num_tries > 0);
+                            for i in 0..num_tries {
+                                let cur_catch_sym =
+                                    read_u32(rdata_section, try_map_addr + (i * 20) + 16)
+                                        .expect("No catch symbol here!");
+                                if cur_catch_sym != 0 {
+                                    // parse THAT to get the catch
+                                    let maybe_catch_addr =
+                                        read_u32(rdata_section, cur_catch_sym + 12)
+                                            .expect("No catch addr here!");
+                                    if maybe_catch_addr != 0 {
+                                        let addr = SectionAddress::new(
+                                            obj.sections.at_address(maybe_catch_addr)?.0,
+                                            maybe_catch_addr,
+                                        );
+                                        // log::debug!("Catch found at {:08X}", addr);
+                                        known_exception_addrs.insert(addr);
+                                        catches.push(Some(addr));
+                                        catch_addrs.insert(addr);
+                                    } else {
+                                        catches.push(None);
+                                    }
+                                } else {
+                                    catches.push(None);
+                                }
                             }
-                        };
+                            Some(SectionAddress::new(rdata_sec_idx, try_map_addr))
+                        } else {
+                            None
+                        }
+                    };
+                    assert_eq!(catches.len(), num_tries as usize);
+                    let num_ip_to_states =
+                        read_u32(rdata_section, cur_func_except_record.address + 20)
+                            .expect("No IP to state count here!");
+                    let ip_to_state_map_addr = {
+                        let ip_to_state_map_addr =
+                            read_u32(rdata_section, cur_func_except_record.address + 24)
+                                .expect("No IP to state map here!");
+                        if ip_to_state_map_addr != 0 {
+                            Some(SectionAddress::new(rdata_sec_idx, ip_to_state_map_addr))
+                        } else {
+                            None
+                        }
+                    };
 
-                        let num_ip_to_states =
-                            read_word(&rdata_section.data, (offset_into_sec + 20) as usize);
-                        let ip_to_state_map_addr = {
-                            let ip_to_state_map_addr =
-                                read_word(&rdata_section.data, (offset_into_sec + 24) as usize);
-                            if ip_to_state_map_addr != 0 {
-                                Some(SectionAddress::new(rdata_sec_idx, ip_to_state_map_addr))
-                            } else {
-                                None
-                            }
-                        };
+                    obj.funcs_with_cxx_handlers.insert(func_start_addr, CXXEhFuncInfo {
+                        addr: cur_func_except_record,
+                        unwind_map_addr,
+                        unwinds,
+                        num_tries,
+                        try_map_addr,
+                        catches,
+                        num_ip_to_states,
+                        ip_to_state_map_addr,
+                    });
 
-                        // add to the lookup
-                        cxx_eh_lookup.insert(cur_func_except_record);
-                        obj.funcs_with_cxx_handlers.insert(func_start_addr, CXXEhFuncInfo {
-                            addr: cur_func_except_record,
-                            num_unwinds,
-                            unwind_map_addr,
-                            num_tries,
-                            try_map_addr,
-                            num_ip_to_states,
-                            ip_to_state_map_addr,
-                        });
-
-                        // this is a known C++ function, but exceptions make it hard to deduce the ending
-                        obj.known_functions.insert(func_start_addr, None);
-                        obj.pdata_funcs.insert(func_start_addr);
-                        num_discovered_funcs += 1;
-                    }
+                    // this is a known C++ function, but exceptions make it hard to deduce the ending
+                    obj.known_functions.insert(func_start_addr, None);
+                    obj.pdata_funcs.insert(func_start_addr);
+                    num_discovered_funcs += 1;
                 }
             } else {
                 // we can't deduce if there is exception handling
@@ -351,7 +367,13 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // and if our function has unwinds and such, we should not have a confirmed ending
         if obj.funcs_with_c_handlers.contains_key(addr) {
             assert!(ending.is_none());
+        } else if obj.funcs_with_cxx_handlers.contains_key(addr) {
+            assert!(ending.is_none());
         }
+    }
+    // every catch should've had an entry in pdata
+    for catch in catch_addrs {
+        assert!(obj.catches.contains_key(&catch));
     }
 
     // add Cxx handler symbol here

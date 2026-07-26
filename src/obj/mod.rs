@@ -71,10 +71,11 @@ pub struct ObjInfo {
     pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
 
     // C++:
-    // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
+    // funcs with CXX except handlers
     pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
     pub unwinds: BTreeSet<SectionAddress>,
-    pub catches: BTreeSet<SectionAddress>,
+    // key = the catch start, value = the catch end (sourced from pdata)
+    pub catches: BTreeMap<SectionAddress, SectionAddress>,
     // funcs that have at least 1 catch
     pub funcs_with_catches: BTreeSet<SectionAddress>,
     // hell, even rtti classes?

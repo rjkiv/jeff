@@ -145,7 +145,7 @@ impl AnalyzerState {
             let func_name;
             if obj.unwinds.contains(&start) {
                 func_name = format!("__unwind${:08X}", start.address);
-            } else if obj.catches.contains(&start) {
+            } else if obj.catches.contains_key(&start) {
                 func_name = format!("__catch${:08X}", start.address);
             } else {
                 func_name = format!("fn_{:08X}", start.address);
@@ -207,7 +207,7 @@ impl AnalyzerState {
                         name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
                         address: unwind_map_addr.address as u64,
                         section: Some(unwind_map_addr.section),
-                        size: (cxx_eh_func_info.num_unwinds * 8) as u64,
+                        size: (cxx_eh_func_info.unwinds.len() * 8) as u64,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -567,12 +567,7 @@ impl AnalyzerState {
         let mut slices = FunctionSlices::default();
         let function_end = self.functions.get(&start).and_then(|info| info.end);
 
-        // analyze the main function
-        if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
-            return Ok(None);
-        }
-
-        // if there are exception structures coming after the main function, analyze those too
+        // if there are exception structures coming after the main function, analyze those first
         if let Some(c_handler) = obj.funcs_with_c_handlers.get(&start) {
             for except_start in &c_handler.handlers {
                 if !slices.analyze(
@@ -586,6 +581,42 @@ impl AnalyzerState {
                     return Ok(None);
                 }
             }
+        } else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&start) {
+            // analyze unwinds, then catches
+            for unwind_start in &cxx_eh_func_info.unwinds {
+                if let Some(unwind_start) = unwind_start {
+                    if !slices.analyze(
+                        obj,
+                        *unwind_start,
+                        start,
+                        function_end,
+                        &self.functions,
+                        None,
+                    )? {
+                        return Ok(None);
+                    }
+                }
+            }
+            for catch_start in &cxx_eh_func_info.catches {
+                if let Some(catch_start) = catch_start {
+                    if !slices.analyze(
+                        obj,
+                        *catch_start,
+                        start,
+                        Some(
+                            *obj.catches.get(catch_start).expect("this catch should've been noted"),
+                        ),
+                        &self.functions,
+                        None,
+                    )? {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        // finally, analyze the main function
+        if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
+            return Ok(None);
         }
 
         return Ok(Some(slices));
@@ -593,13 +624,14 @@ impl AnalyzerState {
         // there should be a loop here
         // analyze the main function, and then each of its unwinds/exception structures
 
-        Ok(match slices.analyze(obj, start, start, function_end, &self.functions, None)? {
-            true => Some(slices),
-            false => None,
-        })
+        // Ok(match slices.analyze(obj, start, start, function_end, &self.functions, None)? {
+        //     true => Some(slices),
+        //     false => None,
+        // })
     }
 
     fn detect_new_functions(&mut self, obj: &ObjInfo) -> Result<bool> {
+        // FIXME: addresses that fall between C functions and their excepts should NOT be detected and added
         let mut new_functions = vec![];
         let mut truncations: Vec<(SectionAddress, SectionAddress)> = vec![];
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
@@ -634,7 +666,7 @@ impl AnalyzerState {
                                 SectionAddress::new(section_index, addr.address + 8);
                             if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
                                 || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
-                                || obj.catches.contains(&possible_func_addr)
+                                || obj.catches.contains_key(&possible_func_addr)
                             {
                                 continue;
                             }
