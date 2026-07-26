@@ -3,18 +3,27 @@ use std::collections::{btree_map::Entry, BTreeSet};
 use anyhow::{bail, Result};
 
 use crate::{
-    analysis::{cfa::SectionAddress, read_u32},
+    analysis::{
+        cfa::SectionAddress,
+        read_u32,
+        seh::HandlerType::{Except, Finally},
+    },
     obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind},
     util::read::read_word,
 };
 
 // info on the C scope table: https://blog.talosintelligence.com/exceptional-behavior-windows-81-x64-seh/
 #[derive(Debug, Clone)]
+pub enum HandlerType {
+    Except { addr: SectionAddress },
+    Finally { addr: SectionAddress },
+}
+#[derive(Debug, Clone)]
 pub struct CScopeTableInfo {
     // The address of the scope table itself
     pub addr: SectionAddress,
-    // How many scope table entries?
-    pub num_handlers: u32,
+    // The scope table entries
+    pub handlers: Vec<HandlerType>,
     // ScopeTableEntry contents:
     // DWORD 1 - Begin; // where the try starts
     // DWORD 2 - End; // where the try ends
@@ -161,6 +170,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     let num_scope_entries =
                         read_word(&rdata_section.data, offset_into_sec as usize);
                     let entry_offsets_begin = offset_into_sec + 4;
+                    let mut handlers = vec![];
                     for i in 0..num_scope_entries {
                         let handler = read_word(
                             &rdata_section.data,
@@ -180,8 +190,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         }
                         if target == 0 {
                             obj.finallys.insert(addr);
+                            handlers.push(Finally { addr });
                         } else {
                             obj.excepts.insert(addr);
+                            handlers.push(Except { addr });
                         }
                         // log::debug!(
                         //     "Func {:08X}: Handler at {:08X} is {}!",
@@ -190,9 +202,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         //     if target == 0 { "a __finally" } else { "an __except" }
                         // );
                     }
+                    assert_eq!(handlers.len(), num_scope_entries as usize);
                     obj.funcs_with_c_handlers.insert(func_start_addr, CScopeTableInfo {
                         addr: cur_func_except_record,
-                        num_handlers: num_scope_entries,
+                        handlers,
                     });
                 } else {
                     // CXX handler - set it or check it
