@@ -10,7 +10,6 @@ use itertools::Itertools;
 
 use crate::{
     analysis::{
-        seh::HandlerType::{Except, Finally},
         skip_alignment,
         slices::{FunctionSlices, TailCallResult},
     },
@@ -124,82 +123,12 @@ pub struct AnalyzerState {
 }
 
 impl AnalyzerState {
-    fn adjust_for_exceptions(&mut self, obj: &ObjInfo) -> Result<()> {
-        // the end goal of this function:
-        // self.functions should contain no unwinds or catches or any exception structs
-        // those exception structs should be merged into their respective functions
-
-        let mut exceptions_to_remove: Vec<SectionAddress> = Vec::new();
-
-        // screw rust's borrow checker
-        for key in self.functions.keys().copied().collect_vec() {
-            if let Some(c_handler) = obj.funcs_with_c_handlers.get(&key) {
-                // merge the excepts/finallys
-                // excepts and finallys are contiguous, right after the main function
-                // so if we wanna merge them together, get the largest end SectionAddress across all of them
-                let mut max_end = self
-                    .functions
-                    .get_mut(&key)
-                    .expect("No function info?")
-                    .end
-                    .expect("No determined function end?");
-                for addr in c_handler.handlers.iter().map(|h| match h {
-                    Except { addr } | Finally { addr } => addr,
-                }) {
-                    exceptions_to_remove.push(*addr);
-                    let cur_end = self.functions[addr].end.expect("No determined function end?");
-                    max_end = max_end.max(cur_end);
-                }
-
-                // log::debug!("Function at {:08X} should now end at {:08X}", key, max_end);
-                self.functions.get_mut(&key).expect("No function info?").end = Some(max_end);
-            } else if let Some(cxx_handler) = obj.funcs_with_cxx_handlers.get(&key) {
-                // merge the unwinds/catches
-            }
-        }
-
-        for rm in exceptions_to_remove {
-            self.functions.remove(&rm);
-        }
-
-        Ok(())
-    }
-
-    pub fn apply(&mut self, obj: &mut ObjInfo) -> Result<()> {
+    pub fn apply(&self, obj: &mut ObjInfo) -> Result<()> {
         for (&section_index, section_name) in &self.known_sections {
             obj.sections[section_index].rename(section_name.clone())?;
         }
 
         // TODO: if a function has unwinds/catches, they need to be merged into the function
-        self.adjust_for_exceptions(obj)?;
-
-        let mut exception_labels: Vec<ObjSymbol> = Vec::new();
-
-        for except in &obj.excepts {
-            // add labels
-            exception_labels.push(ObjSymbol {
-                name: format!("__except${:08X}", except.address),
-                address: except.address as u64,
-                section: Some(except.section),
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                ..Default::default()
-            });
-        }
-        for finally in &obj.finallys {
-            // add labels
-            exception_labels.push(ObjSymbol {
-                name: format!("__finally${:08X}", finally.address),
-                address: finally.address as u64,
-                section: Some(finally.section),
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                ..Default::default()
-            });
-        }
-
-        // do we want to add exception labels? i'm open to removing them tbh
-        for label in exception_labels {
-            obj.add_symbol(label, true)?;
-        }
 
         for (&start, FunctionInfo { end, .. }) in self.functions.iter() {
             let Some(end) = end else { continue };
@@ -214,7 +143,11 @@ impl AnalyzerState {
                 section.address + section.size
             );
             let func_name;
-            if obj.unwinds.contains(&start) {
+            if obj.excepts.contains(&start) {
+                func_name = format!("__except${:08X}", start.address);
+            } else if obj.finallys.contains(&start) {
+                func_name = format!("__finally${:08X}", start.address);
+            } else if obj.unwinds.contains(&start) {
                 func_name = format!("__unwind${:08X}", start.address);
             } else if obj.catches.contains(&start) {
                 func_name = format!("__catch${:08X}", start.address);
@@ -249,7 +182,7 @@ impl AnalyzerState {
                     section: Some(c_scope_table_info.addr.section),
                     // size of scope table: 16 * num_scope_entries + 4
                     // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
-                    size: (c_scope_table_info.handlers.len() * 16 + 4) as u64,
+                    size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Object,
