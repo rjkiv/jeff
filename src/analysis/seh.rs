@@ -13,8 +13,8 @@ use crate::{
 pub struct CScopeTableInfo {
     // The address of the scope table itself
     pub addr: SectionAddress,
-    // How many scope table entries?
-    pub num_handlers: u32,
+    // The exception handlers from this scope table
+    pub handlers: Vec<SectionAddress>,
     // ScopeTableEntry contents:
     // DWORD 1 - Begin; // where the try starts
     // DWORD 2 - End; // where the try ends
@@ -64,6 +64,8 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
 
     // lookup map for __ehfuncinfo tables by their SectionAddresses
     let mut cxx_eh_lookup: BTreeSet<SectionAddress> = BTreeSet::new();
+    // addrs that are confirmed to be unwinds/catches/excepts/finallys
+    let mut known_exception_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
     let mut num_discovered_funcs = 0;
     let data = &pdata_section.data;
@@ -82,9 +84,18 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
 
         let func_start_addr =
             SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
-        obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-        obj.pdata_funcs.insert(func_start_addr);
-        num_discovered_funcs += 1;
+
+        // unwinds/catches/etc will always come AFTER their main function,
+        // so at this point, we should've parsed the main function for its exception structures.
+        if known_exception_addrs.contains(&func_start_addr) {
+            continue;
+        }
+
+        // // FIXME: this should only be inserted if this func doesn't have exception info
+        // // because if it does, we can't confirm the known ending due to unwinds and such
+        // obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
+        // obj.pdata_funcs.insert(func_start_addr);
+        // num_discovered_funcs += 1;
 
         // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
         if func_type == 3 {
@@ -156,33 +167,31 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         rdata_sec_idx, cur_func_except_record.section,
                         "Except record not in .rdata?"
                     );
-                    let offset_into_sec =
-                        cur_func_except_record.address - rdata_section.address as u32;
-                    let num_scope_entries =
-                        read_word(&rdata_section.data, offset_into_sec as usize);
-                    let entry_offsets_begin = offset_into_sec + 4;
+                    let num_scope_entries = read_u32(rdata_section, cur_func_except_record.address)
+                        .expect("No exception record here!");
+                    let entry_addrs_begin = cur_func_except_record.address + 4;
+                    let mut handlers: Vec<SectionAddress> = Vec::new();
                     for i in 0..num_scope_entries {
-                        let handler = read_word(
-                            &rdata_section.data,
-                            (entry_offsets_begin + (i * 16) + 8) as usize,
-                        );
-                        let target = read_word(
-                            &rdata_section.data,
-                            (entry_offsets_begin + (i * 16) + 12) as usize,
-                        );
-
+                        let handler = read_u32(rdata_section, entry_addrs_begin + (i * 16) + 8)
+                            .expect("No handler here!");
+                        // let target = read_u32(rdata_section, entry_addrs_begin + (i * 16) + 12)
+                        //     .expect("No target here!");
                         let addr =
                             SectionAddress::new(obj.sections.at_address(handler)?.0, handler);
-                        // check to see if the addr is already part of a known function - if it's not, add it to known_functions
-                        if let Entry::Vacant(e) = obj.known_functions.entry(addr) {
-                            e.insert(None);
-                            num_discovered_funcs += 1;
-                        }
-                        if target == 0 {
-                            obj.finallys.insert(addr);
-                        } else {
-                            obj.excepts.insert(addr);
-                        }
+                        // add a label for this except structure - could remove this tbh, verify against real objs
+                        syms_to_add.push(ObjSymbol {
+                            name: format!(
+                                "$LN{:08X}",
+                                // if target == 0 { "__finally" } else { "__except" },
+                                addr.address
+                            ),
+                            address: addr.address as u64,
+                            section: Some(addr.section),
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        });
+                        known_exception_addrs.insert(addr);
+                        handlers.push(addr);
                         // log::debug!(
                         //     "Func {:08X}: Handler at {:08X} is {}!",
                         //     func_start_addr,
@@ -190,11 +199,19 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         //     if target == 0 { "a __finally" } else { "an __except" }
                         // );
                     }
+                    assert_eq!(handlers.len(), num_scope_entries as usize);
                     obj.funcs_with_c_handlers.insert(func_start_addr, CScopeTableInfo {
                         addr: cur_func_except_record,
-                        num_handlers: num_scope_entries,
+                        handlers,
                     });
-                } else {
+
+                    // this is a known C function, but exceptions make it hard to deduce the ending
+                    obj.known_functions.insert(func_start_addr, None);
+                    obj.pdata_funcs.insert(func_start_addr);
+                    num_discovered_funcs += 1;
+                }
+                // C++
+                else {
                     // CXX handler - set it or check it
                     match cxx_handler_addr {
                         Some(addr) => {
@@ -299,9 +316,22 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             num_ip_to_states,
                             ip_to_state_map_addr,
                         });
+
+                        // this is a known C++ function, but exceptions make it hard to deduce the ending
+                        obj.known_functions.insert(func_start_addr, None);
+                        obj.pdata_funcs.insert(func_start_addr);
+                        num_discovered_funcs += 1;
                     }
                 }
+            } else {
+                // we can't deduce if there is exception handling
+                todo!("No exception handling in this raw exe?")
             }
+        } else {
+            // no exception data for this func, we can safely mark down its ending
+            obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
+            obj.pdata_funcs.insert(func_start_addr);
+            num_discovered_funcs += 1;
         }
     }
     log::info!("Found {} known funcs from SEH!", num_discovered_funcs);
@@ -309,6 +339,20 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     //     log::info!("\tC   exception handlers: {}", obj.excepts.len() + obj.finallys.len());
     //     log::info!("\tC++ exception handlers: {}", obj.unwinds.len() + obj.catches.len());
     // }
+
+    // sanity checks
+    for addr in &obj.pdata_funcs {
+        // We should not have any known exception addrs in our listed pdata funcs
+        assert!(!known_exception_addrs.contains(addr));
+    }
+    for (addr, ending) in &obj.known_functions {
+        // We should not have any known exception addrs in our listed known_functions
+        assert!(!known_exception_addrs.contains(addr));
+        // and if our function has unwinds and such, we should not have a confirmed ending
+        if obj.funcs_with_c_handlers.contains_key(addr) {
+            assert!(ending.is_none());
+        }
+    }
 
     // add Cxx handler symbol here
     if let Some(cxx_handler) = cxx_handler_addr {

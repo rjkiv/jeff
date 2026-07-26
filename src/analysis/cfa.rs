@@ -143,11 +143,7 @@ impl AnalyzerState {
                 section.address + section.size
             );
             let func_name;
-            if obj.excepts.contains(&start) {
-                func_name = format!("__except${:08X}", start.address);
-            } else if obj.finallys.contains(&start) {
-                func_name = format!("__finally${:08X}", start.address);
-            } else if obj.unwinds.contains(&start) {
+            if obj.unwinds.contains(&start) {
                 func_name = format!("__unwind${:08X}", start.address);
             } else if obj.catches.contains(&start) {
                 func_name = format!("__catch${:08X}", start.address);
@@ -182,7 +178,7 @@ impl AnalyzerState {
                     section: Some(c_scope_table_info.addr.section),
                     // size of scope table: 16 * num_scope_entries + 4
                     // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
-                    size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
+                    size: (c_scope_table_info.handlers.len() * 16 + 4) as u64,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Object,
@@ -570,6 +566,33 @@ impl AnalyzerState {
     ) -> Result<Option<FunctionSlices>> {
         let mut slices = FunctionSlices::default();
         let function_end = self.functions.get(&start).and_then(|info| info.end);
+
+        // analyze the main function
+        if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
+            return Ok(None);
+        }
+
+        // if there are exception structures coming after the main function, analyze those too
+        if let Some(c_handler) = obj.funcs_with_c_handlers.get(&start) {
+            for except_start in &c_handler.handlers {
+                if !slices.analyze(
+                    obj,
+                    *except_start,
+                    start,
+                    function_end,
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
+                }
+            }
+        }
+
+        return Ok(Some(slices));
+
+        // there should be a loop here
+        // analyze the main function, and then each of its unwinds/exception structures
+
         Ok(match slices.analyze(obj, start, start, function_end, &self.functions, None)? {
             true => Some(slices),
             false => None,
