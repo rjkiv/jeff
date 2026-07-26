@@ -30,7 +30,6 @@ pub struct FunctionSlices {
     // Either a block or tail call
     pub possible_blocks: BTreeMap<SectionAddress, Box<VM>>,
     pub has_conditional_blr: bool,
-    pub has_rfi: bool,
     pub finalized: bool,
     pub has_r1_load: bool, // Possibly instead of a prologue
 }
@@ -267,9 +266,6 @@ impl FunctionSlices {
 
         if !self.has_conditional_blr && is_conditional_blr(ins) {
             self.has_conditional_blr = true;
-        }
-        if !self.has_rfi && ins.op == Opcode::Rfi {
-            self.has_rfi = true;
         }
         // If control flow hits a block we thought may be a tail call,
         // we know it isn't.
@@ -654,15 +650,6 @@ impl FunctionSlices {
                         && !known_functions.contains_key(&end)
                     {
                         log::trace!("Found trailing blr @ {:#010X}, merging with function", end);
-                        self.blocks.insert(end, Some(end + 4));
-                    }
-
-                    // Some functions with rfi also include a trailing nop
-                    if self.has_rfi
-                        && matches!(disassemble(section, end.address), Some(ins) if is_nop(ins))
-                        && !known_functions.contains_key(&end)
-                    {
-                        log::trace!("Found trailing nop @ {:#010X}, merging with function", end);
                         self.blocks.insert(end, Some(end + 4));
                     }
                 }
