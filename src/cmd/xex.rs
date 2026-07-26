@@ -369,11 +369,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         fs::write(exe_path, exe_bytes)?;
     }
 
-    // let mut obj = if is_xex_file(&object_path)? {
-    //     process_xex(&object_path)?
-    // } else {
-    //     process_pe(&object_path)?
-    // };
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
@@ -410,14 +405,11 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         }
 
         // Remove known labels from known_functions/pdata_funcs
-        obj.pdata_funcs.sort();
         for known_label in pdb.labels {
             if obj.known_functions.remove(&known_label).is_some() {
                 log::debug!("Demoted {} from func to label", known_label);
             }
-            if let Result::Ok(idx) = obj.pdata_funcs.binary_search(&known_label) {
-                obj.pdata_funcs.remove(idx);
-            };
+            obj.pdata_funcs.remove(&known_label);
         }
 
         // Apply all the symbols

@@ -83,7 +83,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         let func_start_addr =
             SectionAddress::new(obj.sections.at_address(start_addr)?.0, start_addr);
         obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-        obj.pdata_funcs.push(func_start_addr);
+        obj.pdata_funcs.insert(func_start_addr);
         num_discovered_funcs += 1;
 
         // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data

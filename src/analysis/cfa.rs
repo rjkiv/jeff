@@ -127,6 +127,9 @@ impl AnalyzerState {
         for (&section_index, section_name) in &self.known_sections {
             obj.sections[section_index].rename(section_name.clone())?;
         }
+
+        // TODO: if a function has unwinds/catches, they need to be merged into the function
+
         for (&start, FunctionInfo { end, .. }) in self.functions.iter() {
             let Some(end) = end else { continue };
             let section = &obj.sections[start.section];

@@ -64,7 +64,7 @@ pub struct ObjInfo {
 
     // Compiler generated info
     /// Functions that have an entry in .pdata.
-    pub pdata_funcs: Vec<SectionAddress>,
+    pub pdata_funcs: BTreeSet<SectionAddress>,
     /// Info retrieved from exception datas that precede certain functions.
     // C:
     // funcs with C except handlers
