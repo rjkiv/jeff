@@ -99,33 +99,36 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             String { length: usize, terminated: bool },
             WString { length: usize, str: String },
         }
-        pub const fn trim_zeroes_end(mut bytes: &[u8]) -> &[u8] {
-            while let [rest @ .., last] = bytes {
-                if *last == 0 {
-                    bytes = rest;
-                } else {
-                    break;
+        fn is_string(data: &[u8]) -> StringResult {
+            // because symbol sizes are unreliable we're passing in the remaining data for the section
+            // so, trim up to the first zero instead of the last
+            let bytes = data.iter().position(|&b| b == 0).map(|pos| &data[..pos]).unwrap_or(data);
+
+            if !bytes.is_empty() {
+                if bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
+                    return StringResult::String {
+                        length: bytes.len(),
+                        terminated: data.len() > bytes.len(),
+                    };
                 }
             }
-            bytes
-        }
-        fn is_string(data: &[u8]) -> StringResult {
-            let bytes = trim_zeroes_end(data);
-            if bytes.is_empty() {
+
+            // narrow bytes didn't work, try wide bytes
+            let wide_bytes = data
+                .chunks_exact(2)
+                .position(|c| c == [0, 0])
+                .map(|pos| &data[..pos * 2])
+                .unwrap_or(data);
+
+            if wide_bytes.is_empty() {
                 return StringResult::None;
             }
-            if bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
-                return StringResult::String {
-                    length: bytes.len(),
-                    terminated: data.len() > bytes.len(),
-                };
-            }
-            if bytes.len() % 2 == 0 && data.len() >= bytes.len() + 2 {
+            if wide_bytes.len() % 2 == 0 && data.len() >= wide_bytes.len() + 2 {
                 // Found at least 2 bytes of trailing 0s, check UTF-16
                 let mut ok = true;
                 let mut str = String::new();
                 for n in std::char::decode_utf16(
-                    bytes.chunks_exact(2).map(|c| u16::from_be_bytes(c.try_into().unwrap())),
+                    wide_bytes.chunks_exact(2).map(|c| u16::from_be_bytes(c.try_into().unwrap())),
                 ) {
                     match n {
                         Ok(c) if c.is_ascii_graphic() || c.is_ascii_whitespace() => {
@@ -138,7 +141,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                     }
                 }
                 if ok {
-                    return StringResult::WString { length: bytes.len(), str };
+                    return StringResult::WString { length: wide_bytes.len(), str };
                 }
             }
             StringResult::None
@@ -148,7 +151,15 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             .for_section(section_index)
             .filter(|(_, sym)| sym.data_kind == ObjDataKind::Unknown)
         {
-            let data = section.symbol_data(symbol)?;
+            // jump tables are not strings
+            if symbol.name.starts_with("jumptable_") {
+                continue;
+            }
+            // let's not try to search for strings that aren't 4 byte aligned - we can find those later as we actually decomp
+            if symbol.address & 3 != 0 {
+                continue;
+            }
+            let data = section.data_range(symbol.address as u32, 0)?;
             match is_string(data) {
                 StringResult::None => {}
                 StringResult::String { length, terminated } => {

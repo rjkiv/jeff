@@ -127,9 +127,6 @@ impl AnalyzerState {
         for (&section_index, section_name) in &self.known_sections {
             obj.sections[section_index].rename(section_name.clone())?;
         }
-
-        // TODO: if a function has unwinds/catches, they need to be merged into the function
-
         for (&start, FunctionInfo { end, .. }) in self.functions.iter() {
             let Some(end) = end else { continue };
             let section = &obj.sections[start.section];
@@ -142,14 +139,7 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            let func_name;
-            if obj.unwinds.contains(&start) {
-                func_name = format!("__unwind${:08X}", start.address);
-            } else if obj.catches.contains_key(&start) {
-                func_name = format!("__catch${:08X}", start.address);
-            } else {
-                func_name = format!("fn_{:08X}", start.address);
-            }
+            let func_name = format!("fn_{:08X}", start.address);
             let sym_idx = obj.add_symbol(
                 ObjSymbol {
                     name: func_name,
@@ -655,7 +645,6 @@ impl AnalyzerState {
                     (Some((&first, first_info)), Some(&(&second, second_info))) => {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
-                            // TODO: add a vec for C_exception_truncations? it'll make the C function the correct size, and destroy the secondary "function"
                             if obj.funcs_with_c_handlers.contains_key(&first)
                                 && !obj.funcs_with_c_handlers.contains_key(&second)
                             {
@@ -679,8 +668,6 @@ impl AnalyzerState {
                                         max_except_end,
                                         first
                                     );
-                                    // log::warn!("This is a C function exception handling mismatch between {:?} and {:?}", first, second);
-                                    // need to mark: first, second, max_except_end
                                     c_exception_truncations.push((
                                         first,
                                         second,
