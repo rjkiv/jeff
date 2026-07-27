@@ -259,6 +259,13 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                         obj.sections.at_address(maybe_unwind_addr)?.0,
                                         maybe_unwind_addr,
                                     );
+                                    syms_to_add.push(ObjSymbol {
+                                        name: format!("__unwind${:08X}", addr.address),
+                                        address: addr.address as u64,
+                                        section: Some(addr.section),
+                                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                        ..Default::default()
+                                    });
                                     known_exception_addrs.insert(addr);
                                     unwinds.push(Some(addr));
                                     obj.unwinds.insert(addr);
@@ -296,7 +303,13 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                             obj.sections.at_address(maybe_catch_addr)?.0,
                                             maybe_catch_addr,
                                         );
-                                        // log::debug!("Catch found at {:08X}", addr);
+                                        syms_to_add.push(ObjSymbol {
+                                            name: format!("__catch${:08X}", addr.address),
+                                            address: addr.address as u64,
+                                            section: Some(addr.section),
+                                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                            ..Default::default()
+                                        });
                                         known_exception_addrs.insert(addr);
                                         catches.push(Some(addr));
                                         catch_addrs.insert(addr);

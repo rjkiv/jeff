@@ -585,6 +585,7 @@ impl AnalyzerState {
                     return Ok(None);
                 }
             }
+            // TODO: get the max end from our handlers? - that's what function_end should be
         } else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&start) {
             // analyze unwinds, then catches
             for unwind_start in &cxx_eh_func_info.unwinds {
@@ -617,6 +618,7 @@ impl AnalyzerState {
                     }
                 }
             }
+            // TODO: get the max end from our unwinds/catches? - that's what function_end should be
         }
         // finally, analyze the main function
         if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
@@ -635,9 +637,12 @@ impl AnalyzerState {
     }
 
     fn detect_new_functions(&mut self, obj: &ObjInfo) -> Result<bool> {
-        // FIXME: addresses that fall between C functions and their excepts should NOT be detected and added
         let mut new_functions = vec![];
         let mut truncations: Vec<(SectionAddress, SectionAddress)> = vec![];
+        // 1. the start of the C func; 2. the false "func" to remove from self.functions; 3. the known end of the C func
+        // false "funcs" come from funcs with C exception handlers, because microsoft likes to bl to them rather than b
+        let mut c_exception_truncations: Vec<(SectionAddress, SectionAddress, SectionAddress)> =
+            vec![];
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             if section.name == ".xidata" {
                 continue;
@@ -650,6 +655,41 @@ impl AnalyzerState {
                     (Some((&first, first_info)), Some(&(&second, second_info))) => {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
+                            // TODO: add a vec for C_exception_truncations? it'll make the C function the correct size, and destroy the secondary "function"
+                            if obj.funcs_with_c_handlers.contains_key(&first)
+                                && !obj.funcs_with_c_handlers.contains_key(&second)
+                            {
+                                let c_excepts = obj
+                                    .funcs_with_c_handlers
+                                    .get(&first)
+                                    .map(|c_handler| c_handler.handlers.clone())
+                                    .unwrap_or_default();
+
+                                let max_except_end =
+                                    c_excepts.iter().map(|e| obj.c_except_addrs[e]).max();
+
+                                // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
+                                // delete it, and set first's end to max end
+                                if first <= second && max_except_end.is_some_and(|end| second < end)
+                                {
+                                    assert_eq!(
+                                        first_end,
+                                        max_except_end.unwrap(),
+                                        "Expected end {:?}, calculated end {:?}",
+                                        max_except_end,
+                                        first
+                                    );
+                                    // log::warn!("This is a C function exception handling mismatch between {:?} and {:?}", first, second);
+                                    // need to mark: first, second, max_except_end
+                                    c_exception_truncations.push((
+                                        first,
+                                        second,
+                                        max_except_end.unwrap(),
+                                    ));
+                                    continue;
+                                }
+                            }
+
                             log::warn!(
                                 "Overlapping functions {}-{} -> {}, truncating end of {}",
                                 first,
@@ -708,6 +748,18 @@ impl AnalyzerState {
                 }
             }
         }
+        if !c_exception_truncations.is_empty() {
+            println!("C exception len: {}", c_exception_truncations.len());
+        }
+        // TODO: looking at .objs in objdiff, the SectionAddress corresponding with fake_func has a b to 0
+        // Need an actual C with exceptions source-compiled .obj to use as a ground truth/reference
+        for (c_func, fake_func, c_func_len) in c_exception_truncations {
+            self.functions.remove(&fake_func);
+            if let Some(c_func) = self.functions.get_mut(&c_func) {
+                c_func.end = Some(c_func_len);
+            }
+        }
+
         let found_new = !new_functions.is_empty() || !truncations.is_empty();
         for (fn_addr, new_end) in truncations {
             if let Some(info) = self.functions.get_mut(&fn_addr) {
