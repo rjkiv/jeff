@@ -69,6 +69,7 @@ pub struct ObjInfo {
     // C:
     // funcs with C except handlers
     pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
+    pub c_except_addrs: BTreeMap<SectionAddress, SectionAddress>,
 
     // C++:
     // funcs with CXX except handlers
@@ -107,6 +108,7 @@ impl ObjInfo {
             funcs_with_c_handlers: Default::default(),
             funcs_with_cxx_handlers: Default::default(),
             funcs_with_catches: Default::default(),
+            c_except_addrs: Default::default(),
             unwinds: Default::default(),
             catches: Default::default(),
         }

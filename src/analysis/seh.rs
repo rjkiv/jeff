@@ -63,6 +63,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     let mut cxx_handler_addr: Option<SectionAddress> = None;
 
     let mut catch_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
+    let mut c_except_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     // addrs that are confirmed to be unwinds/catches/excepts/finallys
     let mut known_exception_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     let mut syms_to_add: Vec<ObjSymbol> = vec![];
@@ -89,8 +90,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         if known_exception_addrs.contains(&func_start_addr) {
             if catch_addrs.contains(&func_start_addr) {
                 let end_addr = func_start_addr + (num_insts_in_func * 4);
-                // println!("Mark this catch's end addr {:08X} down!", end_addr);
                 obj.catches.insert(func_start_addr, end_addr);
+            } else if c_except_addrs.contains(&func_start_addr) {
+                let end_addr = func_start_addr + (num_insts_in_func * 4);
+                obj.c_except_addrs.insert(func_start_addr, end_addr);
             }
             continue;
         }
@@ -194,6 +197,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                             ..Default::default()
                         });
+                        c_except_addrs.insert(addr);
                         known_exception_addrs.insert(addr);
                         handlers.push(addr);
                         // log::debug!(
@@ -374,6 +378,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     // every catch should've had an entry in pdata
     for catch in catch_addrs {
         assert!(obj.catches.contains_key(&catch));
+    }
+    // ditto with C excepts
+    for except in c_except_addrs {
+        assert!(obj.c_except_addrs.contains_key(&except));
     }
 
     // add Cxx handler symbol here

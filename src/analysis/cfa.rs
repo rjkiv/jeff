@@ -574,7 +574,11 @@ impl AnalyzerState {
                     obj,
                     *except_start,
                     start,
-                    function_end,
+                    Some(
+                        *obj.c_except_addrs
+                            .get(except_start)
+                            .expect("this C except should've been noted"),
+                    ),
                     &self.functions,
                     None,
                 )? {

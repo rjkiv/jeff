@@ -453,7 +453,30 @@ impl FunctionSlices {
                                             symbol.address as u32,
                                         ))
                                     }
-                                    _ => self.function_references.insert(addr),
+                                    _ => {
+                                        let c_excepts = obj
+                                            .funcs_with_c_handlers
+                                            .get(&function_start)
+                                            .map(|c_handler| c_handler.handlers.clone())
+                                            .unwrap_or_default();
+
+                                        let max_except_end =
+                                            c_excepts.iter().map(|e| obj.c_except_addrs[e]).max();
+
+                                        // if this is a C func with excepts, and addr is between the func start, and the max exception end,
+                                        // then this isn't a true function reference, don't insert it
+                                        if function_start <= addr
+                                            && max_except_end.is_some_and(|end| addr < end)
+                                        {
+                                            log::debug!(
+                                                "{:08X} is not a true function reference!",
+                                                addr
+                                            );
+                                            continue;
+                                        } else {
+                                            self.function_references.insert(addr)
+                                        }
+                                    }
                                 };
                             } else {
                                 // MSVC likes to end functions with bl sometimes
