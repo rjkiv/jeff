@@ -104,6 +104,11 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             // so, trim up to the first zero instead of the last
             let bytes = data.iter().position(|&b| b == 0).map(|pos| &data[..pos]).unwrap_or(data);
 
+            // if no zeroes were stripped, probably not a string
+            if bytes.len() == data.len() {
+                return StringResult::None;
+            }
+
             if !bytes.is_empty() {
                 if bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
                     return StringResult::String {
@@ -155,11 +160,15 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             if symbol.name.starts_with("jumptable_") {
                 continue;
             }
+            // if the size is 1, considering there's no null terminator, it's probably not a string
+            if symbol.size == 1 {
+                continue;
+            }
             // let's not try to search for strings that aren't 4 byte aligned - we can find those later as we actually decomp
             if symbol.address & 3 != 0 {
                 continue;
             }
-            let data = section.data_range(symbol.address as u32, 0)?;
+            let data = section.symbol_data(symbol)?;
             match is_string(data) {
                 StringResult::None => {}
                 StringResult::String { length, terminated } => {
@@ -202,7 +211,8 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             None => format!("str_{:08X}", symbol.address as u32),
         };
         symbol.data_kind = entry.kind;
-        symbol.size = entry.size.next_multiple_of(4) as u64;
+        // canonically, strings are not 4 byte aligned
+        symbol.size = entry.size as u64;
         symbol.size_known = true;
         log::debug!(
             "Setting {} ({:#010X}) to size {:#X}",
