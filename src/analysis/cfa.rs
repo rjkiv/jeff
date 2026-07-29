@@ -560,6 +560,7 @@ impl AnalyzerState {
         // if there are exception structures coming after the main function, analyze those first
         if let Some(c_handler) = obj.funcs_with_c_handlers.get(&start) {
             for except_start in &c_handler.handlers {
+                // FIXME: C funcs with excepts currently have a broken bl reloc
                 if !slices.analyze(
                     obj,
                     *except_start,
@@ -578,35 +579,29 @@ impl AnalyzerState {
             // TODO: get the max end from our handlers? - that's what function_end should be
         } else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&start) {
             // analyze unwinds, then catches
-            for unwind_start in &cxx_eh_func_info.unwinds {
-                if let Some(unwind_start) = unwind_start {
-                    if !slices.analyze(
-                        obj,
-                        *unwind_start,
-                        start,
-                        function_end,
-                        &self.functions,
-                        None,
-                    )? {
-                        return Ok(None);
-                    }
+            for unwind_start in cxx_eh_func_info.unwinds.iter().flatten() {
+                if !slices.analyze(
+                    obj,
+                    *unwind_start,
+                    start,
+                    function_end,
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
                 }
             }
-            for catch_start in &cxx_eh_func_info.catches {
-                if let Some(catch_start) = catch_start {
-                    // FIXME: catches that go back up to the main function body need $LNs where those jumps go to
-                    if !slices.analyze(
-                        obj,
-                        *catch_start,
-                        start,
-                        Some(
-                            *obj.catches.get(catch_start).expect("this catch should've been noted"),
-                        ),
-                        &self.functions,
-                        None,
-                    )? {
-                        return Ok(None);
-                    }
+            for catch_start in cxx_eh_func_info.catches.iter().flatten() {
+                // FIXME: catches that go back up to the main function body need $LNs where those jumps go to
+                if !slices.analyze(
+                    obj,
+                    *catch_start,
+                    start,
+                    Some(*obj.catches.get(catch_start).expect("this catch should've been noted")),
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
                 }
             }
             // TODO: get the max end from our unwinds/catches? - that's what function_end should be
@@ -616,15 +611,7 @@ impl AnalyzerState {
             return Ok(None);
         }
 
-        return Ok(Some(slices));
-
-        // there should be a loop here
-        // analyze the main function, and then each of its unwinds/exception structures
-
-        // Ok(match slices.analyze(obj, start, start, function_end, &self.functions, None)? {
-        //     true => Some(slices),
-        //     false => None,
-        // })
+        Ok(Some(slices))
     }
 
     fn detect_new_functions(&mut self, obj: &ObjInfo) -> Result<bool> {

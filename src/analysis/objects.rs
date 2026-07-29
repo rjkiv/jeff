@@ -109,13 +109,13 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                 return StringResult::None;
             }
 
-            if !bytes.is_empty() {
-                if bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
-                    return StringResult::String {
-                        length: bytes.len(),
-                        terminated: data.len() > bytes.len(),
-                    };
-                }
+            if !bytes.is_empty()
+                && bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+            {
+                return StringResult::String {
+                    length: bytes.len(),
+                    terminated: data.len() > bytes.len(),
+                };
             }
 
             // narrow bytes didn't work, try wide bytes

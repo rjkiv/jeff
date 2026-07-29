@@ -382,9 +382,9 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // We should not have any known exception addrs in our listed known_functions
         assert!(!known_exception_addrs.contains(addr));
         // and if our function has unwinds and such, we should not have a confirmed ending
-        if obj.funcs_with_c_handlers.contains_key(addr) {
-            assert!(ending.is_none());
-        } else if obj.funcs_with_cxx_handlers.contains_key(addr) {
+        if obj.funcs_with_c_handlers.contains_key(addr)
+            || obj.funcs_with_cxx_handlers.contains_key(addr)
+        {
             assert!(ending.is_none());
         }
     }
