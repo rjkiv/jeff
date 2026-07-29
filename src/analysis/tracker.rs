@@ -411,6 +411,29 @@ impl Tracker {
         // but we still want to track them.
         let mut possible_missed_branches = BTreeMap::new();
 
+        if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&function_start) {
+            for unwind in &cxx_eh_func_info.unwinds {
+                if let Some(unwind) = unwind {
+                    possible_missed_branches.insert(*unwind, VM::new());
+                }
+            }
+            for catch in &cxx_eh_func_info.catches {
+                if let Some(catch) = catch {
+                    // the previous two instructions are ptrs, mark their relocs down
+                    self.relocations.insert(
+                        *catch - 8,
+                        Relocation::Absolute(RelocationTarget::Address(
+                            obj.cxx_handler.expect("Catches, but no C++ handler?"),
+                        )),
+                    );
+                    self.relocations.insert(
+                        *catch - 4,
+                        Relocation::Absolute(RelocationTarget::Address(cxx_eh_func_info.addr)),
+                    );
+                }
+            }
+        }
+
         let mut executor = Executor::new(obj);
         executor.push(function_start, VM::new(), false);
         loop {

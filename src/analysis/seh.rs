@@ -399,6 +399,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
 
     // add Cxx handler symbol here
     if let Some(cxx_handler) = cxx_handler_addr {
+        obj.cxx_handler = Some(cxx_handler);
         obj.add_symbol(
             ObjSymbol {
                 name: String::from("__CxxFrameHandler"),

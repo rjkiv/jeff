@@ -594,6 +594,7 @@ impl AnalyzerState {
             }
             for catch_start in &cxx_eh_func_info.catches {
                 if let Some(catch_start) = catch_start {
+                    // FIXME: catches that go back up to the main function body need $LNs where those jumps go to
                     if !slices.analyze(
                         obj,
                         *catch_start,

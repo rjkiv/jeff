@@ -74,6 +74,7 @@ pub struct ObjInfo {
     // C++:
     // funcs with CXX except handlers
     pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
+    pub cxx_handler: Option<SectionAddress>,
     pub unwinds: BTreeSet<SectionAddress>,
     // key = the catch start, value = the catch end (sourced from pdata)
     pub catches: BTreeMap<SectionAddress, SectionAddress>,
@@ -111,6 +112,7 @@ impl ObjInfo {
             c_except_addrs: Default::default(),
             unwinds: Default::default(),
             catches: Default::default(),
+            cxx_handler: None,
         }
     }
 
