@@ -40,8 +40,7 @@ pub struct CXXEhFuncInfo {
 
 pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     // add known function boundaries from pdata
-    // FIXME: Some of these are SEH-related labels, not function entrypoints
-    let (_pdata_sec_idx, pdata_section) = obj
+    let (_, pdata_section) = obj
         .sections
         .by_name(".pdata")?
         .expect(".pdata section not found. Is that even possible for an xex?");
@@ -97,12 +96,6 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             }
             continue;
         }
-
-        // // FIXME: this should only be inserted if this func doesn't have exception info
-        // // because if it does, we can't confirm the known ending due to unwinds and such
-        // obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-        // obj.pdata_funcs.insert(func_start_addr);
-        // num_discovered_funcs += 1;
 
         // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
         if func_type == 3 {

@@ -12,7 +12,7 @@ use crate::{
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
         uniq_jump_table_entries,
-        vm::{section_address_for, BranchTarget, StepResult, VM},
+        vm::{section_address_for, BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
     obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
@@ -25,6 +25,7 @@ pub struct FunctionSlices {
     pub function_references: BTreeSet<SectionAddress>,
     pub jump_table_references: BTreeMap<SectionAddress, u32>,
     pub special_jump_table_labels: Vec<SectionAddress>,
+    pub special_catch_labels: Vec<SectionAddress>,
     pub prologue: Option<SectionAddress>,
     pub epilogue: Option<SectionAddress>,
     // Either a block or tail call
@@ -263,6 +264,27 @@ impl FunctionSlices {
 
         // no need to check for prologues/epilogues in MSVC
         // if a func came from pdata, it not only has a prologue/epilogue, but a known confirmed ending
+
+        // if function_start belongs to a func with C++ EH that has catches,
+        // and the inst we just ran was ADDI,
+        // and the value inside R3 > function_start && R3 < any of the catches' start addresses, add it to our catch $LN label list
+        if ins.op == Opcode::Addi {
+            if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&function_start) {
+                if let GprValue::Constant(c) = vm.gpr[3].value {
+                    let maybe_catch_ln = c as u32;
+                    if maybe_catch_ln > function_start.address
+                        && cxx_eh_func_info
+                            .catches
+                            .iter()
+                            .flatten()
+                            .any(|catch| maybe_catch_ln < catch.address)
+                    {
+                        self.special_catch_labels
+                            .push(SectionAddress::new(function_start.section, maybe_catch_ln));
+                    }
+                }
+            }
+        }
 
         if !self.has_conditional_blr && is_conditional_blr(ins) {
             self.has_conditional_blr = true;

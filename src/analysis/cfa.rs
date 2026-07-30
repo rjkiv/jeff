@@ -522,7 +522,15 @@ impl AnalyzerState {
                     name: format!("$LN{:X}", label.address),
                     address: label.address as u64,
                     section: Some(label.section),
-                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                })
+            }
+            for label in slices.special_catch_labels.iter() {
+                self.known_symbols.entry(*label).or_default().push(ObjSymbol {
+                    name: format!("$LN{:X}", label.address),
+                    address: label.address as u64,
+                    section: Some(label.section),
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     ..Default::default()
                 })
@@ -565,11 +573,7 @@ impl AnalyzerState {
                     obj,
                     *except_start,
                     start,
-                    Some(
-                        *obj.c_except_addrs
-                            .get(except_start)
-                            .expect("this C except should've been noted"),
-                    ),
+                    Some(obj.c_except_addrs[except_start]),
                     &self.functions,
                     None,
                 )? {
@@ -597,7 +601,7 @@ impl AnalyzerState {
                     obj,
                     *catch_start,
                     start,
-                    Some(*obj.catches.get(catch_start).expect("this catch should've been noted")),
+                    Some(obj.catches[catch_start]),
                     &self.functions,
                     None,
                 )? {
