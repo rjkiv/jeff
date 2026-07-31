@@ -1,10 +1,13 @@
-use std::collections::{btree_map::Entry, BTreeSet};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 use anyhow::{bail, Result};
 
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
-    obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind},
+    obj::{
+        ExceptionType::{Normal, C, CXX},
+        ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
+    },
 };
 
 // info on the C scope table: https://blog.talosintelligence.com/exceptional-behavior-windows-81-x64-seh/
@@ -61,6 +64,11 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         });
     let mut cxx_handler_addr: Option<SectionAddress> = None;
 
+    // key = the func that has C exceptions, value = each of the exception handlers' start addrs
+    let mut tmp_c_funcs: BTreeMap<SectionAddress, Vec<SectionAddress>> = BTreeMap::new();
+    // key = exception handler start addr, value = exception handler end addr
+    let mut tmp_c_except_addrs: BTreeMap<SectionAddress, SectionAddress> = BTreeMap::new();
+
     let mut catch_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     let mut c_except_addrs: BTreeSet<SectionAddress> = BTreeSet::new();
     // addrs that are confirmed to be unwinds/catches/excepts/finallys
@@ -92,7 +100,8 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                 obj.catches.insert(func_start_addr, end_addr);
             } else if c_except_addrs.contains(&func_start_addr) {
                 let end_addr = func_start_addr + (num_insts_in_func * 4);
-                obj.c_except_addrs.insert(func_start_addr, end_addr);
+                // obj.c_except_addrs.insert(func_start_addr, end_addr);
+                tmp_c_except_addrs.insert(func_start_addr, end_addr);
             }
             continue;
         }
@@ -174,17 +183,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     for i in 0..num_scope_entries {
                         let handler = read_u32(rdata_section, entry_addrs_begin + (i * 16) + 8)
                             .expect("No handler here!");
-                        // let target = read_u32(rdata_section, entry_addrs_begin + (i * 16) + 12)
-                        //     .expect("No target here!");
                         let addr =
                             SectionAddress::new(obj.sections.at_address(handler)?.0, handler);
-                        // add a label for this except structure - could remove this tbh, verify against real objs
                         syms_to_add.push(ObjSymbol {
-                            name: format!(
-                                "$LN{:08X}",
-                                // if target == 0 { "__finally" } else { "__except" },
-                                addr.address
-                            ),
+                            name: format!("$LN{:08X}", addr.address),
                             address: addr.address as u64,
                             section: Some(addr.section),
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
@@ -193,18 +195,21 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         c_except_addrs.insert(addr);
                         known_exception_addrs.insert(addr);
                         handlers.push(addr);
-                        // log::debug!(
-                        //     "Func {:08X}: Handler at {:08X} is {}!",
-                        //     func_start_addr,
-                        //     addr,
-                        //     if target == 0 { "a __finally" } else { "an __except" }
-                        // );
                     }
                     assert_eq!(handlers.len(), num_scope_entries as usize);
-                    obj.funcs_with_c_handlers.insert(func_start_addr, CScopeTableInfo {
-                        addr: cur_func_except_record,
-                        handlers,
+                    syms_to_add.push(ObjSymbol {
+                        name: format!("T${:08X}", cur_func_except_record.address),
+                        address: cur_func_except_record.address as u64,
+                        section: Some(cur_func_except_record.section),
+                        // size of scope table: 16 * num_scope_entries + 4
+                        // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
+                        size: (handlers.len() * 16 + 4) as u64,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
                     });
+                    tmp_c_funcs.insert(func_start_addr, handlers.clone());
 
                     // this is a known C function, but exceptions make it hard to deduce the ending
                     obj.known_functions.insert(func_start_addr, None);
@@ -261,7 +266,6 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                     });
                                     known_exception_addrs.insert(addr);
                                     unwinds.push(Some(addr));
-                                    obj.unwinds.insert(addr);
                                 } else {
                                     unwinds.push(None);
                                 }
@@ -332,18 +336,18 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             None
                         }
                     };
-
-                    obj.funcs_with_cxx_handlers.insert(func_start_addr, CXXEhFuncInfo {
-                        addr: cur_func_except_record,
-                        unwind_map_addr,
-                        unwinds,
-                        num_tries,
-                        try_map_addr,
-                        catches,
-                        num_ip_to_states,
-                        ip_to_state_map_addr,
+                    obj.combined_pdata_funcs.insert(func_start_addr, CXX {
+                        info: CXXEhFuncInfo {
+                            addr: cur_func_except_record,
+                            unwind_map_addr,
+                            unwinds,
+                            num_tries,
+                            try_map_addr,
+                            catches,
+                            num_ip_to_states,
+                            ip_to_state_map_addr,
+                        },
                     });
-
                     // this is a known C++ function, but exceptions make it hard to deduce the ending
                     obj.known_functions.insert(func_start_addr, None);
                     obj.pdata_funcs.insert(func_start_addr);
@@ -357,17 +361,32 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             // no exception data for this func, we can safely mark down its ending
             obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
             obj.pdata_funcs.insert(func_start_addr);
+            obj.combined_pdata_funcs
+                .insert(func_start_addr, Normal { end: func_start_addr + num_insts_in_func * 4 });
             num_discovered_funcs += 1;
         }
     }
+
+    for (c_func, c_func_handler_addrs) in &tmp_c_funcs {
+        let mut c_func_handler_bounds: BTreeMap<SectionAddress, SectionAddress> = BTreeMap::new();
+        for handler in c_func_handler_addrs {
+            c_func_handler_bounds.insert(*handler, tmp_c_except_addrs[handler]);
+        }
+        obj.combined_pdata_funcs.insert(*c_func, C { handlers: c_func_handler_bounds });
+    }
+
     log::info!("Found {} known funcs from SEH!", num_discovered_funcs);
-    // if c_handler_addr.is_some() {
-    //     log::info!("\tC   exception handlers: {}", obj.excepts.len() + obj.finallys.len());
-    //     log::info!("\tC++ exception handlers: {}", obj.unwinds.len() + obj.catches.len());
-    // }
+    log::info!(
+        "\tFuncs with C   exceptions: {}",
+        obj.combined_pdata_funcs.values().filter(|e| matches!(e, C { handlers: _ })).count()
+    );
+    log::info!(
+        "\tFuncs with CXX exceptions: {}",
+        obj.combined_pdata_funcs.values().filter(|e| matches!(e, CXX { info: _ })).count()
+    );
 
     // sanity checks
-    for addr in &obj.pdata_funcs {
+    for (addr, _) in &obj.combined_pdata_funcs {
         // We should not have any known exception addrs in our listed pdata funcs
         assert!(!known_exception_addrs.contains(addr));
     }
@@ -375,9 +394,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // We should not have any known exception addrs in our listed known_functions
         assert!(!known_exception_addrs.contains(addr));
         // and if our function has unwinds and such, we should not have a confirmed ending
-        if obj.funcs_with_c_handlers.contains_key(addr)
-            || obj.funcs_with_cxx_handlers.contains_key(addr)
-        {
+        if matches!(obj.combined_pdata_funcs.get(&addr), Some(C { .. } | CXX { .. })) {
             assert!(ending.is_none());
         }
     }
@@ -386,9 +403,9 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         assert!(obj.catches.contains_key(&catch));
     }
     // ditto with C excepts
-    for except in c_except_addrs {
-        assert!(obj.c_except_addrs.contains_key(&except));
-    }
+    // for except in c_except_addrs {
+    //     assert!(obj.c_except_addrs.contains_key(&except));
+    // }
 
     // add Cxx handler symbol here
     if let Some(cxx_handler) = cxx_handler_addr {

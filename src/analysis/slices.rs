@@ -15,7 +15,7 @@ use crate::{
         vm::{section_address_for, BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
-    obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
+    obj::{ExceptionType::CXX, ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
 };
 
 #[derive(Debug, Default, Clone)]
@@ -269,7 +269,9 @@ impl FunctionSlices {
         // and the inst we just ran was ADDI,
         // and the value inside R3 > function_start && R3 < any of the catches' start addresses, add it to our catch $LN label list
         if ins.op == Opcode::Addi {
-            if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&function_start) {
+            if let Some(CXX { info: cxx_eh_func_info }) =
+                &obj.combined_pdata_funcs.get(&function_start)
+            {
                 if let GprValue::Constant(c) = vm.gpr[3].value {
                     let maybe_catch_ln = c as u32;
                     if maybe_catch_ln > function_start.address

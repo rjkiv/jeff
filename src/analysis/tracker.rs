@@ -17,8 +17,8 @@ use crate::{
         RelocationTarget,
     },
     obj::{
-        ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
-        ObjSymbol, ObjSymbolKind, SectionIndex,
+        ExceptionType::CXX, ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection,
+        ObjSectionKind, ObjSymbol, ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -411,7 +411,8 @@ impl Tracker {
         // but we still want to track them.
         let mut possible_missed_branches = BTreeMap::new();
 
-        if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&function_start) {
+        if let Some(CXX { info: cxx_eh_func_info }) = &obj.combined_pdata_funcs.get(&function_start)
+        {
             for unwind in cxx_eh_func_info.unwinds.iter().flatten() {
                 possible_missed_branches.insert(*unwind, VM::new());
             }
