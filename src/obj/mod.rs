@@ -74,9 +74,9 @@ pub struct ObjInfo {
     pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
 
     // Compiler generated info
-    /// Functions that have an entry in .pdata.
+    // TODO: redo the map and pdb parsing so you can remove this field
     pub pdata_funcs: BTreeSet<SectionAddress>,
-    // trying to consolidate all the pdata entries
+    /// Functions that have an entry in .pdata.
     pub combined_pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
     // Info retrieved from exception datas that precede certain functions.
 
