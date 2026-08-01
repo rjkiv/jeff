@@ -4,17 +4,17 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use indexmap::IndexMap;
 use multimap::MultiMap;
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
-        ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
-        ObjSymbolKind, ObjUnit,
+        ExceptionType::Normal, ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
+        ObjSymbolFlags, ObjSymbolKind, ObjUnit,
     },
 };
-
 // SymbolRef: the symbol name, and the obj it came from
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,7 +27,7 @@ pub enum ExeSectionType {
 pub struct ExeSectionInfo {
     pub name: String,
     pub index: u32,
-    pub offset: u32,
+    pub offset: u32, // the section's offset within the index
     pub size: u32,
     pub section_type: ExeSectionType,
 }
@@ -47,7 +47,7 @@ pub struct ExeMapInfo {
     // the different sections of the map
     pub sections: Vec<ExeSectionInfo>,
     // the symbols found at each section of the map
-    pub section_symbols: Vec<Vec<ExeSymbolEntry>>,
+    pub section_symbols_old: Vec<Vec<ExeSymbolEntry>>,
     // the addresses in the map that have more than one symbol for them
     pub merged_addrs: Vec<u32>,
     // pub entry_point: String,
@@ -59,6 +59,10 @@ pub struct ExeMapInfo {
     // pub link_map_symbols: HashMap<SymbolRef, SymbolEntry>,
     // pub section_symbols: IndexMap<String, BTreeMap<u32, Vec<SymbolEntry>>>,
     // pub section_units: HashMap<String, Vec<(u32, String)>>,
+
+    // String = the section name (like .text)
+    // BTreeMap: key = address in the exe, value = the symbols mapped at this address
+    pub section_symbols: IndexMap<String, BTreeMap<u32, Vec<ExeSymbolEntry>>>,
 }
 
 impl Default for ExeMapInfo {
@@ -70,7 +74,8 @@ impl ExeMapInfo {
         ExeMapInfo {
             preferred_load_addr: 0,
             sections: Vec::new(),
-            section_symbols: Vec::new(),
+            section_symbols_old: Vec::new(),
+            section_symbols: IndexMap::new(),
             merged_addrs: Vec::new(),
         }
     }
@@ -80,8 +85,9 @@ impl ExeMapInfo {
     }
 
     fn add_section(&mut self, section: ExeSectionInfo) {
+        self.section_symbols.insert(section.name.clone(), BTreeMap::new());
         self.sections.push(section);
-        self.section_symbols.push(Vec::new());
+        self.section_symbols_old.push(Vec::new());
     }
 
     fn get_section_idx(&self, idx: u32, offset: u32) -> Result<usize> {
@@ -102,14 +108,26 @@ impl ExeMapInfo {
         let flags_slice = &symbol_parts[3..symbol_parts.len() - 1];
         let section_symbol_idx = self.get_section_idx(sec_idx, sec_offset)?;
 
-        self.section_symbols.get_mut(section_symbol_idx).unwrap().push(ExeSymbolEntry {
+        let sym_name = String::from(symbol_parts[1]);
+
+        let sym_entry = ExeSymbolEntry {
             addr: u32::from_str_radix(symbol_parts[2], 16)?,
-            symbol: String::from(symbol_parts[1]),
+            symbol: sym_name.clone(),
             unit: String::from(*symbol_parts.last().unwrap()),
-            is_function: flags_slice.contains(&"f"),
+            is_function: flags_slice.contains(&"f")
+                && !sym_name.starts_with("__unwind$")
+                && !sym_name.starts_with("__catch$"),
             is_weak: flags_slice.contains(&"i"),
             is_static,
-        });
+        };
+
+        // associate the sym_entry with the addr it's mapped at
+        self.section_symbols[&self.sections[section_symbol_idx].name.clone()]
+            .entry(sym_entry.addr)
+            .or_default()
+            .push(sym_entry.clone());
+        // old impl
+        self.section_symbols_old.get_mut(section_symbol_idx).unwrap().push(sym_entry.clone());
         Ok(())
     }
 
@@ -138,7 +156,22 @@ impl ExeMapInfo {
             None
         }
 
-        for entries in self.section_symbols.iter_mut() {
+        // TODO: refactor this function to use this loop
+        for (section, symbols_by_address) in self.section_symbols.iter_mut() {
+            for (addr, symbols) in symbols_by_address.iter_mut() {
+                // do something with merged entries here
+                if symbols.len() > 1 {
+                    log::debug!(
+                        "Section {} has a merged addr {:08X}! ({} entries)",
+                        section,
+                        addr,
+                        symbols.len()
+                    );
+                }
+            }
+        }
+
+        for entries in self.section_symbols_old.iter_mut() {
             let mut counts = HashMap::new();
             for entry in entries.iter() {
                 *counts.entry(entry.addr).or_insert(0) += 1;
@@ -204,7 +237,7 @@ pub fn is_reg_intrinsic(name: &str) -> bool {
 
 pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     // apply map symbols to ObjInfo
-    for entries in result.section_symbols.iter() {
+    for entries in result.section_symbols_old.iter() {
         for sym in entries {
             // we want to skip imps and save/restore reg intrinsics, since we'll find those ourselves later
             if !sym.symbol.contains("__imp_")
@@ -220,23 +253,31 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         };
                         // if func came from pdata, DO NOT override the size
                         let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
-                        let sym_to_add: ObjSymbol = if obj.pdata_funcs.contains(&the_sec_addr) {
+                        let sym_to_add: ObjSymbol = if let Some(Normal { end }) =
+                            obj.combined_pdata_funcs.get(&the_sec_addr)
+                        {
                             ObjSymbol {
                                 name: sym_name,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
-                                size: obj.known_functions.get(&the_sec_addr).unwrap().unwrap()
-                                    as u64,
+                                size: (end.address - the_sec_addr.address) as u64,
                                 size_known: true,
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: if sec.kind == ObjSectionKind::Code
-                                    && sym.symbol != "__NLG_Dispatch"
-                                    && sym.symbol != "__NLG_Return"
-                                {
+                                kind: if sec.kind == ObjSectionKind::Code && sym.is_function {
                                     ObjSymbolKind::Function
                                 } else {
                                     ObjSymbolKind::Object
                                 },
+                                ..Default::default()
+                            }
+                        } else if sym_name.starts_with("__unwind$")
+                            || sym_name.starts_with("__catch$")
+                        {
+                            ObjSymbol {
+                                name: sym_name,
+                                address: sym.addr as u64,
+                                section: Some(sec_idx),
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                 ..Default::default()
                             }
                         } else {
@@ -244,13 +285,9 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 name: sym_name,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
-                                size: 0,
                                 size_known: false, // shoutout to MSVC maps for not providing sizes
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: if sec.kind == ObjSectionKind::Code
-                                    && sym.symbol != "__NLG_Dispatch"
-                                    && sym.symbol != "__NLG_Return"
-                                {
+                                kind: if sec.kind == ObjSectionKind::Code && sym.is_function {
                                     ObjSymbolKind::Function
                                 } else {
                                     ObjSymbolKind::Object
@@ -281,7 +318,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     }
 
     // identify split bounds and apply them to ObjInfo
-    for (idx, entries) in result.section_symbols.iter().enumerate() {
+    for (idx, entries) in result.section_symbols_old.iter().enumerate() {
         if entries.is_empty() {
             continue;
         }
