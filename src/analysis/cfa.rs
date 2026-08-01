@@ -699,9 +699,6 @@ impl AnalyzerState {
                 }
             }
         }
-        if !c_exception_truncations.is_empty() {
-            println!("C exception len: {}", c_exception_truncations.len());
-        }
         // TODO: looking at .objs in objdiff, the SectionAddress corresponding with fake_func has a b to 0
         // Need an actual C with exceptions source-compiled .obj to use as a ground truth/reference
         for (c_func, fake_func, c_func_len) in c_exception_truncations {

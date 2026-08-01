@@ -240,10 +240,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     for entries in result.section_symbols_old.iter() {
         for sym in entries {
             // we want to skip imps and save/restore reg intrinsics, since we'll find those ourselves later
-            if !sym.symbol.contains("__imp_")
-                && !is_reg_intrinsic(&sym.symbol)
-                && sym.symbol != "__NLG_Return"
-            {
+            if !sym.symbol.contains("__imp_") && !is_reg_intrinsic(&sym.symbol) {
                 match obj.sections.at_address(sym.addr) {
                     Ok((sec_idx, sec)) => {
                         let sym_name = if result.merged_addrs.contains(&sym.addr) {

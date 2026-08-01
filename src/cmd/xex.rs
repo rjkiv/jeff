@@ -25,7 +25,6 @@ use crate::{
         cfa::{AnalyzerState, SectionAddress},
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
-        rtti::FindRTTIObjectsXbox,
         tracker::Tracker,
     },
     cmd::dol::{
@@ -462,10 +461,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         let mut state = AnalyzerState::default();
         debug!("Detecting function boundaries");
         FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-        // don't search for RTTI again, we already did it during initial analysis
-        if symbols_cache.is_none() {
-            FindRTTIObjectsXbox::execute(&mut state, &obj)?;
-        }
         state.detect_functions(&obj)?; // perform CFA
         state.apply(&mut obj)?; // give each found function a symbol
     }
@@ -506,7 +501,6 @@ fn disasm(args: DisasmArgs) -> Result<()> {
     // step 2. find common functions (save/restore reg funcs, XAPI calls)
     // rename the save/restore gpr/fpr funcs that were previously found in pdata
     FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-    FindRTTIObjectsXbox::execute(&mut state, &obj)?;
 
     state.detect_functions(&obj)?;
     log::info!(

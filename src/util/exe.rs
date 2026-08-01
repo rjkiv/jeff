@@ -6,7 +6,7 @@ use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
-    analysis::{cfa::SectionAddress, seh::process_seh},
+    analysis::{cfa::SectionAddress, rtti::process_rtti, seh::process_seh},
     obj::{
         ObjInfo, ObjKind, ObjSection, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
         ObjSymbolKind, SymbolIndex,
@@ -366,7 +366,7 @@ impl InputtedExecutable {
         // you would be amazed just how much we can infer from an Xbox 360 exe before CFA can even begin
         process_seh(&mut obj)?;
         process_xidata(&mut obj)?;
-        // process_rtti
+        process_rtti(&mut obj)?;
 
         const RTL_CHECK_STACK: [u8; 40] = [
             // _RtlCheckStack
