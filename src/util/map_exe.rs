@@ -1,11 +1,10 @@
+#![allow(dead_code)]
 use std::{
-    collections::{btree_map, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap},
     fs::read_to_string,
 };
 
 use anyhow::{bail, Result};
-use indexmap::IndexMap;
-use multimap::MultiMap;
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
@@ -36,33 +35,53 @@ pub struct ExeSectionInfo {
 pub struct ExeSymbolEntry {
     pub addr: u32,
     pub symbol: String,
-    pub unit: String,
+    // what section is this symbol part of?
+    pub section: SectionIdx,
+    // what unit does this symbol belong to?
+    pub unit: UnitIdx,
     pub is_function: bool,
     pub is_weak: bool, // denoted by the "i" in the symbol flags
     pub is_static: bool,
 }
 
+pub struct ExeObjUnit {
+    pub name: String,
+    // any other crap to add in the future goes in here
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct UnitIdx(pub usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct SymbolIdx(pub usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct SectionIdx(pub usize);
+
 pub struct ExeMapInfo {
     pub preferred_load_addr: u32,
     // the different sections of the map
     pub sections: Vec<ExeSectionInfo>,
-    // the symbols found at each section of the map
-    pub section_symbols_old: Vec<Vec<ExeSymbolEntry>>,
-    // the addresses in the map that have more than one symbol for them
-    pub merged_addrs: Vec<u32>,
-    // pub entry_point: String,
+    // lookup for a section's name and its index into our sections Vec
+    pub section_indices: HashMap<String, SectionIdx>,
+    // units/obj names we find
+    pub units: Vec<ExeObjUnit>,
+    // lookup for a unit's name and its index into our units Vec
+    pub unit_indices: HashMap<String, UnitIdx>,
+
     // pub unit_entries: MultiMap<String, SymbolRef>,
     // pub entry_references: MultiMap<SymbolRef, SymbolRef>,
     // pub entry_referenced_from: MultiMap<SymbolRef, SymbolRef>,
     // pub unit_references: MultiMap<SymbolRef, String>,
-    // pub sections: Vec<SectionInfo>,
-    // pub link_map_symbols: HashMap<SymbolRef, SymbolEntry>,
-    // pub section_symbols: IndexMap<String, BTreeMap<u32, Vec<SymbolEntry>>>,
     // pub section_units: HashMap<String, Vec<(u32, String)>>,
 
-    // String = the section name (like .text)
-    // BTreeMap: key = address in the exe, value = the symbols mapped at this address
-    pub section_symbols: IndexMap<String, BTreeMap<u32, Vec<ExeSymbolEntry>>>,
+    // a big vec of ALL the symbols we've found in the map
+    pub symbols: Vec<ExeSymbolEntry>,
+    // the symbols for a unit, indexed by section
+    pub unit_symbols: BTreeMap<UnitIdx, BTreeMap<SectionIdx, Vec<SymbolIdx>>>,
+    // the symbols for a section, indexed by their address in the exe
+    // value is a Vec because of the potential of code merging
+    pub section_symbols: BTreeMap<SectionIdx, BTreeMap<u32, Vec<SymbolIdx>>>,
 }
 
 impl Default for ExeMapInfo {
@@ -74,9 +93,12 @@ impl ExeMapInfo {
         ExeMapInfo {
             preferred_load_addr: 0,
             sections: Vec::new(),
-            section_symbols_old: Vec::new(),
-            section_symbols: IndexMap::new(),
-            merged_addrs: Vec::new(),
+            section_symbols: BTreeMap::new(),
+            section_indices: HashMap::new(),
+            symbols: Vec::new(),
+            unit_indices: HashMap::new(),
+            unit_symbols: BTreeMap::new(),
+            units: Vec::new(),
         }
     }
 
@@ -84,130 +106,126 @@ impl ExeMapInfo {
         self.preferred_load_addr = entry_point;
     }
 
-    fn add_section(&mut self, section: ExeSectionInfo) {
-        self.section_symbols.insert(section.name.clone(), BTreeMap::new());
-        self.sections.push(section);
-        self.section_symbols_old.push(Vec::new());
+    fn add_section(&mut self, section_parts: Vec<&str>) -> Result<()> {
+        // section_parts: [0]: idx:offset, [1]: {size}H, [2]: name, [3]: type (we can ignore this)
+        let name = String::from(section_parts[2]);
+        let (index, offset) = {
+            let idx_and_offset = section_parts[0].split(":").collect::<Vec<&str>>();
+            (
+                u32::from_str_radix(idx_and_offset[0], 16)?,
+                u32::from_str_radix(idx_and_offset[1], 16)?,
+            )
+        };
+        let size = {
+            let size_str = section_parts[1].split("H").collect::<Vec<&str>>();
+            u32::from_str_radix(size_str[0], 16)?
+        };
+        let section_index = SectionIdx(self.sections.len());
+        self.section_indices.insert(name.clone(), section_index);
+        self.section_symbols.insert(section_index, BTreeMap::new());
+        self.sections.push(ExeSectionInfo {
+            name,
+            index,
+            offset,
+            size,
+            section_type: match section_parts[3] {
+                "CODE" => ExeSectionType::Code,
+                "DATA" => ExeSectionType::Data,
+                _ => unreachable!(),
+            },
+        });
+        Ok(())
     }
 
-    fn get_section_idx(&self, idx: u32, offset: u32) -> Result<usize> {
+    fn get_section_idx(&self, idx: u32, offset: u32) -> Result<SectionIdx> {
         for (sec_idx, sec) in self.sections.iter().enumerate() {
             if sec.index == idx && (offset >= sec.offset && offset < (sec.offset + sec.size))
                 || (offset >= sec.offset && sec.size == 0 && sec.name == ".xedata")
             {
-                return Ok(sec_idx);
+                return Ok(SectionIdx(sec_idx));
             }
         }
         bail!("index {}:{:#X} not found", idx, offset);
     }
 
     fn add_symbol(&mut self, symbol_parts: Vec<&str>, is_static: bool) -> Result<()> {
-        let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
-        let sec_idx = u32::from_str_radix(idx_and_offset[0], 16)?;
-        let sec_offset = u32::from_str_radix(idx_and_offset[1], 16)?;
-        let flags_slice = &symbol_parts[3..symbol_parts.len() - 1];
-        let section_symbol_idx = self.get_section_idx(sec_idx, sec_offset)?;
-
         let sym_name = String::from(symbol_parts[1]);
+        let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
+        let sym_section = {
+            let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
+            let sec_idx = u32::from_str_radix(idx_and_offset[0], 16)?;
+            let sec_offset = u32::from_str_radix(idx_and_offset[1], 16)?;
+            self.get_section_idx(sec_idx, sec_offset)?
+        };
+        let flags_slice = &symbol_parts[3..symbol_parts.len() - 1];
+        let unit = String::from(*symbol_parts.last().unwrap());
+        let unit_idx = match self.unit_indices.get(&unit) {
+            Some(idx) => *idx,
+            None => {
+                let unit_idx = UnitIdx(self.units.len());
+                self.unit_indices.insert(unit.clone(), unit_idx);
+                self.unit_symbols.insert(unit_idx, BTreeMap::new());
+                self.units.push(ExeObjUnit { name: unit.clone() });
+                unit_idx
+            }
+        };
 
-        let sym_entry = ExeSymbolEntry {
-            addr: u32::from_str_radix(symbol_parts[2], 16)?,
+        let symbol_idx = SymbolIdx(self.symbols.len());
+        self.symbols.push(ExeSymbolEntry {
+            addr: sym_addr,
             symbol: sym_name.clone(),
-            unit: String::from(*symbol_parts.last().unwrap()),
+            section: sym_section,
+            unit: unit_idx,
             is_function: flags_slice.contains(&"f")
                 && !sym_name.starts_with("__unwind$")
                 && !sym_name.starts_with("__catch$"),
             is_weak: flags_slice.contains(&"i"),
             is_static,
-        };
-
-        // associate the sym_entry with the addr it's mapped at
-        self.section_symbols[&self.sections[section_symbol_idx].name.clone()]
-            .entry(sym_entry.addr)
+        });
+        // add this symbol idx to our unit_symbols
+        self.unit_symbols
+            .get_mut(&unit_idx)
+            .expect("Unit should've been initialized at this point!")
+            .entry(sym_section)
             .or_default()
-            .push(sym_entry.clone());
-        // old impl
-        self.section_symbols_old.get_mut(section_symbol_idx).unwrap().push(sym_entry.clone());
+            .push(symbol_idx);
+        // add this symbol idx to our section symbols
+        self.section_symbols
+            .get_mut(&sym_section)
+            .expect("Section should've been initialized at this point!")
+            .entry(sym_addr)
+            .or_default()
+            .push(symbol_idx);
         Ok(())
     }
 
-    pub fn resolve_merged_entries(&mut self) -> Result<()> {
-        fn check_for_imp_case(entries: Vec<&ExeSymbolEntry>) -> Option<String> {
-            // __imp_{name} and {name} case
-            if entries.len() == 2 {
-                let mut imp = None;
-                let mut thunk = None;
-
-                for dupe in entries {
-                    if dupe.symbol.starts_with("__imp_") {
-                        imp = Some(dupe.symbol.trim_start_matches("__imp_"));
-                    } else {
-                        thunk = Some(dupe.symbol.as_str());
-                    }
+    fn debug_print(&self) {
+        for (unit_idx, symbols_for_unit) in &self.unit_symbols {
+            log::debug!("Symbols at unit {}", self.units[unit_idx.0].name);
+            for (sec_idx, symbol_idxs) in symbols_for_unit {
+                let mut msg =
+                    format!("\t{} ({:04}): ", self.sections[sec_idx.0].name, symbol_idxs.len());
+                for sym_idx in symbol_idxs {
+                    let sym = &self.symbols[sym_idx.0];
+                    msg += &*format!("{:08X}:{} ", sym.addr, sym.symbol.clone()).to_string();
                 }
-
-                if let (Some(imp), Some(thunk)) = (imp, thunk) {
-                    if imp == thunk {
-                        // println!("Unnecessary thunk {} found!", thunk);
-                        return Some(thunk.to_string());
-                    }
-                }
+                log::debug!("{}", msg);
             }
-            None
         }
+    }
 
-        // TODO: refactor this function to use this loop
-        for (section, symbols_by_address) in self.section_symbols.iter_mut() {
+    fn resolve_imps(&mut self) -> Result<()> {
+        for (_section, symbols_by_address) in self.section_symbols.iter_mut() {
             for (addr, symbols) in symbols_by_address.iter_mut() {
-                // do something with merged entries here
-                if symbols.len() > 1 {
-                    log::debug!(
-                        "Section {} has a merged addr {:08X}! ({} entries)",
-                        section,
-                        addr,
-                        symbols.len()
-                    );
+                // if we've got a merged addr that contains an __imp, keep the __imp, dump everything else
+                if symbols.len() > 1
+                    && symbols.iter().any(|s| self.symbols[s.0].symbol.starts_with("__imp_"))
+                {
+                    println!("Merged imp at {:08X}!", addr);
+                    symbols.retain(|s| self.symbols[s.0].symbol.starts_with("__imp_"));
                 }
             }
         }
-
-        for entries in self.section_symbols_old.iter_mut() {
-            let mut counts = HashMap::new();
-            for entry in entries.iter() {
-                *counts.entry(entry.addr).or_insert(0) += 1;
-            }
-
-            let mut dupe_map: MultiMap<u32, usize> = Default::default(); // store indices
-            for (idx, entry) in entries.iter().enumerate() {
-                if counts.get(&entry.addr).copied().unwrap_or(0) > 1 {
-                    dupe_map.insert(entry.addr, idx);
-                }
-            }
-
-            let mut symbols_to_remove: Vec<String> = Vec::new();
-            for (addr, indices) in dupe_map.iter_all() {
-                let group: Vec<&ExeSymbolEntry> = indices.iter().map(|&i| &entries[i]).collect();
-
-                // print!("{} has entries: ", addr);
-                // for dupe in &group {
-                //     print!("{} ", dupe.symbol);
-                // }
-                // println!();
-
-                // resolve imp_Blahs and Blahs that are at the same address
-                if let Some(thunk_sym) = check_for_imp_case(group) {
-                    symbols_to_remove.push(thunk_sym.to_string());
-                } else {
-                    // add this addr to a list of merged addrs
-                    self.merged_addrs.push(*addr);
-                }
-            }
-            entries.retain(|e| !symbols_to_remove.contains(&e.symbol));
-        }
-
-        // do something with code merged symbols/units
-        // maybe: for an address that has a bunch of code merged symbols, look at the prev and next addrs and see what their units are
-        // then wipe out any code merged entry that doesn't belong to those aforementioned units
         Ok(())
     }
 }
@@ -237,24 +255,33 @@ pub fn is_reg_intrinsic(name: &str) -> bool {
 
 pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     // apply map symbols to ObjInfo
-    for entries in result.section_symbols_old.iter() {
-        for sym in entries {
+    // the good news: by this point, exception info and RTTI have been parsed/detected, and their symbols marked
+    // so we can look for those and account for them when deducing .rdata sizes
+    for (section, symbols_by_address) in &result.section_symbols {
+        for (addr, symbols) in symbols_by_address {
             // we want to skip imps and save/restore reg intrinsics, since we'll find those ourselves later
-            if !sym.symbol.contains("__imp_") && !is_reg_intrinsic(&sym.symbol) {
-                match obj.sections.at_address(sym.addr) {
-                    Ok((sec_idx, sec)) => {
-                        let sym_name = if result.merged_addrs.contains(&sym.addr) {
-                            format!("merged_{:08X}", sym.addr)
-                        } else {
-                            sym.symbol.clone()
-                        };
-                        // if func came from pdata, DO NOT override the size
-                        let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
-                        let sym_to_add: ObjSymbol = if let Some(Normal { end }) =
-                            obj.combined_pdata_funcs.get(&the_sec_addr)
-                        {
+            if symbols.iter().any(|sym_idx| {
+                let sym = &result.symbols[sym_idx.0];
+                sym.symbol.starts_with("__imp") || is_reg_intrinsic(&sym.symbol)
+            }) {
+                continue;
+            }
+            // else, add to our ObjInfo
+            let sym = {
+                let mut sym = result.symbols[symbols[0].0].clone();
+                if symbols.len() > 1 {
+                    sym.symbol = format!("merged_{:08X}", sym.addr);
+                }
+                sym
+            };
+            match obj.sections.at_address(sym.addr) {
+                Ok((sec_idx, sec)) => {
+                    // if func came from pdata, DO NOT override the size
+                    let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
+                    let sym_to_add: ObjSymbol =
+                        if let Some(Normal { end }) = obj.combined_pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
-                                name: sym_name,
+                                name: sym.symbol,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
                                 size: (end.address - the_sec_addr.address) as u64,
@@ -267,22 +294,21 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 },
                                 ..Default::default()
                             }
-                        } else if sym_name.starts_with("__unwind$")
-                            || sym_name.starts_with("__catch$")
+                        } else if sym.symbol.starts_with("__unwind$")
+                            || sym.symbol.starts_with("__catch$")
                         {
-                            ObjSymbol {
-                                name: sym_name,
-                                address: sym.addr as u64,
-                                section: Some(sec_idx),
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                ..Default::default()
-                            }
+                            // purposefully not adding unwind and catch names from the map into our obj
+                            // this is because in microsoft's never-ending brilliance,
+                            // two unwinds can have the same number, which will cause duplicate symbol entry conflicts,
+                            // and i don't want to deal with that
+                            continue;
                         } else {
                             ObjSymbol {
-                                name: sym_name,
+                                name: sym.symbol,
                                 address: sym.addr as u64,
                                 section: Some(sec_idx),
-                                size_known: false, // shoutout to MSVC maps for not providing sizes
+                                // shoutout to MSVC maps for not providing sizes
+                                size_known: false,
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                 kind: if sec.kind == ObjSectionKind::Code && sym.is_function {
                                     ObjSymbolKind::Function
@@ -292,12 +318,11 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 ..Default::default()
                             }
                         };
-                        obj.add_symbol(sym_to_add, true)?;
-                    }
-                    // if we couldn't find the section (like maybe it was stripped), just continue on
-                    Err(_) => continue,
-                };
-            }
+                    obj.add_symbol(sym_to_add, true)?;
+                }
+                // if we couldn't find the section (like maybe it was stripped), just continue on
+                Err(_) => continue,
+            };
         }
     }
 
@@ -315,199 +340,200 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     }
 
     // identify split bounds and apply them to ObjInfo
-    for (idx, entries) in result.section_symbols_old.iter().enumerate() {
-        if entries.is_empty() {
-            continue;
-        }
-
-        let section_name = result.sections[idx].name.clone();
-        let (_target_sec_idx, target_sec) = match obj.sections.at_address_mut(entries[0].addr) {
-            Ok((target_sec_idx, target_sec)) => (target_sec_idx, target_sec),
-            Err(_) => continue,
-        };
-        let section_start = target_sec.address as u32 + result.sections[idx].offset;
-        let section_end = section_start + result.sections[idx].size;
-        // println!("Section {}: {:#X}-{:#X}", section_name, section_start, section_end);
-
-        // the contiguous, ascending addresses associated with our entries,
-        // as well as the objs that have symbols at these addresses
-        let sorted_addr_map = {
-            let mut ret: BTreeMap<u32, Vec<String>> = BTreeMap::new();
-            for entry in entries {
-                match ret.entry(entry.addr) {
-                    btree_map::Entry::Occupied(mut o) => {
-                        o.get_mut().push(entry.unit.clone());
-                    }
-                    btree_map::Entry::Vacant(v) => {
-                        v.insert(vec![entry.unit.clone()]);
-                    }
-                }
-            }
-            ret
-        };
-
-        // state machine to iterate through our sorted_addr_map and deduce obj bounds
-        let mut cur_obj: Option<String> = None;
-        let mut cur_start: Option<u32> = None;
-        let mut new_splits = BTreeMap::<u32, ObjSplit>::new();
-        for (addr, objs) in sorted_addr_map {
-            match (&cur_obj, &cur_start) {
-                (None, None) => {
-                    // if the start addr has multiple objs, we can't be sure which it belongs to...so skip it
-                    if objs.len() > 1 {
-                        // println!("  Warning! We can't deduce an obj bound for addr 0x{:08X}!", addr);
-                        continue;
-                    }
-                    // else, note our first obj's name and starting addr
-                    else {
-                        cur_start = Some(addr);
-                        cur_obj = Some(objs[0].clone());
-                    }
-                }
-                (Some(obj_name), Some(obj_start)) => {
-                    // if there's only one obj belonging to this address
-                    if objs.len() == 1 {
-                        // check that its obj is our cur_obj
-                        // if it's not, we have our obj bounds
-                        if objs[0] != *obj_name {
-                            // println!("\t{} bounds: 0x{:08X} - 0x{:08X}!", obj_name, obj_start, addr);
-                            let tu_name: String = fix_split_name(obj_name.clone());
-                            new_splits.insert(*obj_start, ObjSplit {
-                                unit: tu_name.clone(),
-                                end: addr,
-                                align: None,
-                                common: false,
-                                autogenerated: false,
-                                skip: false,
-                                // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
-                                rename: if section_name != target_sec.name {
-                                    Some(section_name.clone())
-                                } else {
-                                    None
-                                },
-                            });
-                            // target_sec.splits.push(*obj_start, ObjSplit {
-                            //     unit: tu_name.clone(),
-                            //     end: addr,
-                            //     align: None,
-                            //     common: false,
-                            //     autogenerated: false,
-                            //     skip: false,
-                            //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
-                            //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
-                            // });
-                            // // if this TU isn't in the link order, add it
-                            // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
-                            //     obj.link_order.push(ObjUnit {
-                            //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
-                            //     });
-                            // }
-                            cur_start = Some(addr);
-                            cur_obj = Some(objs[0].clone());
-                        }
-                    }
-                    // if there's multiple objs belonging to this address (code merging moment)
-                    else if objs.len() > 1 {
-                        // if our current obj name is NOT within this address, we have bounds
-                        if !objs.contains(obj_name) {
-                            // println!("\t{} bounds: 0x{:08X} - 0x{:08X}!", obj_name, obj_start, addr);
-                            let tu_name: String = fix_split_name(obj_name.clone());
-                            new_splits.insert(*obj_start, ObjSplit {
-                                unit: tu_name.clone(),
-                                end: addr,
-                                align: None,
-                                common: false,
-                                autogenerated: false,
-                                skip: false,
-                                // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
-                                rename: if section_name != target_sec.name {
-                                    Some(section_name.clone())
-                                } else {
-                                    None
-                                },
-                            });
-                            // target_sec.splits.push(*obj_start, ObjSplit {
-                            //     unit: tu_name.clone(),
-                            //     end: addr,
-                            //     align: None,
-                            //     common: false,
-                            //     autogenerated: false,
-                            //     skip: false,
-                            //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
-                            //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
-                            // });
-                            // if this TU isn't in the link order, add it
-                            // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
-                            //     obj.link_order.push(ObjUnit {
-                            //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
-                            //     });
-                            // }
-                            // if every obj associated with this addr is the same
-                            if objs.iter().all(|x| x == &objs[0]) {
-                                // then we can infer a known start of a new obj
-                                cur_start = Some(addr);
-                                cur_obj = Some(objs[0].clone());
-                            } else {
-                                // println!("  Warning! We can't deduce an obj bound for addr 0x{:08X}!", addr);
-                                cur_start = None;
-                                cur_obj = None;
-                            }
-                        }
-                    }
-                    // every address we've noted down should have at least 1 obj
-                    else {
-                        unreachable!()
-                    }
-                }
-                _ => unreachable!(),
-            }
-            // if we've reached the last addr in our collection
-            if let (Some(obj_name), Some(obj_start)) = (&cur_obj, &cur_start) {
-                if addr == entries.last().unwrap().addr {
-                    // then we need to set the end bound to the section's end
-                    println!(
-                        "\tneed to add last obj: {} (0x{:08X}-0x{:08X})",
-                        obj_name, obj_start, section_end
-                    );
-                    // let tu_name: String = fix_split_name(obj_name.clone());
-                    // target_sec.splits.push(*obj_start, ObjSplit {
-                    //     unit: tu_name.clone(),
-                    //     // FIXME: this should be section_end, but there's currently conflicts between this,
-                    //     // and symbol bounds later deduced in detect_objects/detect_strings
-                    //     end: section_end,
-                    //     align: None,
-                    //     common: false,
-                    //     autogenerated: false,
-                    //     skip: false,
-                    //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
-                    //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
-                    // });
-                    // // if this TU isn't in the link order, add it
-                    // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
-                    //     obj.link_order.push(ObjUnit {
-                    //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
-                    //     });
-                    // }
-                }
-            }
-        }
-        for (start_addr, split) in new_splits {
-            let tu_name = split.unit.clone();
-            println!("adding split for {} at {:#X}-{:#X}", tu_name, start_addr, split.end);
-            if !target_sec.splits.has_split_at(start_addr) {
-                target_sec.splits.push(start_addr, split);
-            }
-            // obj.add_split(target_sec_idx, start_addr, split)?;
-            // if this TU isn't in the link order, add it
-            if !obj.link_order.iter().any(|x| x.name == tu_name) {
-                obj.link_order.push(ObjUnit {
-                    name: tu_name.clone(),
-                    autogenerated: false,
-                    order: None,
-                });
-            }
-        }
-    }
+    // TODO TODO TODO: use the new section_symbols to come up with splits
+    // for (idx, entries) in result.section_symbols_old.iter().enumerate() {
+    //     if entries.is_empty() {
+    //         continue;
+    //     }
+    //
+    //     let section_name = result.sections[idx].name.clone();
+    //     let (_target_sec_idx, target_sec) = match obj.sections.at_address_mut(entries[0].addr) {
+    //         Ok((target_sec_idx, target_sec)) => (target_sec_idx, target_sec),
+    //         Err(_) => continue,
+    //     };
+    //     let section_start = target_sec.address as u32 + result.sections[idx].offset;
+    //     let section_end = section_start + result.sections[idx].size;
+    //     // println!("Section {}: {:#X}-{:#X}", section_name, section_start, section_end);
+    //
+    //     // the contiguous, ascending addresses associated with our entries,
+    //     // as well as the objs that have symbols at these addresses
+    //     let sorted_addr_map = {
+    //         let mut ret: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    //         for entry in entries {
+    //             match ret.entry(entry.addr) {
+    //                 btree_map::Entry::Occupied(mut o) => {
+    //                     o.get_mut().push(entry.unit.clone());
+    //                 }
+    //                 btree_map::Entry::Vacant(v) => {
+    //                     v.insert(vec![entry.unit.clone()]);
+    //                 }
+    //             }
+    //         }
+    //         ret
+    //     };
+    //
+    //     // state machine to iterate through our sorted_addr_map and deduce obj bounds
+    //     let mut cur_obj: Option<String> = None;
+    //     let mut cur_start: Option<u32> = None;
+    //     let mut new_splits = BTreeMap::<u32, ObjSplit>::new();
+    //     for (addr, objs) in sorted_addr_map {
+    //         match (&cur_obj, &cur_start) {
+    //             (None, None) => {
+    //                 // if the start addr has multiple objs, we can't be sure which it belongs to...so skip it
+    //                 if objs.len() > 1 {
+    //                     // println!("  Warning! We can't deduce an obj bound for addr 0x{:08X}!", addr);
+    //                     continue;
+    //                 }
+    //                 // else, note our first obj's name and starting addr
+    //                 else {
+    //                     cur_start = Some(addr);
+    //                     cur_obj = Some(objs[0].clone());
+    //                 }
+    //             }
+    //             (Some(obj_name), Some(obj_start)) => {
+    //                 // if there's only one obj belonging to this address
+    //                 if objs.len() == 1 {
+    //                     // check that its obj is our cur_obj
+    //                     // if it's not, we have our obj bounds
+    //                     if objs[0] != *obj_name {
+    //                         // println!("\t{} bounds: 0x{:08X} - 0x{:08X}!", obj_name, obj_start, addr);
+    //                         let tu_name: String = fix_split_name(obj_name.clone());
+    //                         new_splits.insert(*obj_start, ObjSplit {
+    //                             unit: tu_name.clone(),
+    //                             end: addr,
+    //                             align: None,
+    //                             common: false,
+    //                             autogenerated: false,
+    //                             skip: false,
+    //                             // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
+    //                             rename: if section_name != target_sec.name {
+    //                                 Some(section_name.clone())
+    //                             } else {
+    //                                 None
+    //                             },
+    //                         });
+    //                         // target_sec.splits.push(*obj_start, ObjSplit {
+    //                         //     unit: tu_name.clone(),
+    //                         //     end: addr,
+    //                         //     align: None,
+    //                         //     common: false,
+    //                         //     autogenerated: false,
+    //                         //     skip: false,
+    //                         //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
+    //                         //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
+    //                         // });
+    //                         // // if this TU isn't in the link order, add it
+    //                         // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
+    //                         //     obj.link_order.push(ObjUnit {
+    //                         //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
+    //                         //     });
+    //                         // }
+    //                         cur_start = Some(addr);
+    //                         cur_obj = Some(objs[0].clone());
+    //                     }
+    //                 }
+    //                 // if there's multiple objs belonging to this address (code merging moment)
+    //                 else if objs.len() > 1 {
+    //                     // if our current obj name is NOT within this address, we have bounds
+    //                     if !objs.contains(obj_name) {
+    //                         // println!("\t{} bounds: 0x{:08X} - 0x{:08X}!", obj_name, obj_start, addr);
+    //                         let tu_name: String = fix_split_name(obj_name.clone());
+    //                         new_splits.insert(*obj_start, ObjSplit {
+    //                             unit: tu_name.clone(),
+    //                             end: addr,
+    //                             align: None,
+    //                             common: false,
+    //                             autogenerated: false,
+    //                             skip: false,
+    //                             // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
+    //                             rename: if section_name != target_sec.name {
+    //                                 Some(section_name.clone())
+    //                             } else {
+    //                                 None
+    //                             },
+    //                         });
+    //                         // target_sec.splits.push(*obj_start, ObjSplit {
+    //                         //     unit: tu_name.clone(),
+    //                         //     end: addr,
+    //                         //     align: None,
+    //                         //     common: false,
+    //                         //     autogenerated: false,
+    //                         //     skip: false,
+    //                         //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
+    //                         //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
+    //                         // });
+    //                         // if this TU isn't in the link order, add it
+    //                         // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
+    //                         //     obj.link_order.push(ObjUnit {
+    //                         //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
+    //                         //     });
+    //                         // }
+    //                         // if every obj associated with this addr is the same
+    //                         if objs.iter().all(|x| x == &objs[0]) {
+    //                             // then we can infer a known start of a new obj
+    //                             cur_start = Some(addr);
+    //                             cur_obj = Some(objs[0].clone());
+    //                         } else {
+    //                             // println!("  Warning! We can't deduce an obj bound for addr 0x{:08X}!", addr);
+    //                             cur_start = None;
+    //                             cur_obj = None;
+    //                         }
+    //                     }
+    //                 }
+    //                 // every address we've noted down should have at least 1 obj
+    //                 else {
+    //                     unreachable!()
+    //                 }
+    //             }
+    //             _ => unreachable!(),
+    //         }
+    //         // if we've reached the last addr in our collection
+    //         if let (Some(obj_name), Some(obj_start)) = (&cur_obj, &cur_start) {
+    //             if addr == entries.last().unwrap().addr {
+    //                 // then we need to set the end bound to the section's end
+    //                 println!(
+    //                     "\tneed to add last obj: {} (0x{:08X}-0x{:08X})",
+    //                     obj_name, obj_start, section_end
+    //                 );
+    //                 // let tu_name: String = fix_split_name(obj_name.clone());
+    //                 // target_sec.splits.push(*obj_start, ObjSplit {
+    //                 //     unit: tu_name.clone(),
+    //                 //     // FIXME: this should be section_end, but there's currently conflicts between this,
+    //                 //     // and symbol bounds later deduced in detect_objects/detect_strings
+    //                 //     end: section_end,
+    //                 //     align: None,
+    //                 //     common: false,
+    //                 //     autogenerated: false,
+    //                 //     skip: false,
+    //                 //     // if section_name != the ObjSection's name, we have a subsection somewhere that we wanna note
+    //                 //     rename: if section_name != target_sec.name { Some(section_name.clone()) } else { None },
+    //                 // });
+    //                 // // if this TU isn't in the link order, add it
+    //                 // if obj.link_order.iter().find(|&x| x.name == tu_name).is_none() {
+    //                 //     obj.link_order.push(ObjUnit {
+    //                 //         name: tu_name.clone(), autogenerated: false, comment_version: None, order: None
+    //                 //     });
+    //                 // }
+    //             }
+    //         }
+    //     }
+    //     for (start_addr, split) in new_splits {
+    //         let tu_name = split.unit.clone();
+    //         println!("adding split for {} at {:#X}-{:#X}", tu_name, start_addr, split.end);
+    //         if !target_sec.splits.has_split_at(start_addr) {
+    //             target_sec.splits.push(start_addr, split);
+    //         }
+    //         // obj.add_split(target_sec_idx, start_addr, split)?;
+    //         // if this TU isn't in the link order, add it
+    //         if !obj.link_order.iter().any(|x| x.name == tu_name) {
+    //             obj.link_order.push(ObjUnit {
+    //                 name: tu_name.clone(),
+    //                 autogenerated: false,
+    //                 order: None,
+    //             });
+    //         }
+    //     }
+    // }
     Ok(())
 }
 
@@ -542,21 +568,8 @@ pub fn process_map_exe(map_path: &Utf8NativePathBuf) -> Result<ExeMapInfo> {
                     state = ExeMapState::None;
                 } else {
                     let sec_parts = line.split_whitespace().collect::<Vec<&str>>();
-                    // [0]: idx:offset, [1]: {size}H, [2]: name, [3]: type (we can ignore this)
                     assert_eq!(sec_parts.len(), 4);
-                    let idx_and_offset = sec_parts[0].split(":").collect::<Vec<&str>>();
-                    let size_str = sec_parts[1].split("H").collect::<Vec<&str>>();
-                    exe_map_info.add_section(ExeSectionInfo {
-                        name: String::from(sec_parts[2]),
-                        index: u32::from_str_radix(idx_and_offset[0], 16)?,
-                        offset: u32::from_str_radix(idx_and_offset[1], 16)?,
-                        size: u32::from_str_radix(size_str[0], 16)?,
-                        section_type: match sec_parts[3] {
-                            "CODE" => ExeSectionType::Code,
-                            "DATA" => ExeSectionType::Data,
-                            _ => unreachable!(),
-                        },
-                    });
+                    exe_map_info.add_section(sec_parts)?;
                 }
             }
             ExeMapState::ReadingSymbols => {
@@ -590,6 +603,7 @@ pub fn process_map_exe(map_path: &Utf8NativePathBuf) -> Result<ExeMapInfo> {
             }
         }
     }
-    exe_map_info.resolve_merged_entries()?;
+    // exe_map_info.debug_print();
+    exe_map_info.resolve_imps()?;
     Ok(exe_map_info)
 }
