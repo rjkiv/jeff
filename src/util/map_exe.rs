@@ -158,6 +158,13 @@ impl ExeMapInfo {
         if sym_name.starts_with("__unwind$") || sym_name.starts_with("__catch$") {
             return Ok(());
         }
+        if sym_name.starts_with("__savegprlr_") || sym_name.starts_with("__restgprlr_") {
+            return Ok(());
+        }
+        if sym_name.starts_with("__savefpr_") || sym_name.starts_with("__restfpr_") {
+            return Ok(());
+        }
+
         let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
         let sym_section = {
             let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
@@ -266,10 +273,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     for (section, symbols_by_address) in &result.section_symbols {
         for (addr, symbols) in symbols_by_address {
             // we want to skip imps and save/restore reg intrinsics, since we'll find those ourselves later
-            if symbols.iter().any(|sym_idx| {
-                let sym = &result.symbols[sym_idx.0];
-                sym.symbol.starts_with("__imp") || is_reg_intrinsic(&sym.symbol)
-            }) {
+            if symbols.iter().any(|sym_idx| result.symbols[sym_idx.0].symbol.starts_with("__imp")) {
                 continue;
             }
             // else, add to our ObjInfo
@@ -437,39 +441,66 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             // TODO: deduce that size, and then add the split
             // TODO: adjust logic for .xidata to grab multiple contiguous bounds
             let section_name = &result.sections[sec_idx.0].name;
-            if !addrs_for_this_section.is_empty() {
-                let split_end = {
-                    let last_addr = addrs_for_this_section.last().unwrap();
-                    let (sec_for_last_addr, section) = obj.sections.at_address(*last_addr)?;
-                    let (sym_idx, sym_at_addr) = obj
-                        .symbols
-                        .at_section_address(sec_for_last_addr, *last_addr)
-                        .next()
-                        .unwrap();
-                    // if there's a known size for the last addr in our deduced bounds, this split ends at this sym's end
-                    if sym_at_addr.size_known {
-                        last_addr + sym_at_addr.size as u32
-                    }
-                    // else, deduce the end from our map
-                    else {
-                        match section_symbols.range((Excluded(last_addr), Unbounded)).next() {
-                            // there's a next addr over, its start is our split end
-                            Some((next_addr, next_syms)) => *next_addr,
-                            // no next addr over, so the end of the section is our split end
-                            None => (section.address + section.size) as u32,
+
+            match (addrs_for_this_section.first(), addrs_for_this_section.last()) {
+                (Some(first), Some(last)) => {
+                    let split_end = {
+                        let (sec_for_last_addr, section) = obj.sections.at_address(*last)?;
+                        let (sym_idx, sym_at_addr) =
+                            obj.symbols.at_section_address(sec_for_last_addr, *last).next().expect(
+                                &*format!("No symbol at {}:{:08X}", sec_for_last_addr, last),
+                            );
+                        // if there's a known size for the last addr in our deduced bounds, this split ends at this sym's end
+                        if sym_at_addr.size_known {
+                            last + sym_at_addr.size as u32
                         }
-                    }
-                };
-                let split_end = split_end.next_multiple_of(4);
-                log::debug!(
-                    "\t{}: Deduced bounds: {:08X} - {:08X}",
-                    section_name,
-                    addrs_for_this_section.first().unwrap(),
-                    split_end
-                );
-            } else {
-                log::debug!("\t{}: No deducable bounds!", section_name);
-            }
+                        // else, deduce the end from our map
+                        else {
+                            match section_symbols.range((Excluded(last), Unbounded)).next() {
+                                // there's a next addr over, its start is our split end
+                                Some((next_addr, next_syms)) => *next_addr,
+                                // no next addr over, so the end of the map section is our split end
+                                None => {
+                                    // println!("Double check the ending for this split!");
+
+                                    // need the section size from the map, not from objinfo
+                                    let sec = &result.sections[sec_idx.0];
+
+                                    // println!(
+                                    //     "Sec to get the end of: {:04X}:{:08X} - size {:08X}",
+                                    //     sec.index, sec.offset, sec.size
+                                    // );
+
+                                    let obj_section =
+                                        obj.sections.get(sec.index - 1).expect("where section");
+                                    // println!(
+                                    //     "Offset adjustment for {}: {:08X} - {:08X}",
+                                    //     obj_section.name,
+                                    //     obj_section.address as u32 + sec.offset,
+                                    //     obj_section.address as u32 + sec.offset + sec.size
+                                    // );
+
+                                    obj_section.address as u32 + sec.offset + sec.size
+
+                                    // (section.address + section.size) as u32
+                                }
+                            }
+                        }
+                    };
+                    let split_end = split_end.next_multiple_of(4);
+                    log::debug!(
+                        "\t{}: Deduced bounds: {:08X} - {:08X}",
+                        section_name,
+                        first,
+                        split_end
+                    );
+                }
+                (None, None) => {
+                    log::debug!("\t{}: No deducable bounds!", section_name);
+                }
+                // it is impossible for first and last to be mutually exclusive
+                _ => unreachable!(),
+            };
         }
     }
 
