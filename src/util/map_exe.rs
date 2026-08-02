@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::read_to_string,
+    ops::Bound::{Excluded, Unbounded},
 };
 
 use anyhow::{bail, Result};
@@ -150,6 +151,13 @@ impl ExeMapInfo {
 
     fn add_symbol(&mut self, symbol_parts: Vec<&str>, is_static: bool) -> Result<()> {
         let sym_name = String::from(symbol_parts[1]);
+        // purposefully not adding unwind and catch names from the map into our obj
+        // this is because in microsoft's never-ending brilliance,
+        // two unwinds can have the same number, which will cause duplicate symbol entry conflicts,
+        // and i don't want to deal with that
+        if sym_name.starts_with("__unwind$") || sym_name.starts_with("__catch$") {
+            return Ok(());
+        }
         let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
         let sym_section = {
             let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
@@ -176,9 +184,7 @@ impl ExeMapInfo {
             symbol: sym_name.clone(),
             section: sym_section,
             unit: unit_idx,
-            is_function: flags_slice.contains(&"f")
-                && !sym_name.starts_with("__unwind$")
-                && !sym_name.starts_with("__catch$"),
+            is_function: flags_slice.contains(&"f"),
             is_weak: flags_slice.contains(&"i"),
             is_static,
         });
@@ -294,14 +300,6 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 },
                                 ..Default::default()
                             }
-                        } else if sym.symbol.starts_with("__unwind$")
-                            || sym.symbol.starts_with("__catch$")
-                        {
-                            // purposefully not adding unwind and catch names from the map into our obj
-                            // this is because in microsoft's never-ending brilliance,
-                            // two unwinds can have the same number, which will cause duplicate symbol entry conflicts,
-                            // and i don't want to deal with that
-                            continue;
                         } else {
                             ObjSymbol {
                                 name: sym.symbol,
@@ -340,7 +338,141 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     }
 
     // identify split bounds and apply them to ObjInfo
-    // TODO TODO TODO: use the new section_symbols to come up with splits
+    for (unit_idx, symbols_by_section) in &result.unit_symbols {
+        log::debug!("Symbols at unit {}", result.units[unit_idx.0].name);
+        for (sec_idx, symbol_idxs) in symbols_by_section {
+            let mut addrs_for_this_section: BTreeSet<u32> = BTreeSet::new();
+            let mut merged_addrs: BTreeSet<u32> = BTreeSet::new();
+            let section_symbols = &result.section_symbols[sec_idx];
+            for sym_idx in symbol_idxs {
+                let sym = &result.symbols[sym_idx.0];
+                let sym_addr = sym.addr;
+                if section_symbols[&sym_addr].len() == 1 {
+                    addrs_for_this_section.insert(sym_addr);
+                } else {
+                    merged_addrs.insert(sym_addr);
+                }
+            }
+            for addr in merged_addrs {
+                // log::debug!("\tMerged addr: {:08X}", addr);
+                let prev_key = section_symbols.range((Unbounded, Excluded(addr))).next_back();
+                let next_key = section_symbols.range((Excluded(addr), Unbounded)).next();
+                match (prev_key, next_key) {
+                    // there's an adjacent address both in front of and behind this addr
+                    (Some((prev_addr, prev_syms)), Some((next_addr, next_syms))) => {
+                        // check the prev addr
+                        // log::debug!("\tFor merged addr {:08X}, investigate prev addr {:08X} and next addr {:08X}", addr, prev_addr, next_addr);
+
+                        // if the next addr has 1 entry
+                        // and it's NOT our unit - stop, this isn't it
+                        // and it IS our unit, qualifies, add it
+
+                        // if either the prev or next addr is in our deduced addr bounds, add this one in
+                        if addrs_for_this_section.contains(prev_addr)
+                            || addrs_for_this_section.contains(next_addr)
+                        {
+                            addrs_for_this_section.insert(addr);
+                        }
+                        // if the prev addr over has one entry
+                        else if prev_syms.len() == 1 {
+                            // ...and it's at this unit, we can assume this is part of our TU, so add it
+                            if result.symbols[prev_syms[0].0].unit == *unit_idx {
+                                addrs_for_this_section.insert(addr);
+                            } else {
+                                // it's NOT our unit, this can't be part of our bounds
+                                // log::debug!("\t\tDid NOT add");
+                            }
+                        }
+                        // if the next addr over has one entry
+                        else if next_syms.len() == 1 {
+                            // ...and it's at this unit, we can assume this is part of our TU, so add it
+                            if result.symbols[next_syms[0].0].unit == *unit_idx {
+                                addrs_for_this_section.insert(addr);
+                            } else {
+                                // it's NOT our unit, this can't be part of our bounds
+                                // log::debug!("\t\tDid NOT add");
+                            }
+                        } else {
+                            // not sure what to do now, let's just not add it
+                            // log::debug!("\t{:08X} needs further investigation! Did NOT add", addr);
+                        }
+                    }
+                    // there's a previous address, but not a next one - this is the last one
+                    (Some((prev_addr, prev_syms)), None) => {
+                        // if the prev addr over has one entry, and it's at this unit, we can assume this is part of our TU, so add it
+                        if prev_syms.len() == 1 && result.symbols[prev_syms[0].0].unit == *unit_idx
+                        {
+                            addrs_for_this_section.insert(addr);
+                        }
+                        // alternatively, if the prev addr is already in our deduced addr bounds, we can assume this is part of our TU
+                        else if addrs_for_this_section.contains(prev_addr) {
+                            addrs_for_this_section.insert(addr);
+                        } else {
+                            // we can't reliably resolve this, just don't add it to our addr bounds then
+                            // log::debug!("Couldn't resolve TU for addr {:08X}", addr);
+                        }
+                    }
+                    // there's a next address, but not a previous one - this is the first one
+                    (None, Some((next_addr, next_syms))) => {
+                        // if the next addr over has one entry, and it's at this unit, we can assume this is part of our TU, so add it
+                        if next_syms.len() == 1 && result.symbols[next_syms[0].0].unit == *unit_idx
+                        {
+                            addrs_for_this_section.insert(addr);
+                        }
+                        // alternatively, if the next addr is already in our deduced addr bounds, we can assume this is part of our TU
+                        else if addrs_for_this_section.contains(next_addr) {
+                            addrs_for_this_section.insert(addr);
+                        } else {
+                            // we can't reliably resolve this, just don't add it to our addr bounds then
+                            // log::debug!("Couldn't resolve TU for addr {:08X}", addr);
+                        }
+                    }
+                    // this is the only addr in the section - i have no clue how this would even be possible
+                    (None, None) => {
+                        // log::debug!("Couldn't resolve TU for addr {:08X}", addr);
+                    }
+                };
+            }
+            // by this point, addrs_for_this_section should be our splits, we just need to deduce the size of the last addr
+            // TODO: deduce that size, and then add the split
+            // TODO: adjust logic for .xidata to grab multiple contiguous bounds
+            let section_name = &result.sections[sec_idx.0].name;
+            if !addrs_for_this_section.is_empty() {
+                let split_end = {
+                    let last_addr = addrs_for_this_section.last().unwrap();
+                    let (sec_for_last_addr, section) = obj.sections.at_address(*last_addr)?;
+                    let (sym_idx, sym_at_addr) = obj
+                        .symbols
+                        .at_section_address(sec_for_last_addr, *last_addr)
+                        .next()
+                        .unwrap();
+                    // if there's a known size for the last addr in our deduced bounds, this split ends at this sym's end
+                    if sym_at_addr.size_known {
+                        last_addr + sym_at_addr.size as u32
+                    }
+                    // else, deduce the end from our map
+                    else {
+                        match section_symbols.range((Excluded(last_addr), Unbounded)).next() {
+                            // there's a next addr over, its start is our split end
+                            Some((next_addr, next_syms)) => *next_addr,
+                            // no next addr over, so the end of the section is our split end
+                            None => (section.address + section.size) as u32,
+                        }
+                    }
+                };
+                let split_end = split_end.next_multiple_of(4);
+                log::debug!(
+                    "\t{}: Deduced bounds: {:08X} - {:08X}",
+                    section_name,
+                    addrs_for_this_section.first().unwrap(),
+                    split_end
+                );
+            } else {
+                log::debug!("\t{}: No deducable bounds!", section_name);
+            }
+        }
+    }
+
     // for (idx, entries) in result.section_symbols_old.iter().enumerate() {
     //     if entries.is_empty() {
     //         continue;
