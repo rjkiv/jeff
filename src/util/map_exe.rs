@@ -288,6 +288,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 Ok((sec_idx, sec)) => {
                     // if func came from pdata, DO NOT override the size
                     let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
+                    // FIXME: if vftable, use the next symbol over to deduce the size - will require peekable()
                     let sym_to_add: ObjSymbol =
                         if let Some(Normal { end }) = obj.combined_pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
@@ -448,10 +449,46 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             // by this point, addrs_for_this_section should be our splits, we just need to deduce the size of the last addr
             let section_name = &result.sections[sec_idx.0].name;
 
-            // FIXME: add logic here to get the contiguous bounds of our addrs_for_this_section, as there can be more than one
+            // get a Vec of each contiguous address set
+            // get the split end for each Vec - those are your splits
+            let contiguous_bounds: Vec<(u32, u32)> = {
+                let mut bounds: Vec<(u32, u32)> = vec![];
+                let mut start: Option<u32> = None;
+                let mut itr = addrs_for_this_section.iter().peekable();
 
-            match (addrs_for_this_section.first(), addrs_for_this_section.last()) {
-                (Some(first), Some(last)) => {
+                while let Some(addr) = itr.next() {
+                    if start.is_none() {
+                        start = Some(*addr);
+                    }
+                    match itr.peek() {
+                        Some(next_addr_in_section) => {
+                            // check if next addr is contiguous
+                            let next_key =
+                                section_symbols.range((Excluded(addr), Unbounded)).next();
+                            match next_key {
+                                Some((next_addr_from_sec_syms, _)) => {
+                                    if *next_addr_in_section != next_addr_from_sec_syms {
+                                        // not contiguous, mark the bounds and continue
+                                        bounds.push((start.unwrap(), *addr));
+                                        start = None;
+                                    }
+                                }
+                                None => {
+                                    unreachable!("this can't be the last addr in our section");
+                                }
+                            }
+                        }
+                        None => {
+                            // addr is the last addr here
+                            bounds.push((start.unwrap(), *addr));
+                        }
+                    };
+                }
+                bounds
+            };
+
+            if !contiguous_bounds.is_empty() {
+                for (first, last) in &contiguous_bounds {
                     let split_end = {
                         let (sec_for_last_addr, section) = obj.sections.at_address(*last)?;
                         let (sym_idx, sym_at_addr) =
@@ -504,17 +541,10 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                     });
                     deduced_obj_units.insert(tu_name.clone());
                 }
-                (None, None) => {
-                    // log::debug!("\t{}: No deducable bounds!", section_name);
-                    log::warn!(
-                        "{}: Could not deduce bounds for section {}!",
-                        unit_name,
-                        section_name
-                    );
-                }
-                // it is impossible for first and last to be mutually exclusive
-                _ => unreachable!(),
-            };
+            } else {
+                // log::debug!("\t{}: No deducable bounds!", section_name);
+                log::warn!("{}: Could not deduce bounds for section {}!", unit_name, section_name);
+            }
         }
     }
 
