@@ -2,17 +2,20 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs::read_to_string,
-    ops::Bound::{Excluded, Unbounded},
+    ops::{
+        Bound::{Excluded, Unbounded},
+        RangeBounds,
+    },
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
         ExceptionType::Normal, ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
-        ObjSymbolFlags, ObjSymbolKind, ObjUnit,
+        ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex, SymbolIndex,
     },
 };
 // SymbolRef: the symbol name, and the obj it came from
@@ -304,6 +307,42 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 },
                                 ..Default::default()
                             }
+                        } else if sym.symbol.starts_with("??_7") {
+                            // if this sym is for a vftable...
+                            let mut size_to_use: Option<u32> = None;
+                            // if there's a "next addr" from this one in our map, AND we have a marked symbol at this address from our RTTI parsing
+                            if let (Some((next_addr, _)), Some((_, obj_sym))) = (
+                                symbols_by_address.range((Excluded(addr), Unbounded)).next(),
+                                obj.symbols.at_section_address(sec_idx, sym.addr).next(),
+                            ) {
+                                // if we have, we need to get its size, and compare it against the deduced size from map
+                                assert!(
+                                    obj_sym.name.starts_with("??_7")
+                                        || obj_sym.name.starts_with("VFTABLE_for_")
+                                );
+                                assert_eq!(obj_sym.size_known, true);
+                                // if deduced size from map < recorded size from symbol, overwrite it
+                                let deduced_size_from_map = next_addr - sym.addr;
+                                if deduced_size_from_map < obj_sym.size as u32 {
+                                    log::debug!(
+                                        "{:08X}: deduced size {:08X} < parsed size {:08X}!",
+                                        sym.addr,
+                                        deduced_size_from_map,
+                                        obj_sym.size
+                                    );
+                                    size_to_use = Some(deduced_size_from_map);
+                                }
+                            }
+                            ObjSymbol {
+                                name: sym.symbol,
+                                address: sym.addr as u64,
+                                section: Some(sec_idx),
+                                size: size_to_use.unwrap_or(0) as u64,
+                                size_known: size_to_use.is_some(),
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object, // vftables are not functions
+                                ..Default::default()
+                            }
                         } else {
                             ObjSymbol {
                                 name: sym.symbol,
@@ -549,21 +588,26 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
 
     // sanity check/fix splits
     // TODO: also ensure splits don't end within symbols
-    for (_objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
+    for (objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
         let mut keys_to_replace: Vec<(u32, u32)> = vec![];
         let mut itr = splits_for_section.iter().peekable();
-        while let (Some((_cur_split_start, cur_split)), Some((next_split_start, _next_split))) =
+        while let (Some((cur_split_start, cur_split)), Some((next_split_start, next_split))) =
             (itr.next(), itr.peek())
         {
             if cur_split.end > **next_split_start {
-                // log::warn!(
-                //     "Splits at {:08X}-{:08X} and {:08X}-{:08X} overlap!",
-                //     cur_split_start,
-                //     cur_split.end,
-                //     next_split_start,
-                //     next_split.end
-                // );
+                log::warn!(
+                    "Splits at {:08X}-{:08X} and {:08X}-{:08X} overlap!",
+                    cur_split_start,
+                    cur_split.end,
+                    next_split_start,
+                    next_split.end
+                );
                 keys_to_replace.push((**next_split_start, cur_split.end));
+                // log::debug!(
+                //     "Intending to replace {:08X} with {:08X}",
+                //     next_split_start,
+                //     cur_split.end
+                // );
             }
         }
         for (old_key, new_key) in &keys_to_replace {
