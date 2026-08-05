@@ -343,6 +343,20 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 kind: ObjSymbolKind::Object, // vftables are not functions
                                 ..Default::default()
                             }
+                        } else if let Some(float_str) = sym.symbol.strip_prefix("__real@") {
+                            // if this is a floating point value...
+                            assert!(float_str.len() == 8 || float_str.len() == 16);
+                            let size = float_str.len() as u64 / 2;
+                            ObjSymbol {
+                                name: sym.symbol,
+                                address: sym.addr as u64,
+                                section: Some(sec_idx),
+                                size,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object, // floats are not functions
+                                ..Default::default()
+                            }
                         } else {
                             ObjSymbol {
                                 name: sym.symbol,
