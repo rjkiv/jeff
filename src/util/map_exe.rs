@@ -234,7 +234,7 @@ impl ExeMapInfo {
                 if symbols.len() > 1
                     && symbols.iter().any(|s| self.symbols[s.0].symbol.starts_with("__imp_"))
                 {
-                    println!("Merged imp at {:08X}!", addr);
+                    // println!("Merged imp at {:08X}!", addr);
                     symbols.retain(|s| self.symbols[s.0].symbol.starts_with("__imp_"));
                 }
             }
@@ -288,7 +288,6 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 Ok((sec_idx, sec)) => {
                     // if func came from pdata, DO NOT override the size
                     let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
-                    // FIXME: if vftable, use the next symbol over to deduce the size - will require peekable()
                     let sym_to_add: ObjSymbol =
                         if let Some(Normal { end }) = obj.combined_pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
@@ -515,7 +514,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                             }
                         }
                     };
-                    let split_end = split_end.next_multiple_of(4);
+                    // let split_end = split_end.next_multiple_of(4);
                     // log::debug!(
                     //     "\t{}: Deduced bounds: {:08X} - {:08X}",
                     //     section_name,
@@ -545,6 +544,32 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 // log::debug!("\t{}: No deducable bounds!", section_name);
                 log::warn!("{}: Could not deduce bounds for section {}!", unit_name, section_name);
             }
+        }
+    }
+
+    // sanity check/fix splits
+    // TODO: also ensure splits don't end within symbols
+    for (_objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
+        let mut keys_to_replace: Vec<(u32, u32)> = vec![];
+        let mut itr = splits_for_section.iter().peekable();
+        while let (Some((_cur_split_start, cur_split)), Some((next_split_start, _next_split))) =
+            (itr.next(), itr.peek())
+        {
+            if cur_split.end > **next_split_start {
+                // log::warn!(
+                //     "Splits at {:08X}-{:08X} and {:08X}-{:08X} overlap!",
+                //     cur_split_start,
+                //     cur_split.end,
+                //     next_split_start,
+                //     next_split.end
+                // );
+                keys_to_replace.push((**next_split_start, cur_split.end));
+            }
+        }
+        for (old_key, new_key) in &keys_to_replace {
+            let val = splits_for_section.remove(old_key).unwrap();
+            splits_for_section.insert(*new_key, val);
+            log::debug!("\tReplaced split start {:08X} with {:08X}", old_key, new_key);
         }
     }
 
