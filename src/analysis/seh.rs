@@ -386,7 +386,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     );
 
     // sanity checks
-    for (addr, _) in &obj.combined_pdata_funcs {
+    for addr in obj.combined_pdata_funcs.keys() {
         // We should not have any known exception addrs in our listed pdata funcs
         assert!(!known_exception_addrs.contains(addr));
     }
@@ -394,7 +394,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // We should not have any known exception addrs in our listed known_functions
         assert!(!known_exception_addrs.contains(addr));
         // and if our function has unwinds and such, we should not have a confirmed ending
-        if matches!(obj.combined_pdata_funcs.get(&addr), Some(C { .. } | CXX { .. })) {
+        if matches!(obj.combined_pdata_funcs.get(addr), Some(C { .. } | CXX { .. })) {
             assert!(ending.is_none());
         }
     }

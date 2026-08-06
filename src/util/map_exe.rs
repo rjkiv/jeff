@@ -2,13 +2,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs::read_to_string,
-    ops::{
-        Bound::{Excluded, Unbounded},
-        RangeBounds,
-    },
+    ops::Bound::{Excluded, Unbounded},
 };
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, Result};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
@@ -167,6 +164,9 @@ impl ExeMapInfo {
         if sym_name.starts_with("__savefpr_") || sym_name.starts_with("__restfpr_") {
             return Ok(());
         }
+        if sym_name.starts_with("__savevmx_") || sym_name.starts_with("__restvmx_") {
+            return Ok(());
+        }
 
         let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
         let sym_section = {
@@ -320,7 +320,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                     obj_sym.name.starts_with("??_7")
                                         || obj_sym.name.starts_with("VFTABLE_for_")
                                 );
-                                assert_eq!(obj_sym.size_known, true);
+                                assert!(obj_sym.size_known);
                                 // if deduced size from map < recorded size from symbol, overwrite it
                                 let deduced_size_from_map = next_addr - sym.addr;
                                 if deduced_size_from_map < obj_sym.size as u32 {
@@ -357,6 +357,20 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 kind: ObjSymbolKind::Object, // floats are not functions
                                 ..Default::default()
                             }
+                        } else if let Some(vmx_str) = sym.symbol.strip_prefix("__vmx@") {
+                            // if this is a vmx value...
+                            assert_eq!(vmx_str.len(), 32);
+                            ObjSymbol {
+                                name: sym.symbol,
+                                address: sym.addr as u64,
+                                section: Some(sec_idx),
+                                size: 16,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object, // vmx consts are not functions
+                                ..Default::default()
+                            }
+                            // TODO: also mark down strings, as we can infer length from their symbols
                         } else {
                             ObjSymbol {
                                 name: sym.symbol,
@@ -406,6 +420,12 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
         let unit_name = &result.units[unit_idx.0].name;
         // log::debug!("Symbols at unit {}", unit_name);
         for (sec_idx, symbol_idxs) in symbols_by_section {
+            let section_name = &result.sections[sec_idx.0].name;
+            // evil hack
+            if section_name.starts_with(".CRT$") || section_name.starts_with(".NSPCH$") {
+                continue;
+            }
+
             let mut addrs_for_this_section: BTreeSet<u32> = BTreeSet::new();
             let mut merged_addrs: BTreeSet<u32> = BTreeSet::new();
             let section_symbols = &result.section_symbols[sec_idx];
@@ -465,12 +485,11 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                     // there's a previous address, but not a next one - this is the last one
                     (Some((prev_addr, prev_syms)), None) => {
                         // if the prev addr over has one entry, and it's at this unit, we can assume this is part of our TU, so add it
-                        if prev_syms.len() == 1 && result.symbols[prev_syms[0].0].unit == *unit_idx
-                        {
-                            addrs_for_this_section.insert(addr);
-                        }
                         // alternatively, if the prev addr is already in our deduced addr bounds, we can assume this is part of our TU
-                        else if addrs_for_this_section.contains(prev_addr) {
+                        if (prev_syms.len() == 1
+                            && result.symbols[prev_syms[0].0].unit == *unit_idx)
+                            || addrs_for_this_section.contains(prev_addr)
+                        {
                             addrs_for_this_section.insert(addr);
                         } else {
                             // we can't reliably resolve this, just don't add it to our addr bounds then
@@ -480,12 +499,11 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                     // there's a next address, but not a previous one - this is the first one
                     (None, Some((next_addr, next_syms))) => {
                         // if the next addr over has one entry, and it's at this unit, we can assume this is part of our TU, so add it
-                        if next_syms.len() == 1 && result.symbols[next_syms[0].0].unit == *unit_idx
-                        {
-                            addrs_for_this_section.insert(addr);
-                        }
                         // alternatively, if the next addr is already in our deduced addr bounds, we can assume this is part of our TU
-                        else if addrs_for_this_section.contains(next_addr) {
+                        if (next_syms.len() == 1
+                            && result.symbols[next_syms[0].0].unit == *unit_idx)
+                            || addrs_for_this_section.contains(next_addr)
+                        {
                             addrs_for_this_section.insert(addr);
                         } else {
                             // we can't reliably resolve this, just don't add it to our addr bounds then
@@ -499,7 +517,6 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 };
             }
             // by this point, addrs_for_this_section should be our splits, we just need to deduce the size of the last addr
-            let section_name = &result.sections[sec_idx.0].name;
 
             // get a Vec of each contiguous address set
             // get the split end for each Vec - those are your splits
@@ -543,10 +560,14 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 for (first, last) in &contiguous_bounds {
                     let split_end = {
                         let (sec_for_last_addr, section) = obj.sections.at_address(*last)?;
-                        let (sym_idx, sym_at_addr) =
-                            obj.symbols.at_section_address(sec_for_last_addr, *last).next().expect(
-                                &*format!("No symbol at {}:{:08X}", sec_for_last_addr, last),
-                            );
+                        let (sym_idx, sym_at_addr) = obj
+                            .symbols
+                            .at_section_address(sec_for_last_addr, *last)
+                            .next()
+                            .unwrap_or_else(|| {
+                                panic!("No symbol at {}:{:08X}", sec_for_last_addr, last)
+                            });
+
                         // if there's a known size for the last addr in our deduced bounds, this split ends at this sym's end
                         if sym_at_addr.size_known {
                             last + sym_at_addr.size as u32
