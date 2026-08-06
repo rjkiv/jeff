@@ -42,7 +42,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
                     .next()
                     .map_or(section_end, |(_, symbol)| symbol.address as u32);
                 let new_size = next_addr - symbol.address as u32;
-                log::debug!("Guessed {} size {:#X}", symbol.name, new_size);
+                // log::debug!("Guessed {} size {:#X}", symbol.name, new_size);
                 symbol.size = match (new_size, expected_size) {
                     (..=4, 1) => expected_size,
                     (2 | 4, 2) => expected_size,
@@ -77,45 +77,37 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
             obj.symbols.replace(idx, symbol)?;
         }
 
-        // TODO: if we have splits at this point, they came from a map
+        let mut symbol_sizes_to_replace: Vec<(SymbolIndex, u32)> = vec![];
+
+        // if we have splits at this point, they came from a map
         // adjust for any new symbol discoveries as needed
         for (split_start, split_info) in section.splits.iter_mut() {
+            // we want the last ObjSymbol, such that the ObjSymbol's start address is within split_start and split_info.end
+            if let Some((last_sym_idx, last_sym)) = obj
+                .symbols
+                .for_section_range(section_index, split_start..split_info.end)
+                .next_back()
+            {
+                // if it goes over the split bounds, shrink the sym size so it does
+                // if it turns out that's wrong, ehhhhh the user can adjust it later,
+                // where they'll have an existing splits/symbols.txt and this code won't be reached
+                if split_info.end < last_sym.address as u32 + last_sym.size as u32 {
+                    log::debug!(
+                        "Symbol at {:08X}-{:08X} goes beyond split end at {:08X}!",
+                        last_sym.address,
+                        last_sym.address as u32 + last_sym.size as u32,
+                        split_info.end
+                    );
+                    symbol_sizes_to_replace.push((last_sym_idx, split_info.end));
+                }
+            }
+        }
 
-            // if let Some((_, symbol)) = obj
-            //     .symbols
-            //     .for_section_range(section_index, ..addr)
-            //     .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
-            // {
-            //     ensure!(
-            //     addr >= symbol.address as u32 + symbol.size as u32,
-            //     "Split {} {} {:#010X}..{:#010X} overlaps symbol '{}' {:#010X}..{:#010X}",
-            //     split.unit,
-            //     section.name,
-            //     addr,
-            //     split.end,
-            //     symbol.name,
-            //     symbol.address,
-            //     symbol.address + symbol.size
-            // );
-            // }
-            //
-            // if let Some((_, symbol)) = obj
-            //     .symbols
-            //     .for_section_range(section_index, ..split.end)
-            //     .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
-            // {
-            //     ensure!(
-            //     split.end >= symbol.address as u32 + symbol.size as u32,
-            //     "Split {} {} ({:#010X}..{:#010X}) ends within symbol '{}' ({:#010X}..{:#010X})",
-            //     split.unit,
-            //     section.name,
-            //     addr,
-            //     split.end,
-            //     symbol.name,
-            //     symbol.address,
-            //     symbol.address + symbol.size
-            // );
-            // }
+        for (sym, new_end) in symbol_sizes_to_replace {
+            let mut new_sym = obj.symbols[sym].clone();
+            new_sym.size = new_end as u64 - new_sym.address;
+            log::debug!("Adjusting symbol bounds to {:08X}-{:08X}", new_sym.address, new_end);
+            obj.symbols.replace(sym, new_sym)?;
         }
     }
     Ok(())
