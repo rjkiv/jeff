@@ -421,11 +421,6 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
         // log::debug!("Symbols at unit {}", unit_name);
         for (sec_idx, symbol_idxs) in symbols_by_section {
             let section_name = &result.sections[sec_idx.0].name;
-            // evil hack
-            if section_name.starts_with(".CRT$") || section_name.starts_with(".NSPCH$") {
-                continue;
-            }
-
             let mut addrs_for_this_section: BTreeSet<u32> = BTreeSet::new();
             let mut merged_addrs: BTreeSet<u32> = BTreeSet::new();
             let section_symbols = &result.section_symbols[sec_idx];
@@ -652,8 +647,8 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
         }
     }
 
-    for (objinfo_sec_idx, splits_for_section) in deduced_obj_splits {
-        let section = obj.sections.get_mut(objinfo_sec_idx).expect("where section");
+    for (objinfo_sec_idx, splits_for_section) in &deduced_obj_splits {
+        let section = obj.sections.get_mut(*objinfo_sec_idx).expect("where section");
         let section_name = section.name.clone();
         for (split_start_addr, split) in splits_for_section {
             let subsection_name = match &split.rename {
@@ -668,7 +663,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                 split.end,
                 split.unit.clone()
             );
-            section.splits.push(split_start_addr, split.clone());
+            section.splits.push(*split_start_addr, split.clone());
         }
     }
     for unit in deduced_obj_units {

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 
 use crate::{
     obj::{ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbolKind, SymbolIndex},
@@ -75,6 +75,47 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
         }
         for (idx, symbol) in replace_symbols {
             obj.symbols.replace(idx, symbol)?;
+        }
+
+        // TODO: if we have splits at this point, they came from a map
+        // adjust for any new symbol discoveries as needed
+        for (split_start, split_info) in section.splits.iter_mut() {
+
+            // if let Some((_, symbol)) = obj
+            //     .symbols
+            //     .for_section_range(section_index, ..addr)
+            //     .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
+            // {
+            //     ensure!(
+            //     addr >= symbol.address as u32 + symbol.size as u32,
+            //     "Split {} {} {:#010X}..{:#010X} overlaps symbol '{}' {:#010X}..{:#010X}",
+            //     split.unit,
+            //     section.name,
+            //     addr,
+            //     split.end,
+            //     symbol.name,
+            //     symbol.address,
+            //     symbol.address + symbol.size
+            // );
+            // }
+            //
+            // if let Some((_, symbol)) = obj
+            //     .symbols
+            //     .for_section_range(section_index, ..split.end)
+            //     .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
+            // {
+            //     ensure!(
+            //     split.end >= symbol.address as u32 + symbol.size as u32,
+            //     "Split {} {} ({:#010X}..{:#010X}) ends within symbol '{}' ({:#010X}..{:#010X})",
+            //     split.unit,
+            //     section.name,
+            //     addr,
+            //     split.end,
+            //     symbol.name,
+            //     symbol.address,
+            //     symbol.address + symbol.size
+            // );
+            // }
         }
     }
     Ok(())
