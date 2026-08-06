@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::Result;
 
 use crate::{
     obj::{ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbolKind, SymbolIndex},

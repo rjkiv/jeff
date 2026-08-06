@@ -565,7 +565,12 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
 
                         // if there's a known size for the last addr in our deduced bounds, this split ends at this sym's end
                         if sym_at_addr.size_known {
-                            last + sym_at_addr.size as u32
+                            // we need to 4 byte align Type Descriptor ends
+                            if sym_at_addr.name.starts_with("??_R0") {
+                                last + sym_at_addr.size.next_multiple_of(4) as u32
+                            } else {
+                                last + sym_at_addr.size as u32
+                            }
                         }
                         // else, deduce the end from our map
                         else {
