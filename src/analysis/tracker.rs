@@ -411,8 +411,7 @@ impl Tracker {
         // but we still want to track them.
         let mut possible_missed_branches = BTreeMap::new();
 
-        if let Some(CXX { info: cxx_eh_func_info }) = &obj.combined_pdata_funcs.get(&function_start)
-        {
+        if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&function_start) {
             for unwind in cxx_eh_func_info.unwinds.iter().flatten() {
                 possible_missed_branches.insert(*unwind, VM::new());
             }

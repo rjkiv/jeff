@@ -292,7 +292,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                     // if func came from pdata, DO NOT override the size
                     let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
                     let sym_to_add: ObjSymbol =
-                        if let Some(Normal { end }) = obj.combined_pdata_funcs.get(&the_sec_addr) {
+                        if let Some(Normal { end }) = obj.pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
                                 name: sym.symbol,
                                 address: sym.addr as u64,

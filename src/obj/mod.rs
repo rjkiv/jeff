@@ -74,10 +74,8 @@ pub struct ObjInfo {
     pub known_functions: BTreeMap<SectionAddress, Option<u32>>,
 
     // Compiler generated info
-    // TODO: redo the map and pdb parsing so you can remove this field
-    pub pdata_funcs: BTreeSet<SectionAddress>,
     /// Functions that have an entry in .pdata.
-    pub combined_pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
+    pub pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
     // Info retrieved from exception datas that precede certain functions.
 
     // C++:
@@ -110,7 +108,6 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
-            combined_pdata_funcs: Default::default(),
             catches: Default::default(),
             cxx_handler: None,
         }

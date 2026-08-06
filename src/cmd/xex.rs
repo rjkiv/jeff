@@ -1,5 +1,4 @@
 use std::{
-    cmp,
     collections::{BTreeMap, HashSet},
     fs::{self, DirBuilder, File},
     io::{BufWriter, Write},
@@ -22,7 +21,7 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{
     analysis::{
-        cfa::{AnalyzerState, SectionAddress},
+        cfa::AnalyzerState,
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
         tracker::Tracker,
@@ -403,34 +402,8 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
             }
         }
 
-        // Remove known labels from known_functions/pdata_funcs
-        for known_label in pdb.labels {
-            if obj.known_functions.remove(&known_label).is_some() {
-                log::debug!("Demoted {} from func to label", known_label);
-            }
-            obj.pdata_funcs.remove(&known_label);
-        }
-
         // Apply all the symbols
-        for mut sym in pdb.symbols.into_iter() {
-            let (sec_idx, _sec) = obj.sections.at_address(sym.address as u32)?;
-            let the_sec_addr = SectionAddress::new(sec_idx, sym.address as u32);
-            if obj.pdata_funcs.contains(&the_sec_addr) {
-                let pdata_sz = obj.known_functions.get(&the_sec_addr).unwrap().unwrap() as u64;
-                let pdb_sz = sym.size;
-                if pdata_sz != pdb_sz {
-                    log::debug!(
-                        concat!(
-                            "Size of {} according to .pdata is {}",
-                            ", but according to pdb is {}. "
-                        ),
-                        &sym.name,
-                        pdata_sz,
-                        pdb_sz
-                    );
-                    sym.size = cmp::max(pdata_sz, pdb_sz);
-                }
-            }
+        for sym in pdb.symbols.into_iter() {
             obj.add_symbol(sym, true)?;
         }
         dep.push(pdb_path);

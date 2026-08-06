@@ -442,9 +442,6 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
     }
 
     for sym in syms_to_add {
-        if sym.name == "??_R4OggMap@@6B@" {
-            println!("here");
-        }
         obj.add_symbol(sym, false)?;
     }
 

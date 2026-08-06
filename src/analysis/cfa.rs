@@ -161,7 +161,7 @@ impl AnalyzerState {
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
 
             // if this func has a C++ exception, add/replace ehfuncinfo symbols
-            if let Some(CXX { info: cxx_eh_func_info }) = &obj.combined_pdata_funcs.get(&sym_addr) {
+            if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&sym_addr) {
                 let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
                 syms_to_add.push(ObjSymbol {
                     name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
@@ -314,7 +314,7 @@ impl AnalyzerState {
             let this_sec_start = SectionAddress::new(section_index, section.address as u32);
             let possible_func_addr =
                 SectionAddress::new(section_index, (section.address + 8) as u32);
-            if obj.combined_pdata_funcs.contains_key(&possible_func_addr) {
+            if obj.pdata_funcs.contains_key(&possible_func_addr) {
                 continue;
             }
             self.functions.entry(this_sec_start).or_default();
@@ -546,7 +546,7 @@ impl AnalyzerState {
         let function_end = self.functions.get(&start).and_then(|info| info.end);
 
         // if there are exception structures coming after the main function, analyze those first
-        if let Some(C { handlers }) = obj.combined_pdata_funcs.get(&start) {
+        if let Some(C { handlers }) = obj.pdata_funcs.get(&start) {
             for (handler_start, handler_end) in handlers {
                 // FIXME: C funcs with excepts currently have a broken bl reloc
                 if !slices.analyze(
@@ -561,7 +561,7 @@ impl AnalyzerState {
                 }
             }
             // TODO: get the max end from our handlers? - that's what function_end should be
-        } else if let Some(CXX { info: cxx_eh_func_info }) = &obj.combined_pdata_funcs.get(&start) {
+        } else if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&start) {
             // analyze unwinds, then catches
             for unwind_start in cxx_eh_func_info.unwinds.iter().flatten() {
                 if !slices.analyze(
@@ -617,9 +617,8 @@ impl AnalyzerState {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
                             // if first is a C func with excepts, and the second is not
-                            if let Some(C { handlers }) = obj.combined_pdata_funcs.get(&first) {
-                                if !matches!(obj.combined_pdata_funcs.get(&second), Some(&C { .. }))
-                                {
+                            if let Some(C { handlers }) = obj.pdata_funcs.get(&first) {
+                                if !matches!(obj.pdata_funcs.get(&second), Some(&C { .. })) {
                                     // using unwrap because there's no way this could possibly be None
                                     let max_except_end =
                                         handlers.last_key_value().map(|(_, v)| v).unwrap();
@@ -660,7 +659,7 @@ impl AnalyzerState {
                             // don't try to add a function where there's an exception symbol
                             let possible_func_addr =
                                 SectionAddress::new(section_index, addr.address + 8);
-                            if obj.combined_pdata_funcs.contains_key(&possible_func_addr)
+                            if obj.pdata_funcs.contains_key(&possible_func_addr)
                                 || obj.catches.contains_key(&possible_func_addr)
                             {
                                 continue;

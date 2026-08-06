@@ -213,7 +213,6 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
 
                     // this is a known C function, but exceptions make it hard to deduce the ending
                     obj.known_functions.insert(func_start_addr, None);
-                    obj.pdata_funcs.insert(func_start_addr);
                     num_discovered_funcs += 1;
                 }
                 // C++
@@ -336,7 +335,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             None
                         }
                     };
-                    obj.combined_pdata_funcs.insert(func_start_addr, CXX {
+                    obj.pdata_funcs.insert(func_start_addr, CXX {
                         info: CXXEhFuncInfo {
                             addr: cur_func_except_record,
                             unwind_map_addr,
@@ -350,7 +349,6 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     });
                     // this is a known C++ function, but exceptions make it hard to deduce the ending
                     obj.known_functions.insert(func_start_addr, None);
-                    obj.pdata_funcs.insert(func_start_addr);
                     num_discovered_funcs += 1;
                 }
             } else {
@@ -360,8 +358,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         } else {
             // no exception data for this func, we can safely mark down its ending
             obj.known_functions.insert(func_start_addr, Some(num_insts_in_func * 4));
-            obj.pdata_funcs.insert(func_start_addr);
-            obj.combined_pdata_funcs
+            obj.pdata_funcs
                 .insert(func_start_addr, Normal { end: func_start_addr + num_insts_in_func * 4 });
             num_discovered_funcs += 1;
         }
@@ -372,21 +369,21 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         for handler in c_func_handler_addrs {
             c_func_handler_bounds.insert(*handler, tmp_c_except_addrs[handler]);
         }
-        obj.combined_pdata_funcs.insert(*c_func, C { handlers: c_func_handler_bounds });
+        obj.pdata_funcs.insert(*c_func, C { handlers: c_func_handler_bounds });
     }
 
     log::info!("Found {} known funcs from SEH!", num_discovered_funcs);
     log::info!(
         "\tFuncs with C   exceptions: {}",
-        obj.combined_pdata_funcs.values().filter(|e| matches!(e, C { handlers: _ })).count()
+        obj.pdata_funcs.values().filter(|e| matches!(e, C { handlers: _ })).count()
     );
     log::info!(
         "\tFuncs with CXX exceptions: {}",
-        obj.combined_pdata_funcs.values().filter(|e| matches!(e, CXX { info: _ })).count()
+        obj.pdata_funcs.values().filter(|e| matches!(e, CXX { info: _ })).count()
     );
 
     // sanity checks
-    for addr in obj.combined_pdata_funcs.keys() {
+    for addr in obj.pdata_funcs.keys() {
         // We should not have any known exception addrs in our listed pdata funcs
         assert!(!known_exception_addrs.contains(addr));
     }
@@ -394,7 +391,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // We should not have any known exception addrs in our listed known_functions
         assert!(!known_exception_addrs.contains(addr));
         // and if our function has unwinds and such, we should not have a confirmed ending
-        if matches!(obj.combined_pdata_funcs.get(addr), Some(C { .. } | CXX { .. })) {
+        if matches!(obj.pdata_funcs.get(addr), Some(C { .. } | CXX { .. })) {
             assert!(ending.is_none());
         }
     }
