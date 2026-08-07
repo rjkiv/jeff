@@ -14,6 +14,7 @@ use crate::{
         slices::{FunctionSlices, TailCallResult},
     },
     obj::{
+        ExceptionType::{C, CXX},
         ObjInfo, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
         SectionIndex,
     },
@@ -139,18 +140,7 @@ impl AnalyzerState {
                 section.address,
                 section.address + section.size
             );
-            let func_name;
-            if obj.excepts.contains(&start) {
-                func_name = format!("__except${:08X}", start.address);
-            } else if obj.finallys.contains(&start) {
-                func_name = format!("__finally${:08X}", start.address);
-            } else if obj.unwinds.contains(&start) {
-                func_name = format!("__unwind${:08X}", start.address);
-            } else if obj.catches.contains(&start) {
-                func_name = format!("__catch${:08X}", start.address);
-            } else {
-                func_name = format!("fn_{:08X}", start.address);
-            }
+            let func_name = format!("fn_{:08X}", start.address);
             let sym_idx = obj.add_symbol(
                 ObjSymbol {
                     name: func_name,
@@ -170,27 +160,8 @@ impl AnalyzerState {
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
 
-            // if this func has a C exception, add/replace C scope table symbols
-            if let Some(c_scope_table_info) = obj.funcs_with_c_handlers.get(&sym_addr) {
-                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
-                syms_to_add.push(ObjSymbol {
-                    name: format!("__scopetable${}", obj.symbols[sym_idx].name),
-                    address: c_scope_table_info.addr.address as u64,
-                    section: Some(c_scope_table_info.addr.section),
-                    // size of scope table: 16 * num_scope_entries + 4
-                    // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
-                    size: (c_scope_table_info.num_handlers * 16 + 4) as u64,
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                });
-                for sym in syms_to_add {
-                    obj.add_symbol(sym, true)?;
-                }
-            }
             // if this func has a C++ exception, add/replace ehfuncinfo symbols
-            else if let Some(cxx_eh_func_info) = obj.funcs_with_cxx_handlers.get(&sym_addr) {
+            if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&sym_addr) {
                 let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
                 syms_to_add.push(ObjSymbol {
                     name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
@@ -208,7 +179,7 @@ impl AnalyzerState {
                         name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
                         address: unwind_map_addr.address as u64,
                         section: Some(unwind_map_addr.section),
-                        size: (cxx_eh_func_info.num_unwinds * 8) as u64,
+                        size: (cxx_eh_func_info.unwinds.len() * 8) as u64,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -343,9 +314,7 @@ impl AnalyzerState {
             let this_sec_start = SectionAddress::new(section_index, section.address as u32);
             let possible_func_addr =
                 SectionAddress::new(section_index, (section.address + 8) as u32);
-            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
-                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
-            {
+            if obj.pdata_funcs.contains_key(&possible_func_addr) {
                 continue;
             }
             self.functions.entry(this_sec_start).or_default();
@@ -533,7 +502,15 @@ impl AnalyzerState {
                     name: format!("$LN{:X}", label.address),
                     address: label.address as u64,
                     section: Some(label.section),
-                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                })
+            }
+            for label in slices.special_catch_labels.iter() {
+                self.known_symbols.entry(*label).or_default().push(ObjSymbol {
+                    name: format!("$LN{:X}", label.address),
+                    address: label.address as u64,
+                    section: Some(label.section),
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     ..Default::default()
                 })
@@ -567,15 +544,66 @@ impl AnalyzerState {
     ) -> Result<Option<FunctionSlices>> {
         let mut slices = FunctionSlices::default();
         let function_end = self.functions.get(&start).and_then(|info| info.end);
-        Ok(match slices.analyze(obj, start, start, function_end, &self.functions, None)? {
-            true => Some(slices),
-            false => None,
-        })
+
+        // if there are exception structures coming after the main function, analyze those first
+        if let Some(C { handlers }) = obj.pdata_funcs.get(&start) {
+            for (handler_start, handler_end) in handlers {
+                // FIXME: C funcs with excepts currently have a broken bl reloc
+                if !slices.analyze(
+                    obj,
+                    *handler_start,
+                    start,
+                    Some(*handler_end),
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
+                }
+            }
+            // TODO: get the max end from our handlers? - that's what function_end should be
+        } else if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&start) {
+            // analyze unwinds, then catches
+            for unwind_start in cxx_eh_func_info.unwinds.iter().flatten() {
+                if !slices.analyze(
+                    obj,
+                    *unwind_start,
+                    start,
+                    function_end,
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
+                }
+            }
+            for catch_start in cxx_eh_func_info.catches.iter().flatten() {
+                if !slices.analyze(
+                    obj,
+                    *catch_start,
+                    start,
+                    Some(obj.catches[catch_start]),
+                    &self.functions,
+                    None,
+                )? {
+                    return Ok(None);
+                }
+            }
+            // TODO: get the max end from our unwinds/catches? - that's what function_end should be
+        }
+        // finally, analyze the main function
+        if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
+            return Ok(None);
+        }
+
+        Ok(Some(slices))
     }
 
     fn detect_new_functions(&mut self, obj: &ObjInfo) -> Result<bool> {
         let mut new_functions = vec![];
         let mut truncations: Vec<(SectionAddress, SectionAddress)> = vec![];
+        // 1. the start of the C func; 2. the false "func" to remove from self.functions; 3. the known end of the C func
+        // false "funcs" come from funcs with C exception handlers, because microsoft likes to bl to them rather than b
+        let mut c_exception_truncations: Vec<(SectionAddress, SectionAddress, SectionAddress)> =
+            vec![];
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             if section.name == ".xidata" {
                 continue;
@@ -588,6 +616,31 @@ impl AnalyzerState {
                     (Some((&first, first_info)), Some(&(&second, second_info))) => {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
+                            // if first is a C func with excepts, and the second is not
+                            if let Some(C { handlers }) = obj.pdata_funcs.get(&first) {
+                                if !matches!(obj.pdata_funcs.get(&second), Some(&C { .. })) {
+                                    // using unwrap because there's no way this could possibly be None
+                                    let max_except_end =
+                                        handlers.last_key_value().map(|(_, v)| v).unwrap();
+
+                                    // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
+                                    // delete it, and set first's end to max end
+                                    if first <= second && second < *max_except_end {
+                                        assert_eq!(
+                                            first_end, *max_except_end,
+                                            "Expected end {:?}, calculated end {:?}",
+                                            max_except_end, first
+                                        );
+                                        c_exception_truncations.push((
+                                            first,
+                                            second,
+                                            *max_except_end,
+                                        ));
+                                        continue;
+                                    }
+                                }
+                            }
+
                             log::warn!(
                                 "Overlapping functions {}-{} -> {}, truncating end of {}",
                                 first,
@@ -606,9 +659,8 @@ impl AnalyzerState {
                             // don't try to add a function where there's an exception symbol
                             let possible_func_addr =
                                 SectionAddress::new(section_index, addr.address + 8);
-                            if obj.funcs_with_c_handlers.contains_key(&possible_func_addr)
-                                || obj.funcs_with_cxx_handlers.contains_key(&possible_func_addr)
-                                || obj.catches.contains(&possible_func_addr)
+                            if obj.pdata_funcs.contains_key(&possible_func_addr)
+                                || obj.catches.contains_key(&possible_func_addr)
                             {
                                 continue;
                             }
@@ -646,6 +698,15 @@ impl AnalyzerState {
                 }
             }
         }
+        // TODO: looking at .objs in objdiff, the SectionAddress corresponding with fake_func has a b to 0
+        // Need an actual C with exceptions source-compiled .obj to use as a ground truth/reference
+        for (c_func, fake_func, c_func_len) in c_exception_truncations {
+            self.functions.remove(&fake_func);
+            if let Some(c_func) = self.functions.get_mut(&c_func) {
+                c_func.end = Some(c_func_len);
+            }
+        }
+
         let found_new = !new_functions.is_empty() || !truncations.is_empty();
         for (fn_addr, new_end) in truncations {
             if let Some(info) = self.functions.get_mut(&fn_addr) {

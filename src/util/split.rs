@@ -910,11 +910,10 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
     Ok(objects)
 }
 
-// TODO: verify this logic still lines up for MSVC on X360
 pub fn default_section_align(section: &ObjSection) -> u64 {
     match section.kind {
         ObjSectionKind::Code => 4,
-        _ => 8,
+        _ => 1, // yes really, thanks microsoft
     }
 }
 

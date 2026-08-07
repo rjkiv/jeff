@@ -17,8 +17,8 @@ use crate::{
         RelocationTarget,
     },
     obj::{
-        ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
-        ObjSymbol, ObjSymbolKind, SectionIndex,
+        ExceptionType::CXX, ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection,
+        ObjSectionKind, ObjSymbol, ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -410,6 +410,25 @@ impl Tracker {
         // The compiler can sometimes create impossible-to-reach branches,
         // but we still want to track them.
         let mut possible_missed_branches = BTreeMap::new();
+
+        if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&function_start) {
+            for unwind in cxx_eh_func_info.unwinds.iter().flatten() {
+                possible_missed_branches.insert(*unwind, VM::new());
+            }
+            for catch in cxx_eh_func_info.catches.iter().flatten() {
+                // the previous two instructions are ptrs, mark their relocs down
+                self.relocations.insert(
+                    *catch - 8,
+                    Relocation::Absolute(RelocationTarget::Address(
+                        obj.cxx_handler.expect("Catches, but no C++ handler?"),
+                    )),
+                );
+                self.relocations.insert(
+                    *catch - 4,
+                    Relocation::Absolute(RelocationTarget::Address(cxx_eh_func_info.addr)),
+                );
+            }
+        }
 
         let mut executor = Executor::new(obj);
         executor.push(function_start, VM::new(), false);

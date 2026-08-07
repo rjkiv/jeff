@@ -1,5 +1,4 @@
 use std::{
-    cmp,
     collections::{BTreeMap, HashSet},
     fs::{self, DirBuilder, File},
     io::{BufWriter, Write},
@@ -22,10 +21,9 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{
     analysis::{
-        cfa::{AnalyzerState, SectionAddress},
+        cfa::AnalyzerState,
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
-        rtti::FindRTTIObjectsXbox,
         tracker::Tracker,
     },
     cmd::dol::{
@@ -369,11 +367,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         fs::write(exe_path, exe_bytes)?;
     }
 
-    // let mut obj = if is_xex_file(&object_path)? {
-    //     process_xex(&object_path)?
-    // } else {
-    //     process_pe(&object_path)?
-    // };
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
@@ -409,37 +402,8 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
             }
         }
 
-        // Remove known labels from known_functions/pdata_funcs
-        obj.pdata_funcs.sort();
-        for known_label in pdb.labels {
-            if obj.known_functions.remove(&known_label).is_some() {
-                log::debug!("Demoted {} from func to label", known_label);
-            }
-            if let Result::Ok(idx) = obj.pdata_funcs.binary_search(&known_label) {
-                obj.pdata_funcs.remove(idx);
-            };
-        }
-
         // Apply all the symbols
-        for mut sym in pdb.symbols.into_iter() {
-            let (sec_idx, _sec) = obj.sections.at_address(sym.address as u32)?;
-            let the_sec_addr = SectionAddress::new(sec_idx, sym.address as u32);
-            if obj.pdata_funcs.contains(&the_sec_addr) {
-                let pdata_sz = obj.known_functions.get(&the_sec_addr).unwrap().unwrap() as u64;
-                let pdb_sz = sym.size;
-                if pdata_sz != pdb_sz {
-                    log::debug!(
-                        concat!(
-                            "Size of {} according to .pdata is {}",
-                            ", but according to pdb is {}. "
-                        ),
-                        &sym.name,
-                        pdata_sz,
-                        pdb_sz
-                    );
-                    sym.size = cmp::max(pdata_sz, pdb_sz);
-                }
-            }
+        for sym in pdb.symbols.into_iter() {
             obj.add_symbol(sym, true)?;
         }
         dep.push(pdb_path);
@@ -470,10 +434,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         let mut state = AnalyzerState::default();
         debug!("Detecting function boundaries");
         FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-        // don't search for RTTI again, we already did it during initial analysis
-        if symbols_cache.is_none() {
-            FindRTTIObjectsXbox::execute(&mut state, &obj)?;
-        }
         state.detect_functions(&obj)?; // perform CFA
         state.apply(&mut obj)?; // give each found function a symbol
     }
@@ -514,7 +474,6 @@ fn disasm(args: DisasmArgs) -> Result<()> {
     // step 2. find common functions (save/restore reg funcs, XAPI calls)
     // rename the save/restore gpr/fpr funcs that were previously found in pdata
     FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-    FindRTTIObjectsXbox::execute(&mut state, &obj)?;
 
     state.detect_functions(&obj)?;
     log::info!(

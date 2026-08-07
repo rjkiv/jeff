@@ -42,7 +42,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
                     .next()
                     .map_or(section_end, |(_, symbol)| symbol.address as u32);
                 let new_size = next_addr - symbol.address as u32;
-                log::debug!("Guessed {} size {:#X}", symbol.name, new_size);
+                // log::debug!("Guessed {} size {:#X}", symbol.name, new_size);
                 symbol.size = match (new_size, expected_size) {
                     (..=4, 1) => expected_size,
                     (2 | 4, 2) => expected_size,
@@ -76,6 +76,39 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
         for (idx, symbol) in replace_symbols {
             obj.symbols.replace(idx, symbol)?;
         }
+
+        let mut symbol_sizes_to_replace: Vec<(SymbolIndex, u32)> = vec![];
+
+        // if we have splits at this point, they came from a map
+        // adjust for any new symbol discoveries as needed
+        for (split_start, split_info) in section.splits.iter_mut() {
+            // we want the last ObjSymbol, such that the ObjSymbol's start address is within split_start and split_info.end
+            if let Some((last_sym_idx, last_sym)) = obj
+                .symbols
+                .for_section_range(section_index, split_start..split_info.end)
+                .next_back()
+            {
+                // if it goes over the split bounds, shrink the sym size so it does
+                // if it turns out that's wrong, ehhhhh the user can adjust it later,
+                // where they'll have an existing splits/symbols.txt and this code won't be reached
+                if split_info.end < last_sym.address as u32 + last_sym.size as u32 {
+                    log::debug!(
+                        "Symbol at {:08X}-{:08X} goes beyond split end at {:08X}!",
+                        last_sym.address,
+                        last_sym.address as u32 + last_sym.size as u32,
+                        split_info.end
+                    );
+                    symbol_sizes_to_replace.push((last_sym_idx, split_info.end));
+                }
+            }
+        }
+
+        for (sym, new_end) in symbol_sizes_to_replace {
+            let mut new_sym = obj.symbols[sym].clone();
+            new_sym.size = new_end as u64 - new_sym.address;
+            log::debug!("Adjusting symbol bounds to {:08X}-{:08X}", new_sym.address, new_end);
+            obj.symbols.replace(sym, new_sym)?;
+        }
     }
     Ok(())
 }
@@ -99,33 +132,41 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             String { length: usize, terminated: bool },
             WString { length: usize, str: String },
         }
-        pub const fn trim_zeroes_end(mut bytes: &[u8]) -> &[u8] {
-            while let [rest @ .., last] = bytes {
-                if *last == 0 {
-                    bytes = rest;
-                } else {
-                    break;
-                }
-            }
-            bytes
-        }
         fn is_string(data: &[u8]) -> StringResult {
-            let bytes = trim_zeroes_end(data);
-            if bytes.is_empty() {
+            // because symbol sizes are unreliable we're passing in the remaining data for the section
+            // so, trim up to the first zero instead of the last
+            let bytes = data.iter().position(|&b| b == 0).map(|pos| &data[..pos]).unwrap_or(data);
+
+            // if no zeroes were stripped, probably not a string
+            if bytes.len() == data.len() {
                 return StringResult::None;
             }
-            if bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
+
+            if !bytes.is_empty()
+                && bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+            {
                 return StringResult::String {
                     length: bytes.len(),
                     terminated: data.len() > bytes.len(),
                 };
             }
-            if bytes.len() % 2 == 0 && data.len() >= bytes.len() + 2 {
+
+            // narrow bytes didn't work, try wide bytes
+            let wide_bytes = data
+                .chunks_exact(2)
+                .position(|c| c == [0, 0])
+                .map(|pos| &data[..pos * 2])
+                .unwrap_or(data);
+
+            if wide_bytes.is_empty() {
+                return StringResult::None;
+            }
+            if wide_bytes.len() % 2 == 0 && data.len() >= wide_bytes.len() + 2 {
                 // Found at least 2 bytes of trailing 0s, check UTF-16
                 let mut ok = true;
                 let mut str = String::new();
                 for n in std::char::decode_utf16(
-                    bytes.chunks_exact(2).map(|c| u16::from_be_bytes(c.try_into().unwrap())),
+                    wide_bytes.chunks_exact(2).map(|c| u16::from_be_bytes(c.try_into().unwrap())),
                 ) {
                     match n {
                         Ok(c) if c.is_ascii_graphic() || c.is_ascii_whitespace() => {
@@ -138,7 +179,7 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                     }
                 }
                 if ok {
-                    return StringResult::WString { length: bytes.len(), str };
+                    return StringResult::WString { length: wide_bytes.len(), str };
                 }
             }
             StringResult::None
@@ -148,6 +189,18 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             .for_section(section_index)
             .filter(|(_, sym)| sym.data_kind == ObjDataKind::Unknown)
         {
+            // jump tables are not strings
+            if symbol.name.starts_with("jumptable_") {
+                continue;
+            }
+            // if the size is 1, considering there's no null terminator, it's probably not a string
+            if symbol.size == 1 {
+                continue;
+            }
+            // let's not try to search for strings that aren't 4 byte aligned - we can find those later as we actually decomp
+            if symbol.address & 3 != 0 {
+                continue;
+            }
             let data = section.symbol_data(symbol)?;
             match is_string(data) {
                 StringResult::None => {}
@@ -191,7 +244,8 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             None => format!("str_{:08X}", symbol.address as u32),
         };
         symbol.data_kind = entry.kind;
-        symbol.size = entry.size.next_multiple_of(4) as u64;
+        // canonically, strings are not 4 byte aligned
+        symbol.size = entry.size as u64;
         symbol.size_known = true;
         log::debug!(
             "Setting {} ({:#010X}) to size {:#X}",

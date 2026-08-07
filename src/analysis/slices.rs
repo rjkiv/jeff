@@ -12,10 +12,10 @@ use crate::{
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
         uniq_jump_table_entries,
-        vm::{section_address_for, BranchTarget, StepResult, VM},
+        vm::{section_address_for, BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
-    obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
+    obj::{ExceptionType::CXX, ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
 };
 
 #[derive(Debug, Default, Clone)]
@@ -25,12 +25,12 @@ pub struct FunctionSlices {
     pub function_references: BTreeSet<SectionAddress>,
     pub jump_table_references: BTreeMap<SectionAddress, u32>,
     pub special_jump_table_labels: Vec<SectionAddress>,
+    pub special_catch_labels: Vec<SectionAddress>,
     pub prologue: Option<SectionAddress>,
     pub epilogue: Option<SectionAddress>,
     // Either a block or tail call
     pub possible_blocks: BTreeMap<SectionAddress, Box<VM>>,
     pub has_conditional_blr: bool,
-    pub has_rfi: bool,
     pub finalized: bool,
     pub has_r1_load: bool, // Possibly instead of a prologue
 }
@@ -265,11 +265,29 @@ impl FunctionSlices {
         // no need to check for prologues/epilogues in MSVC
         // if a func came from pdata, it not only has a prologue/epilogue, but a known confirmed ending
 
+        // if function_start belongs to a func with C++ EH that has catches,
+        // and the inst we just ran was ADDI,
+        // and the value inside R3 > function_start && R3 < any of the catches' start addresses, add it to our catch $LN label list
+        if ins.op == Opcode::Addi {
+            if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&function_start) {
+                if let GprValue::Constant(c) = vm.gpr[3].value {
+                    let maybe_catch_ln = c as u32;
+                    if maybe_catch_ln > function_start.address
+                        && cxx_eh_func_info
+                            .catches
+                            .iter()
+                            .flatten()
+                            .any(|catch| maybe_catch_ln < catch.address)
+                    {
+                        self.special_catch_labels
+                            .push(SectionAddress::new(function_start.section, maybe_catch_ln));
+                    }
+                }
+            }
+        }
+
         if !self.has_conditional_blr && is_conditional_blr(ins) {
             self.has_conditional_blr = true;
-        }
-        if !self.has_rfi && ins.op == Opcode::Rfi {
-            self.has_rfi = true;
         }
         // If control flow hits a block we thought may be a tail call,
         // we know it isn't.
@@ -457,7 +475,34 @@ impl FunctionSlices {
                                             symbol.address as u32,
                                         ))
                                     }
-                                    _ => self.function_references.insert(addr),
+                                    _ => {
+                                        self.function_references.insert(addr)
+                                        // let c_excepts = obj
+                                        //     .funcs_with_c_handlers
+                                        //     .get(&function_start)
+                                        //     .map(|c_handler| c_handler.handlers.clone())
+                                        //     .unwrap_or_default();
+                                        //
+                                        // let max_except_end =
+                                        //     c_excepts.iter().map(|e| obj.c_except_addrs[e]).max();
+                                        //
+                                        // // if this is a C func with excepts, and addr is between the func start, and the max exception end,
+                                        // // then this isn't a true function reference, don't insert it
+                                        // if function_start <= addr
+                                        //     && max_except_end.is_some_and(|end| addr < end)
+                                        // {
+                                        //     log::debug!(
+                                        //         "{:08X} is not a true function reference!",
+                                        //         addr
+                                        //     );
+                                        //     // unconditional branch not a function reference
+                                        //     // why is it bl? i couldn't tell you. thanks microsoft!
+                                        //     self.branches.insert(ins_addr, vec![addr]);
+                                        //     continue;
+                                        // } else {
+                                        //     self.function_references.insert(addr)
+                                        // }
+                                    }
                                 };
                             } else {
                                 // MSVC likes to end functions with bl sometimes
@@ -654,15 +699,6 @@ impl FunctionSlices {
                         && !known_functions.contains_key(&end)
                     {
                         log::trace!("Found trailing blr @ {:#010X}, merging with function", end);
-                        self.blocks.insert(end, Some(end + 4));
-                    }
-
-                    // Some functions with rfi also include a trailing nop
-                    if self.has_rfi
-                        && matches!(disassemble(section, end.address), Some(ins) if is_nop(ins))
-                        && !known_functions.contains_key(&end)
-                    {
-                        log::trace!("Found trailing nop @ {:#010X}, merging with function", end);
                         self.blocks.insert(end, Some(end + 4));
                     }
                 }

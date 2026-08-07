@@ -22,10 +22,7 @@ pub use symbols::{
 };
 
 use crate::{
-    analysis::{
-        cfa::SectionAddress,
-        seh::{CScopeTableInfo, CXXEhFuncInfo},
-    },
+    analysis::{cfa::SectionAddress, seh::CXXEhFuncInfo},
     obj::addresses::AddressRanges,
 };
 
@@ -49,6 +46,20 @@ pub struct ObjUnit {
     pub order: Option<i32>,
 }
 
+/// The exception type for a func that came from pdata.
+#[derive(Debug, Clone)]
+pub enum ExceptionType {
+    /// This func has no exceptions, the end that's listed is the canonical end
+    Normal { end: SectionAddress },
+    /// This is a C func with exceptions, get the bounds of its handlers
+    C {
+        // the start and end addresses of this function's C handlers
+        handlers: BTreeMap<SectionAddress, SectionAddress>,
+    },
+    /// This is a CXX func with exceptions, track all its info
+    CXX { info: CXXEhFuncInfo },
+}
+
 #[derive(Debug, Clone)]
 pub struct ObjInfo {
     pub kind: ObjKind,
@@ -64,21 +75,13 @@ pub struct ObjInfo {
 
     // Compiler generated info
     /// Functions that have an entry in .pdata.
-    pub pdata_funcs: Vec<SectionAddress>,
-    /// Info retrieved from exception datas that precede certain functions.
-    // C:
-    // funcs with C except handlers
-    pub funcs_with_c_handlers: BTreeMap<SectionAddress, CScopeTableInfo>,
-    pub excepts: BTreeSet<SectionAddress>,
-    pub finallys: BTreeSet<SectionAddress>,
+    pub pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
+    // Info retrieved from exception datas that precede certain functions.
 
     // C++:
-    // funcs with CXX except handlers - Rc because a function and its catches can point to (or own) the same exception record
-    pub funcs_with_cxx_handlers: BTreeMap<SectionAddress, CXXEhFuncInfo>,
-    pub unwinds: BTreeSet<SectionAddress>,
-    pub catches: BTreeSet<SectionAddress>,
-    // funcs that have at least 1 catch
-    pub funcs_with_catches: BTreeSet<SectionAddress>,
+    pub cxx_handler: Option<SectionAddress>,
+    // key = the catch start, value = the catch end (sourced from pdata)
+    pub catches: BTreeMap<SectionAddress, SectionAddress>,
     // hell, even rtti classes?
 
     // Extracted
@@ -105,13 +108,8 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
-            funcs_with_c_handlers: Default::default(),
-            excepts: Default::default(),
-            finallys: Default::default(),
-            funcs_with_cxx_handlers: Default::default(),
-            funcs_with_catches: Default::default(),
-            unwinds: Default::default(),
             catches: Default::default(),
+            cxx_handler: None,
         }
     }
 
