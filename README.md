@@ -29,9 +29,6 @@ This aims to replicate the behavior of the original xextool by xorloser.
 This is NOT meant to be run on its own, but rather part of a build system, such as the one in the jeff-template above.
 
 ## Known Issues/Hacks
-- When parsing .map files, the last split of a section will not get added.
-This is because during development, I found that the last split would sometimes conflict with the inferred boundaries of nearby objects/symbols, which would cause errors.
-So, if you are using jeff and your game has a map, you will have to remember to manually add the last split of each of your exe's sections.
 - Parsing/applying .pdb files currently has limited support.
 - Trying to link the generated COFFs into a final exe and comparing sections of it against the original extracted exe (like what the GC/Wii toolkit does with elfs/dols)
 is currently unsupported, as it was out of the initial scope of the project.
