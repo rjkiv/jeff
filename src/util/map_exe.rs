@@ -231,8 +231,8 @@ impl ExeMapInfo {
     }
 
     fn resolve_imps(&mut self) -> Result<()> {
-        for (_section, symbols_by_address) in self.section_symbols.iter_mut() {
-            for (_addr, symbols) in symbols_by_address.iter_mut() {
+        for symbols_by_address in self.section_symbols.values_mut() {
+            for symbols in symbols_by_address.values_mut() {
                 // if we've got a merged addr that contains an __imp, keep the __imp, dump everything else
                 if symbols.len() > 1
                     && symbols.iter().any(|s| self.symbols[s.0].symbol.starts_with("__imp_"))
@@ -623,7 +623,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
 
     // sanity check/fix splits
     // TODO: also ensure splits don't end within symbols
-    for (_objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
+    for splits_for_section in deduced_obj_splits.values_mut() {
         let mut keys_to_replace: Vec<(u32, u32)> = vec![];
         let mut itr = splits_for_section.iter().peekable();
         while let (Some((cur_split_start, cur_split)), Some((next_split_start, next_split))) =
