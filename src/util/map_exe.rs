@@ -12,7 +12,7 @@ use crate::{
     analysis::cfa::SectionAddress,
     obj::{
         ExceptionType::Normal, ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
-        ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex, SymbolIndex,
+        ObjSymbolFlags, ObjSymbolKind, ObjUnit,
     },
 };
 // SymbolRef: the symbol name, and the obj it came from
@@ -232,7 +232,7 @@ impl ExeMapInfo {
 
     fn resolve_imps(&mut self) -> Result<()> {
         for (_section, symbols_by_address) in self.section_symbols.iter_mut() {
-            for (addr, symbols) in symbols_by_address.iter_mut() {
+            for (_addr, symbols) in symbols_by_address.iter_mut() {
                 // if we've got a merged addr that contains an __imp, keep the __imp, dump everything else
                 if symbols.len() > 1
                     && symbols.iter().any(|s| self.symbols[s.0].symbol.starts_with("__imp_"))
@@ -273,7 +273,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     // apply map symbols to ObjInfo
     // the good news: by this point, exception info and RTTI have been parsed/detected, and their symbols marked
     // so we can look for those and account for them when deducing .rdata sizes
-    for (section, symbols_by_address) in &result.section_symbols {
+    for symbols_by_address in result.section_symbols.values() {
         for (addr, symbols) in symbols_by_address {
             // we want to skip imps and save/restore reg intrinsics, since we'll find those ourselves later
             if symbols.iter().any(|sym_idx| result.symbols[sym_idx.0].symbol.starts_with("__imp")) {
@@ -554,8 +554,8 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             if !contiguous_bounds.is_empty() {
                 for (first, last) in &contiguous_bounds {
                     let split_end = {
-                        let (sec_for_last_addr, section) = obj.sections.at_address(*last)?;
-                        let (sym_idx, sym_at_addr) = obj
+                        let (sec_for_last_addr, _section) = obj.sections.at_address(*last)?;
+                        let (_, sym_at_addr) = obj
                             .symbols
                             .at_section_address(sec_for_last_addr, *last)
                             .next()
@@ -576,7 +576,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         else {
                             match section_symbols.range((Excluded(last), Unbounded)).next() {
                                 // there's a next addr over, its start is our split end
-                                Some((next_addr, next_syms)) => *next_addr,
+                                Some((next_addr, _)) => *next_addr,
                                 // no next addr over, so the end of the map section is our split end
                                 None => {
                                     // need the section size from the map, not from objinfo
@@ -623,7 +623,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
 
     // sanity check/fix splits
     // TODO: also ensure splits don't end within symbols
-    for (objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
+    for (_objinfo_sec_idx, splits_for_section) in deduced_obj_splits.iter_mut() {
         let mut keys_to_replace: Vec<(u32, u32)> = vec![];
         let mut itr = splits_for_section.iter().peekable();
         while let (Some((cur_split_start, cur_split)), Some((next_split_start, next_split))) =
