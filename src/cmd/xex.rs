@@ -269,9 +269,8 @@ fn split_write_obj_exe(
     let obj_dir = out_dir.join("obj");
     let entry = if module.obj.kind == ObjKind::Executable {
         module.obj.entry.and_then(|e| {
-            let (section_index, _) = module.obj.sections.at_address(e as u32).ok()?;
-            let symbols =
-                module.obj.symbols.at_section_address(section_index, e as u32).collect_vec();
+            let (section_index, _) = module.obj.sections.at_address(e).ok()?;
+            let symbols = module.obj.symbols.at_section_address(section_index, e).collect_vec();
             best_match_for_reloc(symbols, ObjRelocKind::PpcRel24).map(|(_, s)| s.name.clone())
         })
     } else {

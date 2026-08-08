@@ -67,7 +67,7 @@ pub struct ObjInfo {
     pub symbols: ObjSymbols,
     pub sections: ObjSections,
     /// The entry point of the executable
-    pub entry: Option<u64>,
+    pub entry: Option<u32>,
 
     /// Known functions and their possibly known sizes, obtained from pdata/xidata/RTTI.
     /// Populated before CFA begins, and passed to CFA for more context.

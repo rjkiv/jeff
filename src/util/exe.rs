@@ -1,4 +1,4 @@
-use std::{fs, fs::File, io::Read, num::NonZeroU64};
+use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
 use anyhow::{bail, ensure, Result};
 use memchr::memmem;
@@ -128,15 +128,15 @@ impl InputtedExecutable {
         // Create object
         let mut obj =
             ObjInfo::new(ObjKind::Executable, self.exe_name.to_string(), vec![], sections);
-        obj.entry = NonZeroU64::new(obj_file.entry()).map(|n| n.get());
+        obj.entry = NonZeroU32::new(obj_file.entry() as u32).map(|n| n.get());
 
         if let Some(entry) = obj.entry {
             // label entry as mainCRTStartup
             obj.add_symbol(
                 ObjSymbol {
                     name: String::from("mainCRTStartup"),
-                    address: entry as u32,
-                    section: Some(obj.sections.at_address(entry as u32)?.0),
+                    address: entry,
+                    section: Some(obj.sections.at_address(entry)?.0),
                     size_known: false,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Function,

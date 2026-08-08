@@ -328,7 +328,7 @@ impl AnalyzerState {
         // the rest...
         println!("Known functions complete.");
 
-        if let Some(entry) = obj.entry.map(|n| n as u32) {
+        if let Some(entry) = obj.entry {
             // Locate entry function bounds
             let (section_index, _) = obj
                 .sections

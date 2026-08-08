@@ -120,8 +120,8 @@ impl Tracker {
 
     fn process_code(&mut self, obj: &ObjInfo) -> Result<()> {
         if let Some(entry) = obj.entry {
-            let (section_index, _) = obj.sections.at_address(entry as u32)?;
-            let entry_addr = SectionAddress::new(section_index, entry as u32);
+            let (section_index, _) = obj.sections.at_address(entry)?;
+            let entry_addr = SectionAddress::new(section_index, entry);
             self.process_function_by_address(obj, entry_addr)?;
         }
         for (section_index, _) in obj.sections.by_kind(ObjSectionKind::Code) {
