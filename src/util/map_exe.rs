@@ -295,9 +295,9 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         if let Some(Normal { end }) = obj.pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
                                 name: sym.symbol,
-                                address: sym.addr as u64,
+                                address: sym.addr,
                                 section: Some(sec_idx),
-                                size: (end.address - the_sec_addr.address) as u64,
+                                size: (end.address - the_sec_addr.address),
                                 size_known: true,
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                 kind: if sec.kind == ObjSectionKind::Code && sym.is_function {
@@ -323,7 +323,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 assert!(obj_sym.size_known);
                                 // if deduced size from map < recorded size from symbol, overwrite it
                                 let deduced_size_from_map = next_addr - sym.addr;
-                                if deduced_size_from_map < obj_sym.size as u32 {
+                                if deduced_size_from_map < obj_sym.size {
                                     log::debug!(
                                         "{:08X}: deduced size {:08X} < parsed size {:08X}!",
                                         sym.addr,
@@ -335,9 +335,9 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                             }
                             ObjSymbol {
                                 name: sym.symbol,
-                                address: sym.addr as u64,
+                                address: sym.addr,
                                 section: Some(sec_idx),
-                                size: size_to_use.unwrap_or(0) as u64,
+                                size: size_to_use.unwrap_or(0),
                                 size_known: size_to_use.is_some(),
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                 kind: ObjSymbolKind::Object, // vftables are not functions
@@ -346,10 +346,10 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         } else if let Some(float_str) = sym.symbol.strip_prefix("__real@") {
                             // if this is a floating point value...
                             assert!(float_str.len() == 8 || float_str.len() == 16);
-                            let size = float_str.len() as u64 / 2;
+                            let size = float_str.len() as u32 / 2;
                             ObjSymbol {
                                 name: sym.symbol,
-                                address: sym.addr as u64,
+                                address: sym.addr,
                                 section: Some(sec_idx),
                                 size,
                                 size_known: true,
@@ -362,7 +362,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                             assert_eq!(vmx_str.len(), 32);
                             ObjSymbol {
                                 name: sym.symbol,
-                                address: sym.addr as u64,
+                                address: sym.addr,
                                 section: Some(sec_idx),
                                 size: 16,
                                 size_known: true,
@@ -374,7 +374,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         } else {
                             ObjSymbol {
                                 name: sym.symbol,
-                                address: sym.addr as u64,
+                                address: sym.addr,
                                 section: Some(sec_idx),
                                 // shoutout to MSVC maps for not providing sizes
                                 size_known: false,
@@ -567,9 +567,9 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                         if sym_at_addr.size_known {
                             // we need to 4 byte align Type Descriptor ends
                             if sym_at_addr.name.starts_with("??_R0") {
-                                last + sym_at_addr.size.next_multiple_of(4) as u32
+                                last + sym_at_addr.size.next_multiple_of(4)
                             } else {
-                                last + sym_at_addr.size as u32
+                                last + sym_at_addr.size
                             }
                         }
                         // else, deduce the end from our map

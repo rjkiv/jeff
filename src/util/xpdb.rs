@@ -133,7 +133,7 @@ fn lookup_type_size(ty_finder: &TypeFinder, index: TypeIndex) -> Result<u64> {
 fn set_obj_size_by_type(obj_sym: &mut ObjSymbol, ty_finder: &TypeFinder, index: TypeIndex) {
     match lookup_type_size(ty_finder, index) {
         Ok(ty_size) => {
-            obj_sym.size = ty_size;
+            obj_sym.size = ty_size as u32;
             obj_sym.size_known = true;
         }
         Err(err) => {
@@ -153,10 +153,10 @@ fn set_obj_size_by_name(obj_sym: &mut ObjSymbol, name: &str) {
         let mut str_size = 0;
         for ch in ptr.by_ref() {
             if ch.is_ascii_digit() {
-                str_size = ch.to_digit(10).unwrap() as u64 + 1;
+                str_size = ch.to_digit(10).unwrap() + 1;
                 break;
             } else if ('A'..='P').contains(&ch) {
-                str_size = str_size * 16 + (ch as u8 - b'A') as u64;
+                str_size = str_size * 16 + (ch as u8 - b'A') as u32;
             } else {
                 assert!(
                     ch == '@',
@@ -308,7 +308,7 @@ pub fn try_parse_pdb(
                 // TODO: handle code/data merging properly, instead of
                 // overwriting the name
 
-                obj_sym.address = symaddr.address.into();
+                obj_sym.address = symaddr.address;
                 obj_sym.section = Some(symaddr.section);
                 obj_sym.flags = ObjSymbolFlagSet(ObjSymbolFlags::Global.into());
                 obj_sym.kind =
@@ -333,7 +333,7 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Object;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address = symaddr.address.into();
+                    obj_sym.address = symaddr.address;
                     obj_sym.section = Some(symaddr.section);
                 }
                 if use_types {
@@ -354,7 +354,7 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Object;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address = symaddr.address.into();
+                    obj_sym.address = symaddr.address;
                     obj_sym.section = Some(symaddr.section);
                 }
                 if use_types {
@@ -369,7 +369,7 @@ pub fn try_parse_pdb(
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_GPROC32 or S_LPROC32 record
-                obj_sym.size = data.len as u64;
+                obj_sym.size = data.len;
                 obj_sym.size_known = true;
                 obj_sym.align = Some(8);
                 if data.global {
@@ -378,7 +378,7 @@ pub fn try_parse_pdb(
                     obj_sym.flags.set_scope(ObjSymbolScope::Local);
                     obj_sym.kind = ObjSymbolKind::Function;
                     obj_sym.name = data.name.to_string().into();
-                    obj_sym.address = symaddr.address.into();
+                    obj_sym.address = symaddr.address;
                     obj_sym.section = Some(symaddr.section);
                 }
             }
@@ -390,7 +390,7 @@ pub fn try_parse_pdb(
                 let obj_sym = syms.entry(symaddr).or_default();
 
                 // This is an S_THUNK32 record
-                obj_sym.size = data.len as u64;
+                obj_sym.size = data.len as u32;
                 obj_sym.size_known = true;
                 obj_sym.align = Some(8);
             }
@@ -405,7 +405,7 @@ pub fn try_parse_pdb(
                 }
                 let symaddr = to_section_addr(&pdbmap, section_addrs, &data.offset);
                 let obj_sym = syms.entry(symaddr).or_default();
-                obj_sym.address = symaddr.address.into();
+                obj_sym.address = symaddr.address;
                 obj_sym.data_kind = ObjDataKind::Unknown;
                 obj_sym.flags.set_scope(ObjSymbolScope::Local);
                 obj_sym.kind = ObjSymbolKind::Unknown;

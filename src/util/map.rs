@@ -819,9 +819,9 @@ fn add_symbol(
         ObjSymbol {
             name: symbol_entry.name.clone(),
             demangled_name,
-            address: symbol_entry.address as u64,
+            address: symbol_entry.address,
             section,
-            size: symbol_entry.size as u64,
+            size: symbol_entry.size,
             size_known: symbol_entry.size != 0,
             flags: ObjSymbolFlagSet(flags),
             kind: match symbol_entry.kind {

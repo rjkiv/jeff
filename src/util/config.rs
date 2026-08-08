@@ -90,7 +90,7 @@ pub fn parse_symbol_line(line: &str, obj: &mut ObjInfo) -> Result<Option<ObjSymb
         };
         let demangled_name = demangle(&name, &DemangleOptions::default());
         let mut symbol =
-            ObjSymbol { name, demangled_name, address: addr as u64, section, ..Default::default() };
+            ObjSymbol { name, demangled_name, address: addr, section, ..Default::default() };
         // TODO move somewhere common
         if symbol.name.starts_with("..") {
             symbol.flags.0 |= ObjSymbolFlags::Exported;
@@ -104,7 +104,7 @@ pub fn parse_symbol_line(line: &str, obj: &mut ObjInfo) -> Result<Option<ObjSymb
                             .ok_or_else(|| anyhow!("Unknown symbol type '{}'", value))?;
                     }
                     "size" => {
-                        symbol.size = parse_u32(value)? as u64;
+                        symbol.size = parse_u32(value)?;
                         symbol.size_known = true;
                     }
                     "scope" => {

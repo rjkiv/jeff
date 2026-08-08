@@ -95,7 +95,7 @@ fn create_gap_splits(obj: &mut ObjInfo) -> Result<()> {
                                 symbol.name,
                             );
                         }
-                        new_split_end.address = symbol.address as u32;
+                        new_split_end.address = symbol.address;
                         break;
                     }
                     // Create a new split if we need to adjust the alignment
@@ -108,7 +108,7 @@ fn create_gap_splits(obj: &mut ObjInfo) -> Result<()> {
                                 symbol.name,
                                 align
                             );
-                            new_split_end.address = symbol.address as u32;
+                            new_split_end.address = symbol.address;
                             break;
                         }
                     }
@@ -120,7 +120,7 @@ fn create_gap_splits(obj: &mut ObjInfo) -> Result<()> {
                     current_address,
                     symbols
                         .iter()
-                        .filter(|(_, s)| s.address == current_address.address as u64)
+                        .filter(|(_, s)| s.address == current_address.address)
                         .collect_vec(),
                 );
                 log::debug!(
@@ -199,7 +199,7 @@ fn validate_splits(obj: &ObjInfo) -> Result<()> {
             .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
         {
             ensure!(
-                addr >= symbol.address as u32 + symbol.size as u32,
+                addr >= symbol.address + symbol.size,
                 "Split {} {} {:#010X}..{:#010X} overlaps symbol '{}' {:#010X}..{:#010X}",
                 split.unit,
                 section.name,
@@ -217,7 +217,7 @@ fn validate_splits(obj: &ObjInfo) -> Result<()> {
             .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
         {
             ensure!(
-                split.end >= symbol.address as u32 + symbol.size as u32,
+                split.end >= symbol.address + symbol.size,
                 "Split {} {} ({:#010X}..{:#010X}) ends within symbol '{}' ({:#010X}..{:#010X})",
                 split.unit,
                 section.name,
@@ -253,15 +253,15 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
             let next_split_address = splits
                 .peek()
                 .filter(|(i, _, _, _)| *i == section_index)
-                .map(|(_, _, addr, _)| *addr as u64)
-                .unwrap_or(section.address + section.size);
+                .map(|(_, _, addr, _)| *addr)
+                .unwrap_or((section.address + section.size) as u32);
             let next_symbol_address = obj
                 .symbols
-                .for_section_range(section_index, addr + 1..next_split_address as u32)
+                .for_section_range(section_index, addr + 1..next_split_address)
                 .find(|&(_, s)| s.size_known && s.size > 0)
                 .map(|(_, s)| s.address)
                 .unwrap_or(next_split_address);
-            if next_symbol_address <= addr as u64 {
+            if next_symbol_address <= addr {
                 continue;
             }
             let symbol_name = format!(
@@ -278,9 +278,9 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
             );
             obj.symbols.add_direct(ObjSymbol {
                 name: symbol_name,
-                address: addr as u64,
+                address: addr,
                 section: Some(section_index),
-                size: next_symbol_address - addr as u64,
+                size: next_symbol_address - addr,
                 size_known: true,
                 flags: ObjSymbolFlagSet(
                     ObjSymbolFlags::Local | ObjSymbolFlags::Exported | ObjSymbolFlags::NoWrite,
@@ -308,7 +308,7 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
         while let Some((_, symbol)) = iter.next() {
             // Common BSS is allowed to have gaps and overlaps to accurately match the common BSS inflation bug
             if matches!(common_bss, Some(addr) if
-                section_index == addr.section && symbol.address as u32 >= addr.address)
+                section_index == addr.section && symbol.address  >= addr.address)
             {
                 continue;
             }
@@ -316,8 +316,8 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                 if let Some(&(_, next_symbol)) = iter.peek() {
                     (
                         next_symbol.name.as_str(),
-                        next_symbol.address as u32,
-                        (next_symbol.address + next_symbol.size) as u32,
+                        next_symbol.address,
+                        (next_symbol.address + next_symbol.size),
                         next_symbol.align.unwrap_or(1),
                     )
                 } else {
@@ -330,7 +330,7 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                 };
 
             // Check if symbol is missing data between the end of the symbol and the next symbol
-            let symbol_end = (symbol.address + symbol.size) as u32;
+            let symbol_end = symbol.address + symbol.size;
             if !matches!(section.kind, ObjSectionKind::Code | ObjSectionKind::Bss)
                 && next_address > symbol_end
             {
@@ -343,9 +343,9 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                     );
                     to_add.push(ObjSymbol {
                         name: format!("lbl_{symbol_end:08X}"),
-                        address: symbol_end as u64,
+                        address: symbol_end,
                         section: Some(section_index),
-                        size: (next_address - symbol_end) as u64,
+                        size: (next_address - symbol_end),
                         size_known: true,
                         kind: ObjSymbolKind::Object,
                         ..Default::default()
@@ -366,9 +366,9 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                     log::debug!("Adding gap symbol {} at {:#010X}", symbol_name, aligned_end);
                     to_add.push(ObjSymbol {
                         name: symbol_name,
-                        address: aligned_end as u64,
+                        address: aligned_end,
                         section: Some(section_index),
-                        size: (next_address - aligned_end) as u64,
+                        size: (next_address - aligned_end),
                         size_known: true,
                         flags: ObjSymbolFlagSet(
                             ObjSymbolFlags::Global
@@ -425,7 +425,7 @@ fn trim_split_alignment(obj: &mut ObjInfo) -> Result<()> {
             .for_section_range(section_index, addr..split.end)
             .rfind(|&(_, s)| s.size_known && s.size > 0 && !s.flags.is_stripped())
         {
-            split_end = symbol.address as u32 + symbol.size as u32;
+            split_end = symbol.address + symbol.size;
         }
         split_end = align_up(split_end, split.alignment(obj, section_index, section, addr));
         if split_end < split.end {
@@ -788,9 +788,9 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                 }
 
                 // TODO hack for gTRKInterruptVectorTableEnd
-                if (symbol.address == split_end.address as u64
+                if (symbol.address == split_end.address
                     && symbol.name != "gTRKInterruptVectorTableEnd")
-                    || (symbol.address == current_address.address as u64
+                    || (symbol.address == current_address.address
                         && symbol.name == "gTRKInterruptVectorTableEnd")
                 {
                     continue;
@@ -800,9 +800,9 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                     name: symbol.name.clone(),
                     demangled_name: symbol.demangled_name.clone(),
                     address: if split.common {
-                        symbol.align.unwrap_or(4) as u64
+                        symbol.align.unwrap_or(4)
                     } else {
-                        symbol.address - current_address.address as u64
+                        symbol.address - current_address.address
                     },
                     section: if split.common { None } else { Some(out_section_idx) },
                     size: symbol.size,

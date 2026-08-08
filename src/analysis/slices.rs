@@ -467,12 +467,12 @@ impl FunctionSlices {
                                     .rfind(|(_, symbol)| symbol.kind == ObjSymbolKind::Function);
                                 match last_function {
                                     Some((_, symbol))
-                                        if symbol.address + symbol.size > addr.address as u64 =>
+                                        if symbol.address + symbol.size > addr.address =>
                                     {
                                         // Set the function reference to the start of the function
                                         self.function_references.insert(SectionAddress::new(
                                             addr.section,
-                                            symbol.address as u32,
+                                            symbol.address,
                                         ))
                                     }
                                     _ => {

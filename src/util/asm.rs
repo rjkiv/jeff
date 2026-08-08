@@ -51,12 +51,12 @@ where W: Write + ?Sized {
         // Build symbol start/end entries
         let mut entries = BTreeMap::<u32, Vec<SymbolEntry>>::new();
         for (symbol_index, symbol) in obj.symbols.for_section(section_idx) {
-            entries.nested_push(symbol.address as u32, SymbolEntry {
+            entries.nested_push(symbol.address, SymbolEntry {
                 index: symbol_index,
                 kind: SymbolEntryKind::Start,
             });
             if symbol.size > 0 {
-                entries.nested_push((symbol.address + symbol.size) as u32, SymbolEntry {
+                entries.nested_push(symbol.address + symbol.size, SymbolEntry {
                     index: symbol_index,
                     kind: SymbolEntryKind::End,
                 });
@@ -91,7 +91,7 @@ where W: Write + ?Sized {
                         .or_else(|| vec.iter().find(|e| e.kind == SymbolEntryKind::Start))
                         .map(|e| e.index);
                     if target_symbol_idx.is_none() {
-                        let display_address = address as u64 + section.virtual_address.unwrap_or(0);
+                        let display_address = address + section.virtual_address.unwrap_or(0) as u32;
                         let symbol_idx = symbols.len() as SymbolIndex;
                         symbols.push(ObjSymbol {
                             name: format!(".L_{display_address:08X}"),
@@ -141,8 +141,8 @@ where W: Write + ?Sized {
             let target_section = obj.sections.get(target_section_idx).ok_or_else(|| {
                 anyhow!("Invalid relocation target section: {:#010X} {:?}", reloc_address, target)
             })?;
-            let address = (target.address as i64 + reloc.addend) as u64;
-            let vec = match section_entries[target_section_idx as usize].entry(address as u32) {
+            let address = (target.address as i64 + reloc.addend) as u32;
+            let vec = match section_entries[target_section_idx as usize].entry(address) {
                 btree_map::Entry::Occupied(e) => e.into_mut(),
                 btree_map::Entry::Vacant(e) => e.insert(vec![]),
             };
@@ -150,7 +150,7 @@ where W: Write + ?Sized {
                 .iter()
                 .any(|e| e.kind == SymbolEntryKind::Label || e.kind == SymbolEntryKind::Start)
             {
-                let display_address = address + target_section.virtual_address.unwrap_or(0);
+                let display_address = address + target_section.virtual_address.unwrap_or(0) as u32;
                 let symbol_idx = symbols.len() as SymbolIndex;
                 symbols.push(ObjSymbol {
                     name: format!(".L_{display_address:08X}"),
@@ -414,7 +414,7 @@ where
             }
             write!(w, "# {}:{:#X}", section.name, symbol.address)?;
             if let Some(section_address) = section.virtual_address {
-                write!(w, " | {:#X}", section_address + symbol.address)?;
+                write!(w, " | {:#X}", section_address as u32 + symbol.address)?;
             }
             writeln!(w, " | size: {:#X}", symbol.size)?;
             if let Some(name) = &symbol.demangled_name {

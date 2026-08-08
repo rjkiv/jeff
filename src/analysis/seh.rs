@@ -59,7 +59,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         obj.symbols.by_name("__C_specific_handler")?.map(|(_, sym)| {
             SectionAddress::new(
                 sym.section.expect("C handler should have a section specified!"),
-                sym.address as u32,
+                sym.address,
             )
         });
     let mut cxx_handler_addr: Option<SectionAddress> = None;
@@ -111,7 +111,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             // break glass in case of emergency
             // syms_to_add.push(ObjSymbol {
             //     name: format!("except_data_{:08X}", start_addr - 8),
-            //     address: (start_addr - 8) as u64,
+            //     address: (start_addr - 8) ,
             //     section: Some(func_start_addr.section),
             //     size: 8,
             //     size_known: true,
@@ -154,7 +154,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     // and that's for the func _CallCatchBlock, whose exception handler is _SkipUnwoundFrames
                     syms_to_add.push(ObjSymbol {
                         name: String::from("_CallCatchBlock"),
-                        address: func_start_addr.address as u64,
+                        address: func_start_addr.address,
                         section: Some(func_start_addr.section),
                         // change this to size: 0x24 once you're sure it's the same size throughout all xexes
                         size_known: false,
@@ -164,7 +164,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     });
                     syms_to_add.push(ObjSymbol {
                         name: String::from("_SkipUnwoundFrames"),
-                        address: cur_func_except_handler.address as u64,
+                        address: cur_func_except_handler.address,
                         section: Some(cur_func_except_handler.section),
                         // change this to size: 0x28 once you're sure it's the same size throughout all xexes
                         size_known: false,
@@ -199,7 +199,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                             SectionAddress::new(obj.sections.at_address(handler)?.0, handler);
                         syms_to_add.push(ObjSymbol {
                             name: format!("$LN{:08X}", addr.address),
-                            address: addr.address as u64,
+                            address: addr.address,
                             section: Some(addr.section),
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                             ..Default::default()
@@ -211,11 +211,11 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     assert_eq!(handlers.len(), num_scope_entries as usize);
                     syms_to_add.push(ObjSymbol {
                         name: format!("T${:08X}", cur_func_except_record.address),
-                        address: cur_func_except_record.address as u64,
+                        address: cur_func_except_record.address,
                         section: Some(cur_func_except_record.section),
                         // size of scope table: 16 * num_scope_entries + 4
                         // where 16 = size of scope table entry, 4 = the word that contains the number of scope entries
-                        size: (handlers.len() * 16 + 4) as u64,
+                        size: (handlers.len() * 16 + 4) as u32,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -270,7 +270,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                     );
                                     syms_to_add.push(ObjSymbol {
                                         name: format!("__unwind${:08X}", addr.address),
-                                        address: addr.address as u64,
+                                        address: addr.address,
                                         section: Some(addr.section),
                                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                         ..Default::default()
@@ -313,7 +313,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                         );
                                         syms_to_add.push(ObjSymbol {
                                             name: format!("__catch${:08X}", addr.address),
-                                            address: addr.address as u64,
+                                            address: addr.address,
                                             section: Some(addr.section),
                                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                             ..Default::default()
@@ -422,7 +422,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         obj.add_symbol(
             ObjSymbol {
                 name: String::from("__CxxFrameHandler"),
-                address: cxx_handler.address as u64,
+                address: cxx_handler.address,
                 section: Some(cxx_handler.section),
                 size_known: false,
                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),

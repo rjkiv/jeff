@@ -317,7 +317,7 @@ impl ObjInfo {
                 self.symbols
                     .iter()
                     .filter(|&(_, symbol)| symbol.flags.is_common())
-                    .map(|(_, s)| s.size as u32),
+                    .map(|(_, s)| s.size),
             )
             .sum()
     }

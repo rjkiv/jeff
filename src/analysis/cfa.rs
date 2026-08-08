@@ -144,9 +144,9 @@ impl AnalyzerState {
             let sym_idx = obj.add_symbol(
                 ObjSymbol {
                     name: func_name,
-                    address: start.address as u64,
+                    address: start.address,
                     section: Some(start.section),
-                    size: (end.address - start.address) as u64,
+                    size: end.address - start.address,
                     size_known: true,
                     kind: ObjSymbolKind::Function,
                     ..Default::default()
@@ -165,7 +165,7 @@ impl AnalyzerState {
                 let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
                 syms_to_add.push(ObjSymbol {
                     name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
-                    address: cxx_eh_func_info.addr.address as u64,
+                    address: cxx_eh_func_info.addr.address,
                     section: Some(cxx_eh_func_info.addr.section),
                     // if this exception record has any try/catches, there's no extra 0 at the end
                     size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
@@ -177,9 +177,9 @@ impl AnalyzerState {
                 if let Some(unwind_map_addr) = cxx_eh_func_info.unwind_map_addr {
                     syms_to_add.push(ObjSymbol {
                         name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
-                        address: unwind_map_addr.address as u64,
+                        address: unwind_map_addr.address,
                         section: Some(unwind_map_addr.section),
-                        size: (cxx_eh_func_info.unwinds.len() * 8) as u64,
+                        size: (cxx_eh_func_info.unwinds.len() * 8) as u32,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -189,9 +189,9 @@ impl AnalyzerState {
                 if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
                     syms_to_add.push(ObjSymbol {
                         name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
-                        address: try_map_addr.address as u64,
+                        address: try_map_addr.address,
                         section: Some(try_map_addr.section),
-                        size: (cxx_eh_func_info.num_tries * 0x14) as u64,
+                        size: cxx_eh_func_info.num_tries * 0x14,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -201,9 +201,9 @@ impl AnalyzerState {
                 if let Some(ip_to_state_map_addr) = cxx_eh_func_info.ip_to_state_map_addr {
                     syms_to_add.push(ObjSymbol {
                         name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
-                        address: ip_to_state_map_addr.address as u64,
+                        address: ip_to_state_map_addr.address,
                         section: Some(ip_to_state_map_addr.section),
-                        size: (cxx_eh_func_info.num_ip_to_states * 8) as u64,
+                        size: cxx_eh_func_info.num_ip_to_states * 8,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,
@@ -239,9 +239,9 @@ impl AnalyzerState {
                 obj.add_symbol(
                     ObjSymbol {
                         name: format!("jumptable_{:08X}", addr.address),
-                        address: addr.address as u64,
+                        address: addr.address,
                         section: Some(addr.section),
-                        size: size as u64,
+                        size,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Local.into()),
                         kind: ObjSymbolKind::Object,
@@ -258,10 +258,7 @@ impl AnalyzerState {
                     let end = symbol.address + symbol.size;
                     let overlapping = obj
                         .symbols
-                        .for_section_range(
-                            symbol.section.unwrap(),
-                            symbol.address as u32 + 1..end as u32,
-                        )
+                        .for_section_range(symbol.section.unwrap(), symbol.address + 1..end)
                         .filter(|(_, s)| s.kind == symbol.kind)
                         .map(|(a, _)| a)
                         .collect_vec();
@@ -301,10 +298,10 @@ impl AnalyzerState {
         // Apply known functions from symbols
         for (_, symbol) in obj.symbols.by_kind(ObjSymbolKind::Function) {
             let Some(section_index) = symbol.section else { continue };
-            let addr_ref = SectionAddress::new(section_index, symbol.address as u32);
+            let addr_ref = SectionAddress::new(section_index, symbol.address);
             self.functions.insert(addr_ref, FunctionInfo {
                 analyzed: false,
-                end: if symbol.size_known { Some(addr_ref + symbol.size as u32) } else { None },
+                end: if symbol.size_known { Some(addr_ref + symbol.size) } else { None },
                 slices: None,
             });
         }
@@ -447,7 +444,7 @@ impl AnalyzerState {
                 for label in slices.special_jump_table_labels.iter() {
                     self.known_symbols.entry(*label).or_default().push(ObjSymbol {
                         name: format!("$LN{:X}", label.address),
-                        address: label.address as u64,
+                        address: label.address,
                         section: Some(label.section),
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
@@ -500,7 +497,7 @@ impl AnalyzerState {
             for label in slices.special_jump_table_labels.iter() {
                 self.known_symbols.entry(*label).or_default().push(ObjSymbol {
                     name: format!("$LN{:X}", label.address),
-                    address: label.address as u64,
+                    address: label.address,
                     section: Some(label.section),
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     ..Default::default()
@@ -509,7 +506,7 @@ impl AnalyzerState {
             for label in slices.special_catch_labels.iter() {
                 self.known_symbols.entry(*label).or_default().push(ObjSymbol {
                     name: format!("$LN{:X}", label.address),
-                    address: label.address as u64,
+                    address: label.address,
                     section: Some(label.section),
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     ..Default::default()

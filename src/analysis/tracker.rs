@@ -130,7 +130,7 @@ impl Tracker {
                     && symbol.size_known
                     && !symbol.name.contains("__imp")
             }) {
-                let addr = SectionAddress::new(section_index, symbol.address as u32);
+                let addr = SectionAddress::new(section_index, symbol.address);
                 if !self.processed_functions.insert(addr) {
                     continue;
                 }
@@ -401,8 +401,8 @@ impl Tracker {
         let Some(section_index) = symbol.section else {
             bail!("Function '{}' missing section", symbol.name)
         };
-        let function_start = SectionAddress::new(section_index, symbol.address as u32);
-        let function_end = function_start + symbol.size as u32;
+        let function_start = SectionAddress::new(section_index, symbol.address);
+        let function_end = function_start + symbol.size;
         let _span =
             info_span!("fn", name = %symbol.name, start = %function_start, end = %function_end)
                 .entered();
@@ -573,7 +573,7 @@ impl Tracker {
                 obj.symbols.for_relocation(target, reloc_kind)?
             {
                 let symbol_address = symbol.address;
-                if symbol_address as u32 == target.address
+                if symbol_address == target.address
                     && ((data_kind != ObjDataKind::Unknown
                         && symbol.data_kind == ObjDataKind::Unknown)
                         || (symbol.align.is_none() && inferred_alignment.is_some()))
@@ -584,7 +584,7 @@ impl Tracker {
                     }
                     if symbol.align.is_none() {
                         if let Some(inferred_alignment) = inferred_alignment {
-                            if symbol_address as u32 % inferred_alignment == 0 {
+                            if symbol_address % inferred_alignment == 0 {
                                 new_symbol.align = Some(inferred_alignment);
                             }
                         }
@@ -595,7 +595,7 @@ impl Tracker {
             } else {
                 let symbol_idx = obj.symbols.add_direct(ObjSymbol {
                     name: format!("lbl_{:08X}", target.address),
-                    address: target.address as u64,
+                    address: target.address,
                     section: Some(target.section),
                     data_kind,
                     ..Default::default()

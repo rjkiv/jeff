@@ -142,9 +142,9 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                 // Type Descriptor class name (. omitted): ?AVFilePath@@
                 // Type Descriptor full symbol: ??_R0?AVFilePath@@@8
                 name: format!("??_R0{}@8", type_str),
-                address: td_addr as u64,
+                address: td_addr,
                 section: Some(data_sec_idx),
-                size: (type_str.len() + 8) as u64,
+                size: (type_str.len() + 8) as u32,
                 size_known: true,
                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                 kind: ObjSymbolKind::Object,
@@ -173,7 +173,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
         type_info_vtable.expect("So there's RTTI, but no global type info vtable addr?");
     syms_to_add.push(ObjSymbol {
         name: "??_7type_info@@6B@".to_string(),
-        address: vftable_addr as u64,
+        address: vftable_addr,
         section: Some(rdata_sec_idx),
         size: 4,
         size_known: true,
@@ -333,7 +333,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                 // Type Descriptor class name (. omitted): ?AVFilePath@@
                 // Class Hierarchy Descriptor full symbol: ??_R3FilePath@@8
                 name: format!("??_R3{}8", &the_rtti_class.borrow().name[3..]),
-                address: *chd_exe_addr as u64,
+                address: *chd_exe_addr,
                 section: Some(rdata_sec_idx),
                 size: 16,
                 size_known: true,
@@ -357,10 +357,10 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                 // Type Descriptor class name (. omitted): ?AVFilePath@@
                 // Class Hierarchy Descriptor full symbol: ??_R2FilePath@@8
                 name: format!("??_R2{}8", &the_rtti_class.borrow().name[3..]),
-                address: base_class_array_addr as u64,
+                address: base_class_array_addr,
                 section: Some(rdata_sec_idx),
                 // there's a null word after the last BCD entry, hence the +1
-                size: ((chd.num_base_classes + 1) * 4) as u64,
+                size: ((chd.num_base_classes + 1) * 4),
                 size_known: true,
                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                 kind: ObjSymbolKind::Object,
@@ -414,7 +414,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                                 encode_num(bcd_ptr.attributes as i32),
                                 &class_for_bcd.borrow().name[3..]
                             ),
-                            address: cur_bcd_addr as u64,
+                            address: cur_bcd_addr,
                             section: Some(rdata_sec_idx),
                             size: 28,
                             size_known: true,
@@ -484,7 +484,7 @@ fn compute_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result
                 // make a label for the COL, and for the vftable
                 syms_to_add.push(ObjSymbol {
                     name: format!("??_R4{}6B@", &c.name[3..]),
-                    address: the_sole_col.addr as u64,
+                    address: the_sole_col.addr,
                     section: Some(rdata_sec_idx),
                     size: 20,
                     size_known: true,
@@ -494,9 +494,9 @@ fn compute_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result
                 });
                 syms_to_add.push(ObjSymbol {
                     name: format!("??_7{}6B@", &c.name[3..]),
-                    address: the_sole_col.vftable_addr as u64,
+                    address: the_sole_col.vftable_addr,
                     section: Some(rdata_sec_idx),
-                    size: (the_sole_col.num_vftable_entries * 4) as u64,
+                    size: (the_sole_col.num_vftable_entries * 4),
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Object,
@@ -510,7 +510,7 @@ fn compute_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result
                 for col in &c.complete_object_locators {
                     syms_to_add.push(ObjSymbol {
                         name: format!("COL_for_{}_{:08X}", &c.name[3..], col.addr),
-                        address: col.addr as u64,
+                        address: col.addr,
                         section: Some(rdata_sec_idx),
                         size: 20,
                         size_known: true,
@@ -520,9 +520,9 @@ fn compute_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result
                     });
                     syms_to_add.push(ObjSymbol {
                         name: format!("VFTABLE_for_{}_{:08X}", &c.name[3..], col.addr),
-                        address: col.vftable_addr as u64,
+                        address: col.vftable_addr,
                         section: Some(rdata_sec_idx),
-                        size: (col.num_vftable_entries * 4) as u64,
+                        size: (col.num_vftable_entries * 4),
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Object,

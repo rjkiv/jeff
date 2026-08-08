@@ -32,13 +32,12 @@ pub fn process_code(
     let arch = objdiff_core::arch::ppc::ObjArchPpc { extab: None };
     let orig_relocs = section
         .relocations
-        .range(symbol.address as u32..symbol.address as u32 + symbol.size as u32)
+        .range(symbol.address..symbol.address + symbol.size)
         .map(|(a, r)| to_objdiff_reloc(obj, a, r))
         .collect_vec();
-    let orig_data =
-        section.data_range(symbol.address as u32, symbol.address as u32 + symbol.size as u32)?;
+    let orig_data = section.data_range(symbol.address, symbol.address + symbol.size)?;
     arch.process_code(
-        symbol.address,
+        symbol.address as u64,
         orig_data,
         0, // section_index goes unused anyway
         &orig_relocs,
@@ -295,9 +294,9 @@ fn to_objdiff_symbol(
     objdiff_core::obj::ObjSymbol {
         name: symbol.name.clone(),
         demangled_name: symbol.demangled_name.clone(),
-        address: symbol.address,
-        section_address: symbol.address - section.map(|s| s.address).unwrap_or(0),
-        size: symbol.size,
+        address: symbol.address as u64,
+        section_address: (symbol.address - section.map(|s| s.address).unwrap_or(0) as u32) as u64,
+        size: symbol.size as u64,
         size_known: symbol.size_known,
         flags,
         addend,

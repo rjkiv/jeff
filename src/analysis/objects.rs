@@ -38,10 +38,10 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
             if !symbol.size_known {
                 let next_addr = obj
                     .symbols
-                    .for_section_range(section_index, symbol.address as u32 + 1..)
+                    .for_section_range(section_index, symbol.address + 1..)
                     .next()
-                    .map_or(section_end, |(_, symbol)| symbol.address as u32);
-                let new_size = next_addr - symbol.address as u32;
+                    .map_or(section_end, |(_, symbol)| symbol.address);
+                let new_size = next_addr - symbol.address;
                 // log::debug!("Guessed {} size {:#X}", symbol.name, new_size);
                 symbol.size = match (new_size, expected_size) {
                     (..=4, 1) => expected_size,
@@ -50,7 +50,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
                         // alignment to double
                         if obj.symbols.at_section_address(section_index, next_addr).any(|(_, sym)| sym.data_kind == ObjDataKind::Double)
                         // If we're at a TU boundary, we can assume it's just padding
-                        || section.splits.has_split_at(symbol.address as u32 + new_size)
+                        || section.splits.has_split_at(symbol.address  + new_size)
                         {
                             expected_size
                         } else {
@@ -64,11 +64,11 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
                             new_size
                         }
                     }
-                } as u64;
+                };
                 symbol.size_known = true;
             }
             symbol.kind = ObjSymbolKind::Object;
-            if expected_size > 1 && symbol.size as u32 % expected_size != 0 {
+            if expected_size > 1 && symbol.size % expected_size != 0 {
                 symbol.data_kind = ObjDataKind::Unknown;
             }
             replace_symbols.push((idx, symbol));
@@ -91,11 +91,11 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
                 // if it goes over the split bounds, shrink the sym size so it does
                 // if it turns out that's wrong, ehhhhh the user can adjust it later,
                 // where they'll have an existing splits/symbols.txt and this code won't be reached
-                if split_info.end < last_sym.address as u32 + last_sym.size as u32 {
+                if split_info.end < last_sym.address + last_sym.size {
                     log::debug!(
                         "Symbol at {:08X}-{:08X} goes beyond split end at {:08X}!",
                         last_sym.address,
-                        last_sym.address as u32 + last_sym.size as u32,
+                        last_sym.address + last_sym.size,
                         split_info.end
                     );
                     symbol_sizes_to_replace.push((last_sym_idx, split_info.end));
@@ -105,7 +105,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
 
         for (sym, new_end) in symbol_sizes_to_replace {
             let mut new_sym = obj.symbols[sym].clone();
-            new_sym.size = new_end as u64 - new_sym.address;
+            new_sym.size = new_end - new_sym.address;
             log::debug!("Adjusting symbol bounds to {:08X}-{:08X}", new_sym.address, new_end);
             obj.symbols.replace(sym, new_sym)?;
         }
@@ -206,8 +206,8 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                 StringResult::None => {}
                 StringResult::String { length, terminated } => {
                     let size = if terminated { length + 1 } else { length };
-                    if symbol.size == size as u64
-                        || (is_auto_symbol(symbol) && symbol.size > size as u64)
+                    if symbol.size == size as u32
+                        || (is_auto_symbol(symbol) && symbol.size > size as u32)
                     {
                         let str = String::from_utf8_lossy(&data[..length]);
                         log::debug!("Found string '{}' @ {}", str, symbol.name);
@@ -221,8 +221,8 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                 }
                 StringResult::WString { length, str } => {
                     let size = length + 2;
-                    if symbol.size == size as u64
-                        || (is_auto_symbol(symbol) && symbol.size > size as u64)
+                    if symbol.size == size as u32
+                        || (is_auto_symbol(symbol) && symbol.size > size as u32)
                     {
                         log::debug!("Found wide string '{}' @ {}", str, symbol.name);
                         symbols_set.push(DetectedString {
@@ -241,11 +241,11 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
         let mut symbol = obj.symbols[entry.idx].clone();
         symbol.name = match &entry.mangled_name {
             Some(mangled_name) => mangled_name.clone(),
-            None => format!("str_{:08X}", symbol.address as u32),
+            None => format!("str_{:08X}", symbol.address),
         };
         symbol.data_kind = entry.kind;
         // canonically, strings are not 4 byte aligned
-        symbol.size = entry.size as u64;
+        symbol.size = entry.size as u32;
         symbol.size_known = true;
         log::debug!(
             "Setting {} ({:#010X}) to size {:#X}",

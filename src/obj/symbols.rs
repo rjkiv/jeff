@@ -187,9 +187,9 @@ pub enum ObjDataKind {
 pub struct ObjSymbol {
     pub name: String,
     pub demangled_name: Option<String>,
-    pub address: u64,
+    pub address: u32,
     pub section: Option<SectionIndex>,
-    pub size: u64,
+    pub size: u32,
     pub size_known: bool,
     pub flags: ObjSymbolFlagSet,
     pub kind: ObjSymbolKind,
@@ -218,13 +218,13 @@ impl ObjSymbols {
         let mut symbols_by_name = HashMap::<String, Vec<SymbolIndex>>::new();
         for (idx, symbol) in symbols.iter().enumerate() {
             let idx = idx as SymbolIndex;
-            symbols_by_address.nested_push(symbol.address as u32, idx);
+            symbols_by_address.nested_push(symbol.address, idx);
             if let Some(section_idx) = symbol.section {
                 let section_idx = section_idx as usize;
                 if section_idx >= symbols_by_section.len() {
                     symbols_by_section.resize_with(section_idx + 1, BTreeMap::new);
                 }
-                symbols_by_section[section_idx].nested_push(symbol.address as u32, idx);
+                symbols_by_section[section_idx].nested_push(symbol.address, idx);
             } else {
                 debug_assert!(
                     symbol.address == 0
@@ -245,7 +245,7 @@ impl ObjSymbols {
             // Stripped symbols don't overwrite existing symbols
             None
         } else if let Some(section_index) = in_symbol.section {
-            self.at_section_address(section_index, in_symbol.address as u32).find(|(_, symbol)| {
+            self.at_section_address(section_index, in_symbol.address).find(|(_, symbol)| {
                 symbol.kind == in_symbol.kind ||
                     // Replace auto symbols with real symbols
                     (symbol.kind == ObjSymbolKind::Unknown && is_auto_symbol(symbol))
@@ -337,13 +337,13 @@ impl ObjSymbols {
 
     pub fn add_direct(&mut self, in_symbol: ObjSymbol) -> Result<SymbolIndex> {
         let symbol_idx = self.symbols.len() as SymbolIndex;
-        self.symbols_by_address.nested_push(in_symbol.address as u32, symbol_idx);
+        self.symbols_by_address.nested_push(in_symbol.address, symbol_idx);
         if let Some(section_idx) = in_symbol.section {
             let section_idx = section_idx as usize;
             if section_idx >= self.symbols_by_section.len() {
                 self.symbols_by_section.resize_with(section_idx + 1, BTreeMap::new);
             }
-            self.symbols_by_section[section_idx].nested_push(in_symbol.address as u32, symbol_idx);
+            self.symbols_by_section[section_idx].nested_push(in_symbol.address, symbol_idx);
         } else {
             ensure!(
                 in_symbol.address == 0
@@ -505,7 +505,7 @@ impl ObjSymbols {
             let mut out = None;
             for (index, symbol) in self.for_name(name) {
                 if (section_index.is_none() || symbol.section == section_index)
-                    && symbol.address == address as u64
+                    && symbol.address == address
                 {
                     ensure!(out.is_none(), "Multiple symbols matched {}", symbol_ref);
                     out = Some((index, symbol));
@@ -560,12 +560,12 @@ impl ObjSymbols {
             let Some((symbol_idx, symbol)) = best_match_for_reloc(symbols, reloc_kind) else {
                 continue;
             };
-            if symbol.address == target_addr.address as u64 {
+            if symbol.address == target_addr.address {
                 result = Some((symbol_idx, symbol));
                 break;
             }
             if symbol.size > 0 {
-                if symbol.address + symbol.size > target_addr.address as u64 {
+                if symbol.address + symbol.size > target_addr.address {
                     result = Some((symbol_idx, symbol));
                 }
                 break;

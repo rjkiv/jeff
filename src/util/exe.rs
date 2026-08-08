@@ -135,7 +135,7 @@ impl InputtedExecutable {
             obj.add_symbol(
                 ObjSymbol {
                     name: String::from("mainCRTStartup"),
-                    address: entry,
+                    address: entry as u32,
                     section: Some(obj.sections.at_address(entry as u32)?.0),
                     size_known: false,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
@@ -173,7 +173,7 @@ impl InputtedExecutable {
                 obj.add_symbol(
                     ObjSymbol {
                         name,
-                        address: addr.address as u64,
+                        address: addr.address,
                         section: Some(addr.section),
                         size: 4,
                         size_known: true,
@@ -209,7 +209,7 @@ impl InputtedExecutable {
                 obj.add_symbol(
                     ObjSymbol {
                         name,
-                        address: addr.address as u64,
+                        address: addr.address,
                         section: Some(addr.section),
                         size: 0x10,
                         size_known: true,
@@ -346,7 +346,7 @@ impl InputtedExecutable {
                                 // println!("found sym {}", maybe_imp_sym.unwrap().1.name);
                                 unstrip_thunk(
                                     &mut obj.sections[thunk_idx].data[data_idx..data_idx + 8],
-                                    imp_sym.address as u32,
+                                    imp_sym.address,
                                 );
                             }
                             add_thunk(&mut obj, sym_name, cur_addr)?;
@@ -386,7 +386,7 @@ impl InputtedExecutable {
             obj.known_functions.insert(start + 4, Some(36));
             api_syms.push(ObjSymbol {
                 name: String::from("_RtlCheckStack"),
-                address: start.address as u64,
+                address: start.address,
                 section: Some(start.section),
                 size: 4,
                 size_known: true,
@@ -396,7 +396,7 @@ impl InputtedExecutable {
             });
             api_syms.push(ObjSymbol {
                 name: String::from("_RtlCheckStack12"),
-                address: (start.address + 4) as u64,
+                address: (start.address + 4),
                 section: Some(start.section),
                 size: 36,
                 size_known: true,

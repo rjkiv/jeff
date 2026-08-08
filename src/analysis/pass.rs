@@ -49,9 +49,9 @@ impl AnalysisPass for FindSaveRestSledsXbox {
                 if let Some(Some(known_func_size)) = obj.known_functions.get(&start) {
                     state.known_symbols.entry(start).or_default().push(ObjSymbol {
                         name: func.to_string(),
-                        address: start.address as u64,
+                        address: start.address,
                         section: Some(start.section),
-                        size: *known_func_size as u64,
+                        size: *known_func_size,
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                         kind: ObjSymbolKind::Function,
@@ -62,7 +62,7 @@ impl AnalysisPass for FindSaveRestSledsXbox {
                     let addr = start + (i - reg_start) * step_size;
                     state.known_symbols.entry(addr).or_default().push(ObjSymbol {
                         name: format!("{label}{i}"),
-                        address: addr.address as u64,
+                        address: addr.address,
                         section: Some(start.section),
                         size_known: true,
                         flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
