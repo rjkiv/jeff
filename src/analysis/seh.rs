@@ -108,6 +108,18 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
 
         // if func_type == 3, there's an 8 byte struct (with 2 words) just before the function start that contains exception data
         if func_type == 3 {
+            // break glass in case of emergency
+            // syms_to_add.push(ObjSymbol {
+            //     name: format!("except_data_{:08X}", start_addr - 8),
+            //     address: (start_addr - 8) as u64,
+            //     section: Some(func_start_addr.section),
+            //     size: 8,
+            //     size_known: true,
+            //     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            //     kind: ObjSymbolKind::Object,
+            //     ..Default::default()
+            // });
+            obj.exception_data_infos.insert(func_start_addr - 8);
             let cur_func_except_handler: SectionAddress;
             let cur_func_except_record: SectionAddress;
 

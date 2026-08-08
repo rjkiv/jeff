@@ -76,6 +76,9 @@ pub struct ObjInfo {
     // Compiler generated info
     /// Functions that have an entry in .pdata.
     pub pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
+    // Addresses for 8-byte exception data info.
+    // If need be, can use this to block CFA/function detection/the like
+    pub exception_data_infos: BTreeSet<SectionAddress>,
     // Info retrieved from exception datas that precede certain functions.
 
     // C++:
@@ -108,6 +111,7 @@ impl ObjInfo {
             blocked_relocation_targets: Default::default(),
             known_functions: Default::default(),
             pdata_funcs: Default::default(),
+            exception_data_infos: Default::default(),
             catches: Default::default(),
             cxx_handler: None,
         }
