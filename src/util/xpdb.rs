@@ -49,7 +49,7 @@ fn to_section_addr(
     // TODO: Do optimized binaries have a different mapping?
     let jeff_sect = (sect_offs.section - 1) as u32;
     let sect_base = section_addrs.get(jeff_sect).unwrap_or(&ObjSection::default()).address;
-    SectionAddress { section: jeff_sect, address: sect_base as u32 + sect_offs.offset }
+    SectionAddress { section: jeff_sect, address: sect_base + sect_offs.offset }
 }
 
 /// Attempt to deduce the size of the type referenced by index using the

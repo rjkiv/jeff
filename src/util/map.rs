@@ -717,8 +717,8 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
         .iter()
         .map(|s| {
             let name = s.name.clone();
-            let address = s.address as u64;
-            let size = s.size as u64;
+            let address = s.address;
+            let size = s.size;
             let file_offset = s.file_offset as u64;
             let kind = section_kind_for_section(&name).unwrap_or(ObjSectionKind::ReadOnlyData);
             ObjSection {
@@ -767,7 +767,7 @@ pub fn create_obj(result: &MapInfo) -> Result<ObjInfo> {
             let next = iter
                 .peek()
                 .map(|(addr, _)| *addr)
-                .unwrap_or_else(|| (section.address + section.size) as u32);
+                .unwrap_or_else(|| section.address + section.size);
             let common = section_name == ".bss"
                 && matches!(result.common_bss_start, Some(start) if *addr >= start);
             let unit = unit.replace(' ', "/");

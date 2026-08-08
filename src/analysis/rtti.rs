@@ -96,7 +96,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
     while i + 4 < data.len() {
         let chunk = &data[i..i + 4];
         if chunk == b".?AU" || chunk == b".?AV" || chunk == b".PAU" || chunk == b".PAV" {
-            let td_addr = data_section.address as u32 + (i - 8) as u32;
+            let td_addr = data_section.address + (i - 8) as u32;
             let this_vtable_addr = u32::from_be_bytes(data[i - 8..i - 4].try_into()?);
             // if we've already set the global type info vtable addr
             if let Some(global_vtable_addr) = type_info_vtable {
@@ -192,10 +192,10 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
             // check the next word over
             let next_word = u32::from_be_bytes(data[i + 4..i + 8].try_into()?);
             // if it's a valid address in rdata, it means we're looking at a Complete Object Locator.
-            if rdata_section.address as u32 <= next_word
-                && next_word < rdata_section.address as u32 + rdata_section.size as u32
+            if rdata_section.address <= next_word
+                && next_word < rdata_section.address + rdata_section.size
             {
-                let col_start_addr = rdata_section.address as u32 + (i - 12) as u32;
+                let col_start_addr = rdata_section.address + (i - 12) as u32;
                 // log::debug!(
                 //     "Discovered RTTI Complete Object Locator entry at {:08X}!",
                 //     col_start_addr
@@ -224,7 +224,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                 if let Some(col_start_idx) = memmem::find(data, &col_start_addr.to_be_bytes()) {
                     // the vftable is the next addr over from the COL, hence the +4
                     let vftable_idx = col_start_idx + 4;
-                    let vftable_addr = rdata_section.address as u32 + vftable_idx as u32;
+                    let vftable_addr = rdata_section.address + vftable_idx as u32;
 
                     // calculate vftable entry count here
                     // as long as an entry is a valid address in .text, keep going
@@ -236,9 +236,8 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                             data[cur_vftable_idx_offset..cur_vftable_idx_offset + 4].try_into()?,
                         );
                         // check that cur_vftable_entry is within .text bounds
-                        if text_section.address as u32 <= cur_vftable_entry
-                            && cur_vftable_entry
-                                < text_section.address as u32 + text_section.size as u32
+                        if text_section.address <= cur_vftable_entry
+                            && cur_vftable_entry < text_section.address + text_section.size
                         {
                             // add this to our known function addrs
                             // check to see if the addr is already part of a known function - if it's not, add it to known_functions
@@ -311,7 +310,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
 
             // log::debug!("CHD found at {:08X} for {}!", chd_exe_addr, the_rtti_class.borrow().name);
             // navigate to the bytes in .rdata that make up this CHD, and parse it
-            let chd_data_idx = chd_exe_addr - rdata_section.address as u32;
+            let chd_data_idx = chd_exe_addr - rdata_section.address;
             let chd_data = &rdata_section.data[chd_data_idx as usize..chd_data_idx as usize + 16];
             let mut chd = ClassHierarchyDescriptor {
                 signature: u32::from_be_bytes(chd_data[0..4].try_into()?),
@@ -344,9 +343,8 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
 
             // if the recorded BCA addr is not within .rdata, something has gone horribly wrong
             assert!(
-                rdata_section.address as u32 <= base_class_array_addr
-                    && base_class_array_addr
-                        < rdata_section.address as u32 + rdata_section.size as u32,
+                rdata_section.address <= base_class_array_addr
+                    && base_class_array_addr < rdata_section.address + rdata_section.size,
                 "Bad BCA addr {:08X}!",
                 base_class_array_addr
             );
@@ -368,7 +366,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
             });
 
             // parse the BCA and BCDs as well, since the CHD will own the BCA
-            let bca_data_idx = base_class_array_addr - rdata_section.address as u32;
+            let bca_data_idx = base_class_array_addr - rdata_section.address;
             let bca_data = &rdata_section.data[bca_data_idx as usize
                 ..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
 
@@ -377,7 +375,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                 let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
                     Entry::Vacant(entry) => {
                         // it's vacant, parse and create a new BCD instance
-                        let bcd_data_idx = cur_bcd_addr - rdata_section.address as u32;
+                        let bcd_data_idx = cur_bcd_addr - rdata_section.address;
                         let bcd_data =
                             &rdata_section.data[bcd_data_idx as usize..bcd_data_idx as usize + 28];
                         let td_addr = u32::from_be_bytes(bcd_data[0..4].try_into()?);

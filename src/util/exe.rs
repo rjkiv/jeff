@@ -114,8 +114,8 @@ impl InputtedExecutable {
             sections.push(ObjSection {
                 name: section_name,
                 kind: section_kind,
-                address: section.address(),
-                size: section.size(),
+                address: section.address() as u32,
+                size: section.size() as u32,
                 data: section_data,
                 align: section.align(),
                 relocations: Default::default(),
@@ -271,7 +271,7 @@ impl InputtedExecutable {
                 // i had to write things this way because of how rust handles borrowing...thank you rust, very cool
                 let (import_idx, offset_within_sec) = {
                     let (idx, sec) = obj.sections.at_address(min_addr)?;
-                    (idx, (min_addr - sec.address as u32) as usize)
+                    (idx, (min_addr - sec.address) as usize)
                 };
                 let mut i = min_addr;
                 loop {
@@ -312,7 +312,7 @@ impl InputtedExecutable {
                 // i had to write things this way because of how rust handles borrowing...thank you rust, very cool
                 let (thunk_idx, offset_within_sec) = {
                     let (idx, sec) = obj.sections.at_address(min_addr)?;
-                    (idx, (min_addr - sec.address as u32) as usize)
+                    (idx, (min_addr - sec.address) as usize)
                 };
 
                 let mut i = min_addr;
@@ -381,7 +381,7 @@ impl InputtedExecutable {
             let Some(pos) = memmem::find(&section.data, &RTL_CHECK_STACK) else {
                 continue;
             };
-            let start = SectionAddress::new(section_index, section.address as u32 + pos as u32);
+            let start = SectionAddress::new(section_index, section.address + pos as u32);
             obj.known_functions.insert(start, Some(4));
             obj.known_functions.insert(start + 4, Some(36));
             api_syms.push(ObjSymbol {

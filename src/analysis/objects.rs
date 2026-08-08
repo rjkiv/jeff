@@ -14,7 +14,7 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
         .iter_mut()
         .filter(|(_, s)| s.kind != ObjSectionKind::Code && s.name != ".pdata")
     {
-        let section_end = (section.address + section.size) as u32;
+        let section_end = section.address + section.size;
 
         let mut replace_symbols = vec![];
         for (idx, symbol) in obj.symbols.for_section(section_index) {

@@ -308,9 +308,8 @@ impl AnalyzerState {
 
         // Also check the beginning of every code section
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
-            let this_sec_start = SectionAddress::new(section_index, section.address as u32);
-            let possible_func_addr =
-                SectionAddress::new(section_index, (section.address + 8) as u32);
+            let this_sec_start = SectionAddress::new(section_index, section.address);
+            let possible_func_addr = SectionAddress::new(section_index, section.address + 8);
             if obj.pdata_funcs.contains_key(&possible_func_addr) {
                 continue;
             }
@@ -605,8 +604,8 @@ impl AnalyzerState {
             if section.name == ".xidata" {
                 continue;
             } // because we already did our xidata processing at this point
-            let section_start = SectionAddress::new(section_index, section.address as u32);
-            let section_end = section_start + section.size as u32;
+            let section_start = SectionAddress::new(section_index, section.address);
+            let section_end = section_start + section.size;
             let mut iter = self.functions.range(section_start..section_end).peekable();
             loop {
                 match (iter.next(), iter.peek()) {

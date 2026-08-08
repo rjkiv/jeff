@@ -31,7 +31,7 @@ impl AnalysisPass for FindSaveRestSledsXbox {
                 let Some(pos) = memmem::find(&section.data, &needle) else {
                     continue;
                 };
-                let start = SectionAddress::new(section_index, section.address as u32 + pos as u32);
+                let start = SectionAddress::new(section_index, section.address + pos as u32);
                 log::debug!("Found {} @ {:#010X}", func, start);
                 // let mut sled_size = (reg_end - reg_start) * step_size + 4 /* blr */;
 

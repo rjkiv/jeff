@@ -449,7 +449,7 @@ impl Tracker {
             let mut added = false;
             for (addr, vm) in take(&mut possible_missed_branches) {
                 let section = &obj.sections[addr.section];
-                if !executor.visited(section.address as u32, addr) {
+                if !executor.visited(section.address, addr) {
                     executor.push(addr, vm, true);
                     added = true;
                 }
@@ -467,7 +467,7 @@ impl Tracker {
         section_index: SectionIndex,
         section: &ObjSection,
     ) -> Result<()> {
-        let mut addr = SectionAddress::new(section_index, section.address as u32);
+        let mut addr = SectionAddress::new(section_index, section.address);
         for chunk in section.data.chunks_exact(4) {
             let value = u32::from_be_bytes(chunk.try_into()?);
             if let Some(value) = self.is_valid_address(obj, addr, value) {

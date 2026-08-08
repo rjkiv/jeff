@@ -67,9 +67,7 @@ where W: Write + ?Sized {
 
         // Generate local jump labels
         if section.kind == ObjSectionKind::Code {
-            for (addr, ins) in
-                InsIter::new(&section.data, section.address as u32, Extensions::xenon())
-            {
+            for (addr, ins) in InsIter::new(&section.data, section.address, Extensions::xenon()) {
                 if let Some(address) = ins.branch_dest(addr) {
                     if ins.field_aa() || !section.contains(address) {
                         continue;
@@ -91,7 +89,7 @@ where W: Write + ?Sized {
                         .or_else(|| vec.iter().find(|e| e.kind == SymbolEntryKind::Start))
                         .map(|e| e.index);
                     if target_symbol_idx.is_none() {
-                        let display_address = address + section.virtual_address.unwrap_or(0) as u32;
+                        let display_address = address + section.virtual_address.unwrap_or(0);
                         let symbol_idx = symbols.len() as SymbolIndex;
                         symbols.push(ObjSymbol {
                             name: format!(".L_{display_address:08X}"),
@@ -150,7 +148,7 @@ where W: Write + ?Sized {
                 .iter()
                 .any(|e| e.kind == SymbolEntryKind::Label || e.kind == SymbolEntryKind::Start)
             {
-                let display_address = address + target_section.virtual_address.unwrap_or(0) as u32;
+                let display_address = address + target_section.virtual_address.unwrap_or(0);
                 let symbol_idx = symbols.len() as SymbolIndex;
                 symbols.push(ObjSymbol {
                     name: format!(".L_{display_address:08X}"),
@@ -186,8 +184,8 @@ where W: Write + ?Sized {
         let entries = &section_entries[section_index as usize];
         let relocations = &section_relocations[section_index as usize];
 
-        let mut current_address = section.address as u32;
-        let section_end = (section.address + section.size) as u32;
+        let mut current_address = section.address;
+        let section_end = section.address + section.size;
         let subsection = obj
             .sections
             .iter()
@@ -251,7 +249,7 @@ where
 {
     for (addr, ins) in InsIter::new(data, address, Extensions::xenon()) {
         let reloc = relocations.get(&addr);
-        let file_offset = section.file_offset + (addr as u64 - section.address);
+        let file_offset = section.file_offset + (addr - section.address) as u64;
         write_ins(w, symbols, addr, ins, reloc, file_offset, section.virtual_address)?;
     }
     Ok(())
@@ -264,7 +262,7 @@ fn write_ins<W>(
     mut ins: Ins,
     reloc: Option<&ObjReloc>,
     file_offset: u64,
-    section_vaddr: Option<u64>,
+    section_vaddr: Option<u32>,
 ) -> Result<()>
 where
     W: Write + ?Sized,
@@ -272,7 +270,7 @@ where
     write!(
         w,
         "/* {:08X} {:08X}  {:02X} {:02X} {:02X} {:02X} */\t",
-        addr as u64 + section_vaddr.unwrap_or(0),
+        addr + section_vaddr.unwrap_or(0),
         file_offset,
         (ins.code >> 24) & 0xFF,
         (ins.code >> 16) & 0xFF,
@@ -414,7 +412,7 @@ where
             }
             write!(w, "# {}:{:#X}", section.name, symbol.address)?;
             if let Some(section_address) = section.virtual_address {
-                write!(w, " | {:#X}", section_address as u32 + symbol.address)?;
+                write!(w, " | {:#X}", section_address + symbol.address)?;
             }
             writeln!(w, " | size: {:#X}", symbol.size)?;
             if let Some(name) = &symbol.demangled_name {
@@ -485,7 +483,7 @@ where
                 let dbg_symbols = vec.iter().map(|e| &symbols[e.index as usize]).collect_vec();
                 bail!(
                     "Unaligned symbol entry @ {:#010X}:\n\t{:?}",
-                    section.virtual_address.unwrap_or(0) as u32 + sym_addr,
+                    section.virtual_address.unwrap_or(0) + sym_addr,
                     dbg_symbols
                 );
             }
@@ -539,8 +537,8 @@ where
             entries,
             reloc
         );
-        let data = &section.data[(current_address - section.address as u32) as usize
-            ..(until - section.address as u32) as usize];
+        let data = &section.data
+            [(current_address - section.address) as usize..(until - section.address) as usize];
         if symbol_kind == ObjSymbolKind::Function {
             ensure!(
                 current_address & 3 == 0 && data.len() & 3 == 0,
@@ -880,7 +878,7 @@ where
             Ok(reloc_address + 4)
         }
         ObjRelocKind::PpcRel14 | ObjRelocKind::PpcRel24 => {
-            let off = (reloc_address - section.address as u32) as usize;
+            let off = (reloc_address - section.address) as usize;
             let code = u32::from_be_bytes(section.data[off..off + 4].try_into().unwrap());
             let ins = Ins::new(code, Extensions::xenon());
             let file_offset = section.file_offset + off as u64;
@@ -960,8 +958,8 @@ where
     writeln!(
         w,
         "\n# {:#010X}..{:#010X} | size: {:#X}",
-        start as u64 + section_virtual_address,
-        end as u64 + section_virtual_address,
+        start + section_virtual_address,
+        end + section_virtual_address,
         end - start
     )?;
     match section.name.as_str() {

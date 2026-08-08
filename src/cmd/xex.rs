@@ -554,7 +554,7 @@ fn disasm(args: DisasmArgs) -> Result<()> {
                 name: sym.name.clone().into_bytes(),
                 value: match sym.section {
                     Some(idx) => match coff_obj.sections.get(idx) {
-                        Some(sect) => sym.address as u64 - sect.address,
+                        Some(sect) => (sym.address - sect.address) as u64,
                         None => bail!("Could not find section for symbol {}!", sym.name),
                     },
                     None => 0,

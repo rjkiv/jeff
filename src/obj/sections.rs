@@ -25,13 +25,12 @@ pub enum ObjSectionKind {
 pub struct ObjSection {
     pub name: String,
     pub kind: ObjSectionKind,
-    // these could all be u32s for an xex
-    pub address: u64,
-    pub size: u64,
+    pub address: u32,
+    pub size: u32,
     pub data: Vec<u8>,
     pub align: u64,
     pub relocations: ObjRelocations,
-    pub virtual_address: Option<u64>,
+    pub virtual_address: Option<u32>,
     pub file_offset: u64,
     pub splits: ObjSplits,
 }
@@ -175,11 +174,11 @@ impl ObjSection {
         if self.kind == ObjSectionKind::Bss {
             return Ok(&[]);
         }
-        let start = (start as u64 - self.address) as usize;
+        let start = (start - self.address) as usize;
         Ok(if end == 0 {
             &self.data[start..]
         } else {
-            &self.data[start..min(self.data.len(), (end as u64 - self.address) as usize)]
+            &self.data[start..min(self.data.len(), (end - self.address) as usize)]
         })
     }
 
@@ -193,14 +192,14 @@ impl ObjSection {
 
     #[inline]
     pub fn contains(&self, addr: u32) -> bool {
-        (self.address..self.address + self.size).contains(&(addr as u64))
+        (self.address..self.address + self.size).contains(&(addr))
     }
 
     #[inline]
     pub fn contains_range<R>(&self, range: R) -> bool
     where R: RangeBounds<u32> {
-        let start = self.address as u32;
-        let end = self.address as u32 + self.size as u32;
+        let start = self.address;
+        let end = self.address + self.size;
         let start_in_range = match range.start_bound() {
             Bound::Included(&n) => n >= start && n < end,
             Bound::Excluded(&n) => n > start && n < end,

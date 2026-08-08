@@ -469,7 +469,7 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
             name: sym.name.clone().into_bytes(),
             value: match sym.section {
                 Some(idx) => match obj.sections.get(idx) {
-                    Some(sect) => (sym.address - sect.address as u32) as u64,
+                    Some(sect) => (sym.address - sect.address) as u64,
                     None => bail!("Could not find section for symbol {}!", sym.name),
                 },
                 None => 0,

@@ -24,7 +24,7 @@ pub fn disassemble(section: &ObjSection, address: u32) -> Option<Ins> {
 }
 
 pub fn read_u32(section: &ObjSection, address: u32) -> Option<u32> {
-    let offset = (address as u64 - section.address) as usize;
+    let offset = (address - section.address) as usize;
     if section.data.len() < offset + 4 {
         return None;
     }
@@ -108,8 +108,7 @@ fn get_jump_table_entries(
             );
             let mut entries: Vec<SectionAddress> = Vec::new();
             // now, step through, line by line, until you find not-an-address
-            let mut data =
-                section.data_range(addr.address, (section.address + section.size) as u32)?;
+            let mut data = section.data_range(addr.address, section.address + section.size)?;
             let mut cur_addr = addr;
             loop {
                 let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));

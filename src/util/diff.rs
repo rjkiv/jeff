@@ -295,7 +295,7 @@ fn to_objdiff_symbol(
         name: symbol.name.clone(),
         demangled_name: symbol.demangled_name.clone(),
         address: symbol.address as u64,
-        section_address: (symbol.address - section.map(|s| s.address).unwrap_or(0) as u32) as u64,
+        section_address: (symbol.address - section.map(|s| s.address).unwrap_or(0)) as u64,
         size: symbol.size as u64,
         size_known: symbol.size_known,
         flags,

@@ -690,7 +690,7 @@ where R: BufRead + ?Sized {
                     }
                 }?;
                 let section = obj.sections.get_mut(section_index).unwrap();
-                let section_end = (section.address + section.size) as u32;
+                let section_end = section.address + section.size;
                 ensure!(
                     section.contains_range(start..end)
                         || (start == section_end && end == section_end),

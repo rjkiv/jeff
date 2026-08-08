@@ -22,7 +22,7 @@ fn create_gap_splits(obj: &mut ObjInfo) -> Result<()> {
     let mut new_splits = BTreeMap::<SectionAddress, ObjSplit>::new();
 
     for (section_index, section) in obj.sections.iter() {
-        let mut current_address = SectionAddress::new(section_index, section.address as u32);
+        let mut current_address = SectionAddress::new(section_index, section.address);
         let section_end = end_for_section(obj, section_index)?;
         let mut file_iter = section
             .splits
@@ -254,7 +254,7 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                 .peek()
                 .filter(|(i, _, _, _)| *i == section_index)
                 .map(|(_, _, addr, _)| *addr)
-                .unwrap_or((section.address + section.size) as u32);
+                .unwrap_or(section.address + section.size);
             let next_symbol_address = obj
                 .symbols
                 .for_section_range(section_index, addr + 1..next_split_address)
@@ -323,8 +323,8 @@ fn add_padding_symbols(obj: &mut ObjInfo) -> Result<()> {
                 } else {
                     (
                         section.name.as_str(),
-                        (section.address + section.size) as u32,
-                        (section.address + section.size) as u32,
+                        section.address + section.size,
+                        section.address + section.size,
                         1,
                     )
                 };
@@ -471,7 +471,7 @@ fn split_pdata(obj: &mut ObjInfo) -> Result<()> {
         }
     }
     let (pdata_idx, pdata_sec) = obj.sections.by_name(".pdata")?.unwrap();
-    let pdata_start = pdata_sec.address as u32;
+    let pdata_start = pdata_sec.address;
     let mut pdata_splits: BTreeMap<u32, ObjSplit> = BTreeMap::new();
 
     // for each code split you find, you must give the appropriate pdata bound for the obj
@@ -493,7 +493,7 @@ fn split_pdata(obj: &mut ObjInfo) -> Result<()> {
                 }
             }
             if split_start.is_some() && split_end.is_none() {
-                split_end = Some(pdata_start + pdata_sec.size as u32);
+                split_end = Some(pdata_start + pdata_sec.size);
             }
             if let (Some(start), Some(end)) = (split_start, split_end) {
                 if start != end {
@@ -666,7 +666,7 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
     }
 
     for (section_index, section) in obj.sections.iter() {
-        let mut current_address = SectionAddress::new(section_index, section.address as u32);
+        let mut current_address = SectionAddress::new(section_index, section.address);
         let section_end = end_for_section(obj, section_index)?;
         let mut split_iter = section
             .splits
@@ -829,21 +829,21 @@ pub fn split_obj(obj: &ObjInfo, module_name: Option<&str>) -> Result<Vec<ObjInfo
                     .unwrap_or(section.kind);
                 let data = match split_kind {
                     ObjSectionKind::Bss => vec![],
-                    _ => section.data[(current_address.address as u64 - section.address) as usize
-                        ..(split_end.address as u64 - section.address) as usize]
+                    _ => section.data[(current_address.address - section.address) as usize
+                        ..(split_end.address - section.address) as usize]
                         .to_vec(),
                 };
                 split_obj.sections.push(ObjSection {
                     name: split.rename.as_ref().unwrap_or(&section.name).clone(),
                     kind: split_kind,
                     address: 0,
-                    size: split_end.address as u64 - current_address.address as u64,
+                    size: split_end.address - current_address.address,
                     data,
                     align,
                     relocations: ObjRelocations::new(out_relocations)?,
-                    virtual_address: Some(current_address.address as u64),
+                    virtual_address: Some(current_address.address),
                     file_offset: section.file_offset
-                        + (current_address.address as u64 - section.address),
+                        + (current_address.address - section.address) as u64,
                     splits: Default::default(),
                 });
             }
@@ -932,7 +932,7 @@ pub fn end_for_section(obj: &ObjInfo, section_index: SectionIndex) -> Result<Sec
         .sections
         .get(section_index)
         .ok_or_else(|| anyhow!("Invalid section index: {}", section_index))?;
-    let section_end = (section.address + section.size) as u32;
+    let section_end = section.address + section.size;
     if section.data.is_empty() {
         return Ok(SectionAddress::new(section_index, section_end));
     }

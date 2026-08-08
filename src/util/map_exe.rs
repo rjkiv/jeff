@@ -583,7 +583,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                     let sec = &result.sections[sec_idx.0];
                                     let obj_section =
                                         obj.sections.get(sec.index - 1).expect("where section");
-                                    obj_section.address as u32 + sec.offset + sec.size
+                                    obj_section.address + sec.offset + sec.size
                                 }
                             }
                         }

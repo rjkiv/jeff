@@ -98,7 +98,7 @@ impl Executor {
             }
 
             // Already visited block
-            let section_address = section.address as u32;
+            let section_address = section.address;
             if self.visited.contains(section_address, state.address) {
                 continue;
             }

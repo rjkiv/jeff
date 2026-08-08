@@ -131,8 +131,8 @@ impl ObjInfo {
             .sections
             .get_mut(section_index)
             .ok_or_else(|| anyhow!("Invalid section index {}", section_index))?;
-        let section_start = section.address as u32;
-        let section_end = (section.address + section.size) as u32;
+        let section_start = section.address;
+        let section_end = section.address + section.size;
         ensure!(
             split.end == 0 || split.end <= section_end,
             "Split {} {:#010X}-{:#010X} is outside section {} {:#010X}-{:#010X}",
@@ -302,7 +302,7 @@ impl ObjInfo {
         self.sections
             .iter()
             .filter(|(_, section)| section.kind == ObjSectionKind::Code)
-            .map(|(_, section)| section.size as u32)
+            .map(|(_, section)| section.size)
             .sum()
     }
 
@@ -311,7 +311,7 @@ impl ObjInfo {
         self.sections
             .iter()
             .filter(|(_, section)| section.kind != ObjSectionKind::Code)
-            .map(|(_, section)| section.size as u32)
+            .map(|(_, section)| section.size)
             .chain(
                 // Include common symbols
                 self.symbols
