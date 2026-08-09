@@ -380,7 +380,7 @@ impl InputtedExecutable {
             });
             api_syms.push(ObjSymbol {
                 name: String::from("_RtlCheckStack12"),
-                address: (start.address + 4),
+                address: start.address + 4,
                 section: Some(start.section),
                 size: 36,
                 size_known: true,
@@ -392,6 +392,17 @@ impl InputtedExecutable {
         for sym in api_syms {
             obj.add_symbol(sym, false)?;
         }
+
+        // .rdata subsections:
+        // -.rdata: the regular ole .rdata we all know and love
+        // -.rdata$r: RTTI structures
+        // -.xdata: C exception scope table infos
+        // -.xdata$x: throw infos
+
+        // .data subsections:
+        // -.CRT: C runtime info
+        // some NUI thing
+        // -.data: the regular ole .data we all know and love
 
         // .XBMOVIE: matches up with ground truth...but it's mostly a sea of 0's
         // .idata: partially zero'ed out and offsetted from ground truth in debug, completely gone from release

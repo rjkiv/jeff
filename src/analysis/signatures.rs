@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use anyhow::{Ok, Result};
 
 use crate::{
     analysis::{
         cfa::SectionAddress,
+        read_u32,
         tracker::{Relocation, Tracker},
         RelocationTarget,
     },
@@ -119,7 +122,7 @@ fn get_relocs_for_function(
     Ok((rel24s, los))
 }
 
-fn parse_entry(obj: &mut ObjInfo) -> Result<bool> {
+fn parse_entry(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> Result<bool> {
     if let Some(entry) = obj.entry {
         let entry_addr = SectionAddress::new(obj.sections.at_address(entry)?.0, entry);
         let (rel24s, los) = get_relocs_for_function(obj, "entry", &entry_addr)?;
@@ -174,10 +177,13 @@ fn parse_entry(obj: &mut ObjInfo) -> Result<bool> {
         add_known_function_symbol(obj, "XapiPAL50Incompatible", &rel24s[3], None)?;
         add_known_function_symbol(obj, "_mtinit", &rel24s[5], None)?;
         add_known_function_symbol(obj, "_rtinit", &rel24s[6], None)?;
+        lookup.insert("_rtinit", rel24s[6]);
         add_known_function_symbol(obj, "_cinit", &rel24s[7], None)?;
+        lookup.insert("_cinit", rel24s[7]);
         add_known_function_symbol(obj, "GetCommandLineA", &rel24s[8], None)?;
         add_known_function_symbol(obj, "main", &rel24s[9], None)?;
         add_known_function_symbol(obj, "_cexit", &rel24s[10], Some(0xC))?;
+        lookup.insert("_cexit", rel24s[10]);
         add_known_function_symbol(obj, "UnhandledExceptionFilter", &rel24s[13], None)?;
 
         // Reloc at 4:0x82335EE4: Rel24(Address(4:0x8299D928)) - savegpr 28
@@ -195,31 +201,146 @@ fn parse_entry(obj: &mut ObjInfo) -> Result<bool> {
         // Reloc at 4:0x82336094: Rel24(Address(4:0x82EE5624)) - XamTerminateTitle
         // Reloc at 4:0x823360A4: Rel24(Address(4:0x823355F0)) - UnhandledExceptionFilter
 
-        return Ok(true);
+        Ok(true)
     } else {
-        return Ok(false);
+        Ok(false)
     }
 }
 
-fn parse_crt(obj: &mut ObjInfo) -> Result<()> {
+fn parse_crt(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> Result<()> {
     // will be called if entry point was successfully parsed
     // so we should be able to further analyze _rtinit, _cinit, _cexit - all in pdata
+
     // _rtinit will give us __xri_a and __xri_z
+    {
+        let (_, los) = get_relocs_for_function(obj, "_rtinit", &lookup["_rtinit"])?;
+        // should be 2 los (__xri_a/z)
+        if los.len() != 2 {
+            return Ok(());
+        }
+        let xri_a_addr = los[0];
+        let xri_z_addr = los[1];
+
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("__xri_a"),
+                address: xri_a_addr.address,
+                section: Some(xri_a_addr.section),
+                size: xri_z_addr.address - xri_a_addr.address,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Object,
+                ..Default::default()
+            },
+            false,
+        )?;
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("__xri_z"),
+                address: xri_z_addr.address,
+                section: Some(xri_z_addr.section),
+                size: 4,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Object,
+                ..Default::default()
+            },
+            false,
+        )?;
+
+        for addr in (xri_a_addr.address..xri_z_addr.address).step_by(4) {
+            match addr - xri_a_addr.address {
+                0 => {
+                    // first entry of xri_a - must be 0
+                    if read_u32(&obj.sections[xri_a_addr.section], addr).unwrap() != 0 {
+                        return Ok(());
+                    }
+                }
+                4 => {
+                    // second entry of xri_a - must be __onexitinit
+                    let exitinit_addr = {
+                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                    };
+                    add_known_function_symbol(obj, "__onexitinit", &exitinit_addr, None)?;
+                }
+                8 => {
+                    // third entry of xri_a - must be _ioinit
+                    let ioinit_addr = {
+                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                    };
+                    add_known_function_symbol(obj, "_ioinit", &ioinit_addr, None)?;
+                    let pioinit_addr = SectionAddress::new(xri_a_addr.section, addr);
+                    obj.add_symbol(
+                        ObjSymbol {
+                            name: String::from("__pioinit"),
+                            address: pioinit_addr.address,
+                            section: Some(pioinit_addr.section),
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
+                }
+                _ => {
+                    // any further entries are unknown to us, except for the fact they're functions
+                    let func_addr = {
+                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                    };
+                    obj.known_functions.entry(func_addr).or_default();
+                }
+            };
+        }
+    }
+
     // _cinit will give us __xi_a, __xi_z, __xc_a and __xc_z in that order
+    {
+        let (_, los) = get_relocs_for_function(obj, "_cinit", &lookup["_cinit"])?;
+        // should be 5 los (1 to rdata, __xi_a, __xi_z, __xc_a and __xc_z in that order)
+        if los.len() != 5 {
+            return Ok(());
+        }
+        let xi_a_addr = los[1];
+        let xi_z_addr = los[2];
+        let xc_a_addr = los[3];
+        let xc_z_addr = los[4];
+
+        let mut num_sinits = 0;
+        for addr in (xc_a_addr.address..xc_z_addr.address).step_by(4) {
+            let sinit_addr = read_u32(&obj.sections[xc_a_addr.section], addr).unwrap();
+            if sinit_addr != 0 {
+                let sinit_sec_addr =
+                    SectionAddress::new(obj.sections.at_address(sinit_addr)?.0, sinit_addr);
+                obj.known_functions.entry(sinit_sec_addr).or_default();
+                num_sinits += 1;
+            }
+        }
+        log::info!("Found {} known static initializer funcs!", num_sinits);
+    }
+
     // _cexit -> doexit (in pdata), which will give us __xp_a, __xp_z, __xt_a, __xt_z, and _initterm
 
     Ok(())
 }
 
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
+    let mut funcs_to_analyze: HashMap<&str, SectionAddress> = HashMap::new();
+
     // parse the entry point
-    if parse_entry(obj)? {
+    if parse_entry(obj, &mut funcs_to_analyze)? {
         println!("Let's keep going!");
-        parse_crt(obj)?;
+        parse_crt(obj, &mut funcs_to_analyze)?;
     }
+
+    // parse throw info and RTTI here?
 
     // more common funcs to search patterns of:
     // memset, memmove
+    // typeid, dynamic_cast
+
+    // move _RtlCheckStack/12 check here
 
     Ok(())
 }
