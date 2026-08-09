@@ -403,7 +403,7 @@ impl Tracker {
             bail!("Function '{}' missing section", symbol.name)
         };
         let function_start = SectionAddress::new(section_index, symbol.address);
-        let mut function_end = function_start + symbol.size;
+        let function_end = function_start + symbol.size;
         let _span =
             info_span!("fn", name = %symbol.name, start = %function_start, end = %function_end)
                 .entered();
@@ -431,12 +431,6 @@ impl Tracker {
                 );
             }
         } else if let Some(C { handlers }) = &obj.pdata_funcs.get(&function_start) {
-            // function_end should be the start of the very first exception handler
-            let Some((k, _v)) = handlers.first_key_value() else {
-                panic!("Func with C exception info has no exception info???");
-            };
-            function_end = *k;
-
             for start in handlers.keys() {
                 possible_missed_branches.insert(*start, VM::new());
             }
