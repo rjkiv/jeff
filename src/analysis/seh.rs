@@ -360,6 +360,8 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         },
                     });
                     // this is a known C++ function, but exceptions make it hard to deduce the ending
+                    // Note: if a func has both unwinds and catches, catches come first, then unwinds
+                    // unwinds don't always show up in pdata, so we can't reliably deduce the full func ending
                     obj.known_functions.insert(func_start_addr, None);
                     num_discovered_funcs += 1;
                 }
@@ -381,6 +383,11 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         for handler in c_func_handler_addrs {
             c_func_handler_bounds.insert(*handler, tmp_c_except_addrs[handler]);
         }
+        // this whole func's ending is at the end of the last C handler
+        let ending = c_func_handler_bounds.values().max().expect("No handlers?");
+        let full_c_func_size = ending.address - c_func.address;
+        // update the now-known ending of this C func
+        obj.known_functions.insert(*c_func, Some(full_c_func_size));
         obj.pdata_funcs.insert(*c_func, C { handlers: c_func_handler_bounds });
     }
 
@@ -403,7 +410,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
         // We should not have any known exception addrs in our listed known_functions
         assert!(!known_exception_addrs.contains(addr));
         // and if our function has unwinds and such, we should not have a confirmed ending
-        if matches!(obj.pdata_funcs.get(addr), Some(C { .. } | CXX { .. })) {
+        if matches!(obj.pdata_funcs.get(addr), Some(CXX { .. })) {
             assert!(ending.is_none());
         }
     }
