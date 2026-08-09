@@ -17,8 +17,9 @@ use crate::{
         RelocationTarget,
     },
     obj::{
-        ExceptionType::CXX, ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection,
-        ObjSectionKind, ObjSymbol, ObjSymbolKind, SectionIndex,
+        ExceptionType::{C, CXX},
+        ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
+        ObjSymbol, ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -402,7 +403,7 @@ impl Tracker {
             bail!("Function '{}' missing section", symbol.name)
         };
         let function_start = SectionAddress::new(section_index, symbol.address);
-        let function_end = function_start + symbol.size;
+        let mut function_end = function_start + symbol.size;
         let _span =
             info_span!("fn", name = %symbol.name, start = %function_start, end = %function_end)
                 .entered();
@@ -412,6 +413,7 @@ impl Tracker {
         let mut possible_missed_branches = BTreeMap::new();
 
         if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&function_start) {
+            // function end should be the start of the very first unwind or catch, whichever is first
             for unwind in cxx_eh_func_info.unwinds.iter().flatten() {
                 possible_missed_branches.insert(*unwind, VM::new());
             }
@@ -427,6 +429,16 @@ impl Tracker {
                     *catch - 4,
                     Relocation::Absolute(RelocationTarget::Address(cxx_eh_func_info.addr)),
                 );
+            }
+        } else if let Some(C { handlers }) = &obj.pdata_funcs.get(&function_start) {
+            // function_end should be the start of the very first exception handler
+            let Some((k, _v)) = handlers.first_key_value() else {
+                panic!("Func with C exception info has no exception info???");
+            };
+            function_end = *k;
+
+            for start in handlers.keys() {
+                possible_missed_branches.insert(*start, VM::new());
             }
         }
 

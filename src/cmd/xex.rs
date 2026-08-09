@@ -24,6 +24,7 @@ use crate::{
         cfa::AnalyzerState,
         objects::{detect_objects, detect_strings},
         pass::{AnalysisPass, FindSaveRestSledsXbox},
+        signatures::apply_signatures,
         tracker::Tracker,
     },
     cmd::dol::{
@@ -428,6 +429,23 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 
     // Apply block relocations from config
     apply_block_relocations(&mut obj, &config.base.block_relocations)?;
+
+    if !config.symbols_known {
+        // TODO: perform signature analysis here
+        // start by analyzing function calls and references in entry
+        // https://github.com/encounter/decomp-toolkit/blob/main/src/analysis/signatures.rs#L394
+        apply_signatures(&mut obj)?;
+
+        if !config.quick_analysis {
+            let mut state = AnalyzerState::default();
+            debug!("Detecting function boundaries");
+            FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+            state.detect_functions(&obj)?; // perform CFA
+            state.apply(&mut obj)?; // give each found function a symbol
+        }
+
+        // apply_signatures_post(&mut obj)?;
+    }
 
     if !config.symbols_known && !config.quick_analysis {
         let mut state = AnalyzerState::default();
