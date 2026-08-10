@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{Ok, Result};
+use anyhow::{ensure, Ok, Result};
 
 use crate::{
     analysis::{
@@ -100,8 +100,21 @@ fn get_relocs_for_function(
                 };
                 main_body_ending.address - addr.address
             }
-            // if func is not in pdata, we can't reliably deduce function end at this point - empty vecs returned
-            _ => return Ok((vec![], vec![])),
+            None => {
+                // check obj's symbols - we might've added this symbol in beforehand
+                // otherwise, we can't reliably deduce function end at this point - empty vecs returned
+                if let Some((_, sym)) =
+                    obj.symbols.at_section_address(addr.section, addr.address).next()
+                {
+                    if sym.size_known {
+                        sym.size
+                    } else {
+                        return Ok((vec![], vec![]));
+                    }
+                } else {
+                    return Ok((vec![], vec![]));
+                }
+            }
         },
         ..Default::default()
     };
@@ -212,115 +225,231 @@ fn parse_crt(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> R
     // so we should be able to further analyze _rtinit, _cinit, _cexit - all in pdata
 
     // _rtinit will give us __xri_a and __xri_z
-    {
-        let (_, los) = get_relocs_for_function(obj, "_rtinit", &lookup["_rtinit"])?;
-        // should be 2 los (__xri_a/z)
-        if los.len() != 2 {
-            return Ok(());
-        }
-        let xri_a_addr = los[0];
-        let xri_z_addr = los[1];
+    let (_, los) = get_relocs_for_function(obj, "_rtinit", &lookup["_rtinit"])?;
+    // should be 2 los (__xri_a/z)
+    ensure!(los.len() == 2, "bad _rtinit!");
+    let xri_a_addr = los[0];
+    let xri_z_addr = los[1];
 
-        obj.add_symbol(
-            ObjSymbol {
-                name: String::from("__xri_a"),
-                address: xri_a_addr.address,
-                section: Some(xri_a_addr.section),
-                size: xri_z_addr.address - xri_a_addr.address,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Object,
-                ..Default::default()
-            },
-            false,
-        )?;
-        obj.add_symbol(
-            ObjSymbol {
-                name: String::from("__xri_z"),
-                address: xri_z_addr.address,
-                section: Some(xri_z_addr.section),
-                size: 4,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Object,
-                ..Default::default()
-            },
-            false,
-        )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xri_a"),
+            address: xri_a_addr.address,
+            section: Some(xri_a_addr.section),
+            size: xri_z_addr.address - xri_a_addr.address,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xri_z"),
+            address: xri_z_addr.address,
+            section: Some(xri_z_addr.section),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
 
-        for addr in (xri_a_addr.address..xri_z_addr.address).step_by(4) {
-            match addr - xri_a_addr.address {
-                0 => {
-                    // first entry of xri_a - must be 0
-                    if read_u32(&obj.sections[xri_a_addr.section], addr).unwrap() != 0 {
-                        return Ok(());
-                    }
-                }
-                4 => {
-                    // second entry of xri_a - must be __onexitinit
-                    let exitinit_addr = {
-                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
-                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
-                    };
-                    add_known_function_symbol(obj, "__onexitinit", &exitinit_addr, None)?;
-                }
-                8 => {
-                    // third entry of xri_a - must be _ioinit
-                    let ioinit_addr = {
-                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
-                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
-                    };
-                    add_known_function_symbol(obj, "_ioinit", &ioinit_addr, None)?;
-                    let pioinit_addr = SectionAddress::new(xri_a_addr.section, addr);
-                    obj.add_symbol(
-                        ObjSymbol {
-                            name: String::from("__pioinit"),
-                            address: pioinit_addr.address,
-                            section: Some(pioinit_addr.section),
-                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                            ..Default::default()
-                        },
-                        false,
-                    )?;
-                }
-                _ => {
-                    // any further entries are unknown to us, except for the fact they're functions
-                    let func_addr = {
-                        let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
-                        SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
-                    };
-                    obj.known_functions.entry(func_addr).or_default();
-                }
-            };
-        }
+    for addr in (xri_a_addr.address..xri_z_addr.address).step_by(4) {
+        match addr - xri_a_addr.address {
+            0 => {
+                // first entry of xri_a - must be 0
+                ensure!(
+                    read_u32(&obj.sections[xri_a_addr.section], addr).unwrap() == 0,
+                    "bad __xri_a!"
+                );
+            }
+            4 => {
+                // second entry of xri_a - must be __onexitinit
+                let exitinit_addr = {
+                    let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                add_known_function_symbol(obj, "__onexitinit", &exitinit_addr, None)?;
+            }
+            8 => {
+                // third entry of xri_a - must be _ioinit
+                let ioinit_addr = {
+                    let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                add_known_function_symbol(obj, "_ioinit", &ioinit_addr, None)?;
+                let pioinit_addr = SectionAddress::new(xri_a_addr.section, addr);
+                obj.add_symbol(
+                    ObjSymbol {
+                        name: String::from("__pioinit"),
+                        address: pioinit_addr.address,
+                        section: Some(pioinit_addr.section),
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
+            _ => {
+                // any further entries are unknown to us, except for the fact they're functions
+                let func_addr = {
+                    let addr = read_u32(&obj.sections[xri_a_addr.section], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                obj.known_functions.entry(func_addr).or_default();
+            }
+        };
     }
 
     // _cinit will give us __xi_a, __xi_z, __xc_a and __xc_z in that order
-    {
-        let (_, los) = get_relocs_for_function(obj, "_cinit", &lookup["_cinit"])?;
-        // should be 5 los (1 to rdata, __xi_a, __xi_z, __xc_a and __xc_z in that order)
-        if los.len() != 5 {
-            return Ok(());
-        }
-        let xi_a_addr = los[1];
-        let xi_z_addr = los[2];
-        let xc_a_addr = los[3];
-        let xc_z_addr = los[4];
+    let (_, los) = get_relocs_for_function(obj, "_cinit", &lookup["_cinit"])?;
+    // should be 5 los (1 to rdata, __xi_a, __xi_z, __xc_a and __xc_z in that order)
+    ensure!(los.len() == 5, "bad _cinit!");
+    let xi_a_addr = los[1];
+    let xi_z_addr = los[2];
+    let xc_a_addr = los[3];
+    let xc_z_addr = los[4];
 
-        let mut num_sinits = 0;
-        for addr in (xc_a_addr.address..xc_z_addr.address).step_by(4) {
-            let sinit_addr = read_u32(&obj.sections[xc_a_addr.section], addr).unwrap();
-            if sinit_addr != 0 {
-                let sinit_sec_addr =
-                    SectionAddress::new(obj.sections.at_address(sinit_addr)?.0, sinit_addr);
-                obj.known_functions.entry(sinit_sec_addr).or_default();
-                num_sinits += 1;
-            }
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xc_a"),
+            address: xc_a_addr.address,
+            section: Some(xc_a_addr.section),
+            size: xc_z_addr.address - xc_a_addr.address,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xc_z"),
+            address: xc_z_addr.address,
+            section: Some(xc_z_addr.section),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xi_a"),
+            address: xi_a_addr.address,
+            section: Some(xi_a_addr.section),
+            size: xi_z_addr.address - xi_a_addr.address,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xi_z"),
+            address: xi_z_addr.address,
+            section: Some(xi_z_addr.section),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+
+    let mut num_sinits = 0;
+    for addr in (xc_a_addr.address..xc_z_addr.address).step_by(4) {
+        let sinit_addr = read_u32(&obj.sections[xc_a_addr.section], addr).unwrap();
+        if sinit_addr != 0 {
+            let sinit_sec_addr =
+                SectionAddress::new(obj.sections.at_address(sinit_addr)?.0, sinit_addr);
+            obj.known_functions.entry(sinit_sec_addr).or_default();
+            num_sinits += 1;
         }
-        log::info!("Found {} known static initializer funcs!", num_sinits);
     }
+    log::info!("Found {} known static initializer funcs!", num_sinits);
 
-    // _cexit -> doexit (in pdata), which will give us __xp_a, __xp_z, __xt_a, __xt_z, and _initterm
+    // TODO: add funcs from __xi_a/__xi_z and determine if we can give them hard names
+
+    // _cexit -> doexit (in pdata), which will give us __xp_a, __xp_z, __xt_a, __xt_z
+
+    let (doexitrel, _) = get_relocs_for_function(obj, "_cexit", &lookup["_cexit"])?;
+    // should only be 1 rel to doexit
+    ensure!(doexitrel.len() == 1, "bad _cexit!");
+    add_known_function_symbol(obj, "doexit", &doexitrel[0], None)?;
+    let (_, los) = get_relocs_for_function(obj, "doexit", &doexitrel[0])?;
+    ensure!(los.len() >= 4, "bad doexit!"); // we only want the last 4, those are our xp/xt's
+    let remaining_vars = &los[los.len() - 4..];
+    ensure!(remaining_vars[1] == xi_z_addr + 4, "bad doexit!");
+    let xp_a_addr = remaining_vars[0].min(remaining_vars[1]);
+    let xp_z_addr = remaining_vars[0].max(remaining_vars[1]);
+    let xt_a_addr = remaining_vars[2].min(remaining_vars[3]);
+    let xt_z_addr = remaining_vars[2].max(remaining_vars[3]);
+
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xp_a"),
+            address: xp_a_addr.address,
+            section: Some(xp_a_addr.section),
+            size: xp_z_addr.address - xp_a_addr.address,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xp_z"),
+            address: xp_z_addr.address,
+            section: Some(xp_z_addr.section),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xt_a"),
+            address: xt_a_addr.address,
+            section: Some(xt_a_addr.section),
+            size: xt_z_addr.address - xt_a_addr.address,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("__xt_z"),
+            address: xt_z_addr.address,
+            section: Some(xt_z_addr.section),
+            size: 4,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Object,
+            ..Default::default()
+        },
+        false,
+    )?;
+
+    // todo mark addrs in xp/xt
 
     Ok(())
 }
@@ -330,14 +459,14 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
 
     // parse the entry point
     if parse_entry(obj, &mut funcs_to_analyze)? {
-        println!("Let's keep going!");
+        // then CRT objects
         parse_crt(obj, &mut funcs_to_analyze)?;
     }
 
     // parse throw info and RTTI here?
 
     // more common funcs to search patterns of:
-    // memset, memmove
+    // memset, memmove, _initterm/e
     // typeid, dynamic_cast
 
     // move _RtlCheckStack/12 check here
