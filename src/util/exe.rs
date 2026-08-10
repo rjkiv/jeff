@@ -1,6 +1,7 @@
 use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
 use anyhow::{bail, ensure, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use memchr::memmem;
 use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
 use typed_path::Utf8NativePathBuf;
@@ -352,17 +353,12 @@ impl InputtedExecutable {
         process_xidata(&mut obj)?;
         process_rtti(&mut obj)?;
 
-        const RTL_CHECK_STACK: [u8; 40] = [
-            // _RtlCheckStack
-            0x7d, 0x83, 0x00, 0xd0, // _RtlCheckStack12
-            0x7d, 0x6c, 0x00, 0xd0, 0x38, 0x0b, 0x0f, 0xff, 0x7c, 0x00, 0x66, 0x71, 0x4c, 0x81,
-            0x00, 0x20, 0x7c, 0x2b, 0x0b, 0x78, 0x7c, 0x09, 0x03, 0xa6, 0x84, 0x0b, 0xf0, 0x00,
-            0x42, 0x00, 0xff, 0xfc, 0x4e, 0x80, 0x00, 0x20,
-        ];
+        const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
+        let rtl_bytes = STANDARD.decode(RTL_CHECK_STACK)?;
 
         let mut api_syms: Vec<ObjSymbol> = vec![];
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
-            let Some(pos) = memmem::find(&section.data, &RTL_CHECK_STACK) else {
+            let Some(pos) = memmem::find(&section.data, &rtl_bytes) else {
                 continue;
             };
             let start = SectionAddress::new(section_index, section.address + pos as u32);

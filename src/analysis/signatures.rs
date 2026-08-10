@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::{ensure, Ok, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use memchr::memmem;
 
 use crate::{
     analysis::{
@@ -11,8 +13,8 @@ use crate::{
     },
     obj::{
         ExceptionType::{Normal, C, CXX},
-        ObjDataKind, ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
-        SymbolIndex,
+        ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
+        ObjSymbolKind, SymbolIndex,
     },
 };
 
@@ -390,7 +392,6 @@ fn parse_crt(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> R
     let (_, los) = get_relocs_for_function(obj, "doexit", &doexitrel[0])?;
     ensure!(los.len() >= 4, "bad doexit!"); // we only want the last 4, those are our xp/xt's
     let remaining_vars = &los[los.len() - 4..];
-    ensure!(remaining_vars[1] == xi_z_addr + 4, "bad doexit!");
     let xp_a_addr = remaining_vars[0].min(remaining_vars[1]);
     let xp_z_addr = remaining_vars[0].max(remaining_vars[1]);
     let xt_a_addr = remaining_vars[2].min(remaining_vars[3]);
@@ -454,20 +455,58 @@ fn parse_crt(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> R
     Ok(())
 }
 
+const FUNCTION_SIGNATURES: [(&str, u32, &str); 1] = [("_CxxThrowException", 0x84, "fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////")];
+
+// will probably modify these to go into FUNCTION_SIGNATURES, dunno yet, still experimenting
+const FUNCTION_BYTES: [(&str, u32, &str); 3] = [
+    ("memset", 0xA0, "OAUAAXwJA6ZgZgAASAAAEDil//+YhgAAOMYAAXDAAANAAv/wUIRELlSg4T9QhIAeQeIAIHwJA6aQhgAAkIYABJCGAAiQhgAMOMYAEEMg/+xUoPe/QcIAKHwJA6aQhgAAOMYABENAABiQhgAAOMYABENAAAyQhgAAOMYABHCgAAN8CQOmTeIAIJiGAABPQAAgmIYAAU9AACCYhgACToAAIA=="),
+    ("_initterm", 0x58, "fYgCppGB//j7wf/o++H/8JQh/5B8fxt4fJ4jeEgAAByBfwAAKwsAAEGaAAx9aQOmToAEITv/AAR/H/BAQZj/5DghAHCBgf/4fYgDpuvB/+jr4f/wToAAIA=="),
+    ("_initterm", 0x58, "fYgCppGB//j7wf/o++H/8JQh/5B8fxt4fJ4jeEgAAByBfwAAKAsAAEGCAAx9aQOmToAEITv/AAR/H/BAQZj/5DghAHCBgf/4fYgDpuvB/+jr4f/wToAAIA=="),
+];
+
+fn match_function_bytes(obj: &mut ObjInfo) -> Result<()> {
+    let mut syms_to_add: Vec<(&str, u32, SectionAddress)> = vec![];
+    for (func_name, func_size, func_str) in FUNCTION_BYTES {
+        let func_bytes = STANDARD.decode(func_str)?;
+        for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
+            if let Some(pos) = memmem::find(&section.data, &func_bytes) {
+                let func_start_addr =
+                    SectionAddress::new(section_index, section.address + pos as u32);
+                syms_to_add.push((func_name, func_size, func_start_addr));
+                break;
+            }
+        }
+    }
+    for (func_name, func_size, func_start_addr) in syms_to_add {
+        add_known_function_symbol(obj, func_name, &func_start_addr, Some(func_size))?;
+    }
+    Ok(())
+}
+
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     let mut funcs_to_analyze: HashMap<&str, SectionAddress> = HashMap::new();
 
     // parse the entry point
     if parse_entry(obj, &mut funcs_to_analyze)? {
-        // then CRT objects
+        // then CRT objects using the funcs we found from the entry point
         parse_crt(obj, &mut funcs_to_analyze)?;
     }
 
+    // match funcs with exact bytes here
+    match_function_bytes(obj)?;
+    // match funcs with looser signatures here
+
     // parse throw info and RTTI here?
+    // if, after the C scope tables, there's still .rdata left, check for _CxxThrowException, then throw info
+    // _CxxThrowException is in pdata, Normal exception type
 
     // more common funcs to search patterns of:
-    // memset, memmove, _initterm/e
-    // typeid, dynamic_cast
+    // memmove, strncmp
+
+    // if we have RTTI, these two *should* exist somewhere:
+    // typeid - is a C except func with one exception
+    // dynamic_cast - is a C except func with one exception
+    // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
 
     // move _RtlCheckStack/12 check here
 

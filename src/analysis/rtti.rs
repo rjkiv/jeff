@@ -551,7 +551,7 @@ pub fn process_rtti(obj: &mut ObjInfo) -> Result<()> {
         return Ok(());
     }
 
-    log::info!("Found {} classes from RTTI!\n", rtti_metadata.discovered_classes.len());
+    log::info!("Found {} classes from RTTI!", rtti_metadata.discovered_classes.len());
 
     // if we've reached this point, we have a full set of RTTI objects and their relationships
     // and everything except for COLs and vftables have been labeled
