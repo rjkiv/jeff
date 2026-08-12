@@ -91,6 +91,7 @@ enum SubCommand {
     Demangle(cmd::demangle::Args),
     Map(cmd::map::Args),
     Xex(cmd::xex::Args),
+    Pngs(cmd::pngs::Args),
 }
 
 // Duplicated from supports-color so we can check early.
@@ -151,6 +152,7 @@ fn main() {
         SubCommand::Demangle(c_args) => cmd::demangle::run(c_args),
         SubCommand::Map(c_args) => cmd::map::run(c_args),
         SubCommand::Xex(c_args) => cmd::xex::run(c_args),
+        SubCommand::Pngs(c_args) => cmd::pngs::run(c_args),
     });
     if let Err(e) = result {
         eprintln!("Failed: {e:?}");
