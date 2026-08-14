@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::{ensure, Ok, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use memchr::memmem;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     analysis::{
@@ -200,6 +201,10 @@ fn parse_entry(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) ->
         add_known_function_symbol(obj, "_cexit", &rel24s[10], Some(0xC))?;
         lookup.insert("_cexit", rel24s[10]);
         add_known_function_symbol(obj, "UnhandledExceptionFilter", &rel24s[13], None)?;
+
+        let (r, l) = get_relocs_for_function(obj, "XapiInitProcess", &rel24s[1])?;
+        let (r, l) = get_relocs_for_function(obj, "XapiInitHeap", &r[0])?;
+        println!("{} {}", r.len(), l.len());
 
         // Reloc at 4:0x82335EE4: Rel24(Address(4:0x8299D928)) - savegpr 28
         // Reloc at 4:0x82335F14: Rel24(Address(4:0x82336AF0)) - XapiInitProcess
@@ -455,7 +460,11 @@ fn parse_crt(obj: &mut ObjInfo, lookup: &mut HashMap<&str, SectionAddress>) -> R
     Ok(())
 }
 
-const FUNCTION_SIGNATURES: [(&str, u32, &str); 1] = [("_CxxThrowException", 0x84, "fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////")];
+const FUNCTION_SIGNATURES: [(&str, u32, &str); 3] = [
+    ("_CxxThrowException", 0x84, "fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////"),
+    ("_initterm", 0x58, "fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf+Q/////3x/G3j/////fJ4jeP////9IAAAc/////4F/AAD/////KAsAAPw///9BggAM/+f//31pA6b/////ToAEIf////87/wAE/////38f8ED/////QZj/5P////84IQBw/////4GB//j/////fYgDpv/////rwf/o/////+vh//D/////ToAAIP////8="),
+    ("memset", 0xA0, "OAUAAf////98CQOm/////2BmAAD/////SAAAEP////84pf///////5iGAAD/////OMYAAf////9wwAAD/////0AC//D/////UIRELv////9UoOE//////1CEgB7/////QeIAIP////98CQOm/////5CGAAD/////kIYABP////+QhgAI/////5CGAAz/////OMYAEP////9DIP/s/////1Sg97//////QcIAKP////98CQOm/////5CGAAD/////OMYABP////9DQAAY/////5CGAAD/////OMYABP////9DQAAM/////5CGAAD/////OMYABP////9woAAD/////3wJA6b/////TeIAIP////+YhgAA/////09AACD/////mIYAAf////9PQAAg/////5iGAAL/////ToAAIP////8=")
+];
 
 // will probably modify these to go into FUNCTION_SIGNATURES, dunno yet, still experimenting
 const FUNCTION_BYTES: [(&str, u32, &str); 3] = [
@@ -483,14 +492,192 @@ fn match_function_bytes(obj: &mut ObjInfo) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+struct OutReference {
+    pub name: String,
+    #[serde(default)]
+    pub kind: ObjSymbolKind,
+    #[serde(default)]
+    pub size: u32,
+    #[serde(default)]
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+struct FunctionSignature {
+    pub name: String,
+    #[serde(default)]
+    pub pdata_type: u8,
+    #[serde(default)]
+    pub num_handlers: u8,
+    #[serde(default)]
+    pub size: u32,
+    #[serde(default)]
+    pub signature: String,
+    #[serde(default)]
+    pub references: Vec<OutReference>,
+}
+
+// you pass in a function's name and address, and this'll give you the relevant relocs for mapping/labeling
+fn get_function_references(
+    obj: &ObjInfo,
+    name: &str,
+    addr: &SectionAddress,
+) -> Result<Vec<SectionAddress>> {
+    let mut tracker = Tracker::new(obj);
+    // the symbol being passed into process_function only needs a name, address, section, and size
+    let tracker_sym = ObjSymbol {
+        name: String::from(name),
+        address: addr.address,
+        section: Some(addr.section),
+        size: match &obj.pdata_funcs.get(addr) {
+            Some(Normal { end }) => end.address - addr.address,
+            Some(C { handlers }) => {
+                // the end of the main function body == the start of the first C handler
+                let Some((k, _)) = handlers.first_key_value() else {
+                    panic!("entry doesn't have C handlers?");
+                };
+                k.address - addr.address
+            }
+            Some(CXX { info }) => {
+                let first_unwind = info.unwinds.iter().filter_map(|x| *x).min();
+                let first_catch = info.catches.iter().filter_map(|x| *x).min();
+                let main_body_ending = match (first_unwind, first_catch) {
+                    (Some(unwind), Some(catch)) => unwind.min(catch),
+                    (Some(unwind), None) => unwind,
+                    (None, Some(catch)) => catch,
+                    _ => return Ok(vec![]),
+                };
+                main_body_ending.address - addr.address
+            }
+            None => {
+                // check obj's symbols - we might've added this symbol in beforehand
+                // otherwise, we can't reliably deduce function end at this point - empty vecs returned
+                if let Some((_, sym)) =
+                    obj.symbols.at_section_address(addr.section, addr.address).next()
+                {
+                    if sym.size_known {
+                        sym.size
+                    } else {
+                        return Ok(vec![]);
+                    }
+                } else {
+                    return Ok(vec![]);
+                }
+            }
+        },
+        ..Default::default()
+    };
+    tracker.process_function(obj, &tracker_sym)?;
+    let mut refs = vec![];
+    for reloc in tracker.relocations.values() {
+        match reloc {
+            Relocation::Rel24(RelocationTarget::Address(a)) => {
+                refs.push(*a);
+            }
+            Relocation::Lo(RelocationTarget::Address(a)) => {
+                refs.push(*a);
+            }
+            _ => {}
+        }
+    }
+    Ok(refs)
+}
+
+fn add_symbol_from_reference(
+    obj: &mut ObjInfo,
+    addr: &SectionAddress,
+    reference: &OutReference,
+) -> Result<SymbolIndex> {
+    // deduce a symbol size from our known_functions (or pdata for C++)
+    let symbol_size = {
+        let mut size = reference.size;
+        if size == 0 {
+            // Normal and C funcs should have a size value in known_functions
+            if let Some(size_option) = obj.known_functions.get(addr) {
+                if let Some(s) = size_option {
+                    size = *s;
+                }
+                // we have to search for C++ info from pdata
+                else if let Some(CXX { info }) = obj.pdata_funcs.get(addr) {
+                    let first_unwind = info.unwinds.iter().filter_map(|x| *x).max();
+                    let first_catch = info.catches.iter().filter_map(|x| *x).max();
+                    // if there are catches and zero unwinds, we have a known ending
+                    if let (None, Some(catch)) = (first_unwind, first_catch) {
+                        size = obj.catches.get(&catch).unwrap().address - addr.address;
+                    }
+                }
+            }
+        }
+        size
+    };
+    obj.add_symbol(
+        ObjSymbol {
+            name: reference.name.clone(),
+            address: addr.address,
+            section: Some(addr.section),
+            size: symbol_size,
+            size_known: symbol_size != 0,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: reference.kind,
+            ..Default::default()
+        },
+        false,
+    )
+}
+
+fn try_parse_entry(obj: &mut ObjInfo) -> Result<bool> {
+    let Some(entry) = obj.entry else {
+        return Ok(false);
+    };
+    let entry_yml = include_str!("../../assets/signatures_x360/entry.yml");
+    let entry_sig = {
+        let sigs: Vec<FunctionSignature> = serde_yaml::from_str(entry_yml)?;
+        sigs[0].clone()
+    };
+    let entry_addr = SectionAddress::new(obj.sections.at_address(entry)?.0, entry);
+    let refs = get_function_references(obj, "entry", &entry_addr)?;
+    if entry_sig.references.len() != refs.len() || refs.len() != 18 {
+        return Ok(false);
+    }
+
+    // skip 0, 6, 15, 16
+    for i in 1..refs.len() {
+        // skipped 0 because it's a reg intrinsic that we'll find later
+        // 6, 15 and 16 are all xex imports
+        if i == 6 || i == 15 || i == 16 {
+            continue;
+        }
+        add_symbol_from_reference(obj, &refs[i], &entry_sig.references[i])?;
+    }
+
+    Ok(true)
+}
+
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     let mut funcs_to_analyze: HashMap<&str, SectionAddress> = HashMap::new();
+
+    if try_parse_entry(obj)? {
+        println!("Entry successfully parsed!");
+    }
+
+    return Ok(());
 
     // parse the entry point
     if parse_entry(obj, &mut funcs_to_analyze)? {
         // then CRT objects using the funcs we found from the entry point
         parse_crt(obj, &mut funcs_to_analyze)?;
+
+        // get calloc and _errno from what we've parsed up to this point
     }
+
+    // NOTE: a lot of these come from pdata, we can use that as a starting point or reference
+    // like, filter by exception type, size range, a set of instructions you know will appear in there
+
+    // _initterm is also in pdata
+    // _purecall is in pdata, size:0x4C
+    // strstr, atexit
+    // isalpha and all the other char checkers
 
     // match funcs with exact bytes here
     match_function_bytes(obj)?;
@@ -502,11 +689,15 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
 
     // more common funcs to search patterns of:
     // memmove, strncmp
+    // in pdata: malloc, free, errno, printf
 
     // if we have RTTI, these two *should* exist somewhere:
     // typeid - is a C except func with one exception
     // dynamic_cast - is a C except func with one exception
     // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
+
+    // XGetOverlappedResult
+    // CreateThread
 
     // move _RtlCheckStack/12 check here
 

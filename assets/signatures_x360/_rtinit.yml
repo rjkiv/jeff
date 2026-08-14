@@ -1,13 +1,10 @@
 - name: _rtinit
 - pdata_type: 1 # Normal - in pdata, no exceptions
-  num_handlers: 0
   size: 0x6C
   signature: fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf+Q/////z1gglD//wAAPUCCUP//AAA5awAA//8AADvKAAz//wAAfV9TeP/f9/84YAAA/////38K8ED//v//QJgALP////8vAwAA/////0CaACT/////gX8AAP////8oCwAA/H///0GCAAz/5///fWkDpv////9OgAQh/////zv/AAT/////fx/wQP////9BmP/c/////zghAHD/////gYH/+P////99iAOm/////+vB/+j/////6+H/8P////9OgAAg/////w==
   references:
     - name: __xri_a
       kind: Object
-      optional: false
     - name: __xri_z
       kind: Object
       size: 0x4
-      optional: false
