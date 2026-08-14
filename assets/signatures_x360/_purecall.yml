@@ -1,0 +1,19 @@
+- name: _purecall
+  pdata_type: 0 # None - not in pdata
+  num_handlers: 0 # None - not in pdata
+  size: 0x4C
+  signature: fYgCpv////+Rgf/4/////5Qh/6D/////PWAAAP//AACBawAA//8AACgLAAD/////QYIADP////99aQOm/////06ABCH/////OGAAGf////9IAAAB/AAAAziAAAH/////OGAAAP////9IAAAB/AAAA0gAAAH8AAADOCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+  references:
+    - name: __pPurecall
+      kind: Object
+      size: 4
+      optional: false
+    - name: _NMSG_WRITE
+      kind: Function
+      optional: false
+    - name: _set_abort_behavior
+      kind: Function
+      optional: false
+    - name: abort
+      kind: Function
+      optional: false

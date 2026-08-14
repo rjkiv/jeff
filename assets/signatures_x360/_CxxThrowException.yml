@@ -1,0 +1,16 @@
+- name: _CxxThrowException
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  num_handlers: 0
+  size: 0x84
+  signature: fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////
+  references:
+    - name: THE_GLOBAL_EXCEPTION_RECORD # idk the name this is a complete guess
+      kind: Object
+      size: 0x20
+      optional: false
+    - name: memcpy
+      kind: Function
+      optional: false
+    - name: RaiseException
+      kind: Function
+      optional: false
