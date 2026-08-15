@@ -1,4 +1,4 @@
-- name: _rtinit
+- name: _cinit
   pdata_type: 1 # Normal - in pdata, no exceptions
   # we can't have a concrete size/signature because some xexes use reg intrinsics while others don't
   references:
@@ -6,9 +6,17 @@
       size: 0x4
       optional: true
       skip: true
-    - name: __xri_a
+    - name: _FPinit
       kind: Object
-    - name: __xri_z
+      size: 0x4
+    - name: __xi_a
+      kind: Object
+    - name: __xi_z
+      kind: Object
+      size: 0x4
+    - name: __xc_a
+      kind: Object
+    - name: __xc_z
       kind: Object
       size: 0x4
     - name: __restgprlr_29

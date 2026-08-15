@@ -5,6 +5,7 @@
   references:
     - name: __savegprlr_28
       size: 0x4
+      skip: true
     - name: __onexitend
       kind: Object
       size: 0x4
@@ -19,7 +20,7 @@
       kind: Function
     - name: XamTerminateTitle
       kind: Function
-      # TODO: add flag for being an import?
+      skip: true
     - name: _mtinit
       kind: Function
     - name: _rtinit
@@ -41,8 +42,9 @@
       size: 0x18
     - name: DbgPrint
       kind: Function
+      skip: true
     - name: XamTerminateTitle
       kind: Function
-      # TODO: add flag for being an import?
+      skip: true
     - name: UnhandledExceptionFilter
       kind: Function
