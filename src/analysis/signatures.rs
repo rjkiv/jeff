@@ -19,10 +19,12 @@ use crate::{
     },
 };
 
-const SIGNATURES: [(&str, &str); 4] = [
+const SIGNATURES: [(&str, &str); 6] = [
     ("mainCRTStartup", include_str!("../../assets/signatures_x360/entry.yml")),
     ("_rtinit", include_str!("../../assets/signatures_x360/_rtinit.yml")),
     ("_cinit", include_str!("../../assets/signatures_x360/_cinit.yml")),
+    ("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml")),
+    ("doexit", include_str!("../../assets/signatures_x360/doexit.yml")),
     ("memset", include_str!("../../assets/signatures_x360/memset.yml")),
 ];
 
@@ -295,6 +297,10 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
         // then CRT objects using the funcs we found from the entry point
         apply_signature(obj, "_rtinit")?;
         apply_signature(obj, "_cinit")?;
+        apply_signature(obj, "_cexit")?;
+        apply_signature(obj, "doexit")?;
+
+        // after all that's been applied, peruse through the xa/z's
     }
 
     return Ok(());

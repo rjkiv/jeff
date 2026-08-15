@@ -1,0 +1,6 @@
+- name: _cexit
+  size: 0xC
+  signature: OIAAAf////84YAAA/////0gAAAD8AAAA
+  references:
+    - name: doexit
+      kind: Function
