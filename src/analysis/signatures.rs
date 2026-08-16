@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::{ensure, Ok, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use memchr::memmem;
@@ -14,8 +12,9 @@ use crate::{
     },
     obj::{
         ExceptionType::{Normal, C, CXX},
-        ObjDataKind, ObjInfo, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
-        ObjSymbolKind, SymbolIndex,
+        ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
+        ObjSymbolKind::{Function, Object},
+        SymbolIndex,
     },
 };
 
@@ -291,6 +290,172 @@ fn check_signature(obj: &ObjInfo, addr: u32, size: u32, sig: &String) -> Result<
     Ok(true)
 }
 
+fn process_crt(obj: &mut ObjInfo) -> Result<()> {
+    let data_sec_idx = obj.sections.by_name(".data")?.expect("where data").0;
+
+    // xri - runtime initializers?
+    let (xri_start, xri_end) = {
+        let (xria_sym_idx, xria_sym) =
+            obj.symbols.by_name("__xri_a")?.expect("we should've found __xri_a at this point!");
+        let xriz_sym =
+            obj.symbols.by_name("__xri_z")?.expect("we should've found __xri_z at this point!").1;
+        let xri_start = xria_sym.address;
+        let xri_end = xriz_sym.address;
+        let mut new_sym = xria_sym.clone();
+        new_sym.size = xri_end - xri_start;
+        new_sym.size_known = true;
+        obj.symbols.replace(xria_sym_idx, new_sym)?;
+        (xri_start, xri_end)
+    };
+
+    for addr in (xri_start..xri_end).step_by(4) {
+        match addr - xri_start {
+            0 => {
+                // first entry of xri_a - must be 0
+                ensure!(read_u32(&obj.sections[data_sec_idx], addr).unwrap() == 0, "bad __xri_a!");
+            }
+            4 => {
+                // second entry of xri_a - must be __onexitinit
+                let exitinit_addr = {
+                    let addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                add_symbol_from_reference(obj, &exitinit_addr, &OutReference {
+                    name: String::from("__onexitinit"),
+                    kind: Function,
+                    size: 0,
+                    optional: false,
+                    skip: false,
+                })?;
+            }
+            8 => {
+                // third entry of xri_a - must be _ioinit
+                let ioinit_addr = {
+                    let addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                add_symbol_from_reference(obj, &ioinit_addr, &OutReference {
+                    name: String::from("_ioinit"),
+                    kind: Function,
+                    size: 0,
+                    optional: false,
+                    skip: false,
+                })?;
+                let pioinit_addr = SectionAddress::new(data_sec_idx, addr);
+                add_symbol_from_reference(obj, &pioinit_addr, &OutReference {
+                    name: String::from("__pioinit"),
+                    kind: Object,
+                    size: 4,
+                    optional: false,
+                    skip: false,
+                })?;
+            }
+            _ => {
+                // any further entries are unknown to us, except for the fact they're functions
+                let func_addr = {
+                    let addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+                    SectionAddress::new(obj.sections.at_address(addr)?.0, addr)
+                };
+                obj.known_functions.entry(func_addr).or_default();
+            }
+        }
+    }
+
+    // xc - static constructors
+    let (xc_start, xc_end) = {
+        let (xca_sym_idx, xca_sym) =
+            obj.symbols.by_name("__xc_a")?.expect("we should've found __xc_a at this point!");
+        let xcz_sym =
+            obj.symbols.by_name("__xc_z")?.expect("we should've found __xc_z at this point!").1;
+        let xc_start = xca_sym.address;
+        let xc_end = xcz_sym.address;
+        let mut new_sym = xca_sym.clone();
+        new_sym.size = xc_end - xc_start;
+        new_sym.size_known = true;
+        obj.symbols.replace(xca_sym_idx, new_sym)?;
+        (xc_start, xc_end)
+    };
+
+    let mut num_sinits = 0;
+    for addr in (xc_start..xc_end).step_by(4) {
+        let sinit_addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+        if sinit_addr != 0 {
+            let sinit_sec_addr =
+                SectionAddress::new(obj.sections.at_address(sinit_addr)?.0, sinit_addr);
+            obj.known_functions.entry(sinit_sec_addr).or_default();
+            num_sinits += 1;
+        }
+    }
+    log::info!("Found {} known static initializer funcs!", num_sinits);
+
+    let (xi_start, xi_end) = {
+        let (xia_sym_idx, xia_sym) =
+            obj.symbols.by_name("__xi_a")?.expect("we should've found __xi_a at this point!");
+        let xiz_sym =
+            obj.symbols.by_name("__xi_z")?.expect("we should've found __xi_z at this point!").1;
+        let xi_start = xia_sym.address;
+        let xi_end = xiz_sym.address;
+        let mut new_sym = xia_sym.clone();
+        new_sym.size = xi_end - xi_start;
+        new_sym.size_known = true;
+        obj.symbols.replace(xia_sym_idx, new_sym)?;
+        (xi_start, xi_end)
+    };
+
+    // TODO adjust the logic of this loop to match xri, namely other funcs than __initstdio and __initmbctable
+    for addr in (xi_start..xi_end).step_by(4) {
+        let cur_addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+        if cur_addr != 0 {
+            let cur_sec_addr = SectionAddress::new(obj.sections.at_address(cur_addr)?.0, cur_addr);
+            obj.known_functions.entry(cur_sec_addr).or_default();
+        }
+    }
+
+    let (xp_start, xp_end) = {
+        let (xpa_sym_idx, xpa_sym) =
+            obj.symbols.by_name("__xp_a")?.expect("we should've found __xp_a at this point!");
+        let xpz_sym =
+            obj.symbols.by_name("__xp_z")?.expect("we should've found __xp_z at this point!").1;
+        let xp_start = xpa_sym.address;
+        let xp_end = xpz_sym.address;
+        let mut new_sym = xpa_sym.clone();
+        new_sym.size = xp_end - xp_start;
+        new_sym.size_known = true;
+        obj.symbols.replace(xpa_sym_idx, new_sym)?;
+        (xp_start, xp_end)
+    };
+    for addr in (xp_start..xp_end).step_by(4) {
+        let cur_addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+        if cur_addr != 0 {
+            let cur_sec_addr = SectionAddress::new(obj.sections.at_address(cur_addr)?.0, cur_addr);
+            obj.known_functions.entry(cur_sec_addr).or_default();
+        }
+    }
+
+    let (xt_start, xt_end) = {
+        let (xta_sym_idx, xta_sym) =
+            obj.symbols.by_name("__xt_a")?.expect("we should've found __xt_a at this point!");
+        let xtz_sym =
+            obj.symbols.by_name("__xt_z")?.expect("we should've found __xt_z at this point!").1;
+        let xt_start = xta_sym.address;
+        let xt_end = xtz_sym.address;
+        let mut new_sym = xta_sym.clone();
+        new_sym.size = xt_end - xt_start;
+        new_sym.size_known = true;
+        obj.symbols.replace(xta_sym_idx, new_sym)?;
+        (xt_start, xt_end)
+    };
+    for addr in (xt_start..xt_end).step_by(4) {
+        let cur_addr = read_u32(&obj.sections[data_sec_idx], addr).unwrap();
+        if cur_addr != 0 {
+            let cur_sec_addr = SectionAddress::new(obj.sections.at_address(cur_addr)?.0, cur_addr);
+            obj.known_functions.entry(cur_sec_addr).or_default();
+        }
+    }
+
+    Ok(())
+}
+
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
@@ -299,8 +464,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
         apply_signature(obj, "_cinit")?;
         apply_signature(obj, "_cexit")?;
         apply_signature(obj, "doexit")?;
-
         // after all that's been applied, peruse through the xa/z's
+        process_crt(obj)?;
     }
 
     return Ok(());
