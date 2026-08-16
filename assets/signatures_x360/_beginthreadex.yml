@@ -1,0 +1,32 @@
+- name: _beginthreadex
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  size: 0xD8
+  signature: fYgCpv////9IAAAB/AAAA5Qh/2D/////fHobeP////98mSN4/////3y9K3j/////fNszeP////98+Dt4/////30eQ3j/////O4AAAP////8rBQAA/////0CaABj/////SAAAAfwAAAM5YAAW/////5FjAAD/////SAAAAfwAAANIAACM/////0gAAAH8AAADOIAAxP////84YAAB/////0gAAAH8AAADfH8bef////9BggBc/////ziAAAD/////f+P7eP////9IAAAB/AAAAzlg////////k78AVP////8rHgAA/////5N/AFj/////kX8ABP////9AmgAI/////zvBAFD/////PWAAAP//AAB/yPN4/////38Hw3j/////f+b7eP////84qwAA//8AAH8ky3j/////f0PTeP////9IAAAB/AAAAygDAAD/////QIIAKP////9IAAAB/AAAA3x8G3j/////f+P7eP////9IAAAB/AAAAyscAAD/////QZoADP////9/g+N4/////0gAAAH8AAADOGAAAP////84IQCg/////0gAAAD8AAAD
+  references:
+    - name: __savegprlr_24
+      size: 0x4
+      skip: true
+    - name: _errno
+      kind: Function
+    - name: _invalid_parameter_noinfo
+      kind: Function
+    - name: Returns0
+      kind: Function
+      size: 0x8
+    - name: calloc
+      kind: Function
+    - name: _initptd
+      kind: Function
+    - name: _threadstartex
+      kind: Function
+    - name: CreateThread
+      kind: Function
+    - name: GetLastError
+      kind: Function
+    - name: free
+      kind: Function
+    - name: _dosmaperr
+      kind: Function
+    - name: __restgprlr_24
+      size: 0x4
+      skip: true

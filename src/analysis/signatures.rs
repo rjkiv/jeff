@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::LazyLock};
+
 use anyhow::{ensure, Ok, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use memchr::memmem;
@@ -18,15 +20,18 @@ use crate::{
     },
 };
 
-const SIGNATURES: [(&str, &str); 7] = [
-    ("mainCRTStartup", include_str!("../../assets/signatures_x360/entry.yml")),
-    ("_rtinit", include_str!("../../assets/signatures_x360/_rtinit.yml")),
-    ("_cinit", include_str!("../../assets/signatures_x360/_cinit.yml")),
-    ("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml")),
-    ("doexit", include_str!("../../assets/signatures_x360/doexit.yml")),
-    ("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml")),
-    ("memset", include_str!("../../assets/signatures_x360/memset.yml")),
-];
+static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    map.insert("mainCRTStartup", include_str!("../../assets/signatures_x360/entry.yml"));
+    map.insert("_rtinit", include_str!("../../assets/signatures_x360/_rtinit.yml"));
+    map.insert("_cinit", include_str!("../../assets/signatures_x360/_cinit.yml"));
+    map.insert("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml"));
+    map.insert("doexit", include_str!("../../assets/signatures_x360/doexit.yml"));
+    map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
+    map.insert("memset", include_str!("../../assets/signatures_x360/memset.yml"));
+    map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
+    map
+});
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 struct OutReference {
@@ -205,13 +210,8 @@ fn apply_entry(obj: &mut ObjInfo) -> Result<bool> {
 fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
     log::debug!("Name: {}", name);
     let sig = {
-        let sigs: Vec<FunctionSignature> = serde_yaml::from_str(
-            SIGNATURES
-                .iter()
-                .find(|(func_name, _)| *func_name == name)
-                .map(|(_, sig)| sig)
-                .expect("Missing signature!"),
-        )?;
+        let sigs: Vec<FunctionSignature> =
+            serde_yaml::from_str(SIGNATURES.get(name).expect("Missing signature!"))?;
         sigs[0].clone()
     };
 
@@ -275,7 +275,7 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
                             .kind_at_section_address(addr.section, addr.address, Function)?
                             .is_none()
                     {
-                        func_candidates.push(addr.clone());
+                        func_candidates.push(*addr);
                     }
                 }
                 // println!("Candidates found: {}", func_candidates.len());
@@ -516,15 +516,16 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
         // then CRT objects using the funcs we found from the entry point
-        apply_signature(obj, "_rtinit")?;
-        apply_signature(obj, "_cinit")?;
-        apply_signature(obj, "_cexit")?;
-        apply_signature(obj, "doexit")?;
+        for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
+            apply_signature(obj, func)?;
+        }
         // after all that's been applied, peruse through the xa/z's
         process_crt(obj)?;
     }
 
     apply_signature(obj, "_purecall")?;
+    // older xexes may not have this function actually
+    apply_signature(obj, "_beginthreadex")?;
 
     return Ok(());
 
@@ -561,8 +562,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // // dynamic_cast - is a C except func with one exception
     // // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
     //
-    // // XGetOverlappedResult
-    // // CreateThread
+    // // XGetOverlappedResult - can't rely on signature
+    // // CreateThread - does not always show up in pdata, search for _beginthreadex instead
     //
     // // move _RtlCheckStack/12 check here
 
