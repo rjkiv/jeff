@@ -30,6 +30,8 @@ static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
     map.insert("memset", include_str!("../../assets/signatures_x360/memset.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
+    map.insert("XapiInitProcess", include_str!("../../assets/signatures_x360/XapiInitProcess.yml"));
+    map.insert("XapiInitHeap", include_str!("../../assets/signatures_x360/XapiInitHeap.yml"));
     map
 });
 
@@ -515,6 +517,10 @@ fn process_crt(obj: &mut ObjInfo) -> Result<()> {
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
+
+        apply_signature(obj, "XapiInitProcess")?;
+        apply_signature(obj, "XapiInitHeap")?;
+
         // then CRT objects using the funcs we found from the entry point
         for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
             apply_signature(obj, func)?;
@@ -562,8 +568,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // // dynamic_cast - is a C except func with one exception
     // // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
     //
-    // // XGetOverlappedResult - can't rely on signature
-    // // CreateThread - does not always show up in pdata, search for _beginthreadex instead
+    // // XGetOverlappedResult - can't rely on signature, two versions, one with reg intrinsics and one without
+    // // CreateThread - can't rely on signature, two versions, one with reg intrinsics and one without
     //
     // // move _RtlCheckStack/12 check here
 

@@ -1,0 +1,23 @@
+- name: XapiInitHeap
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  references:
+    - name: __imp_XexExecutableModuleHandle
+      skip: true
+    - name: RtlImageXexHeaderField
+      kind: Function
+      skip: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: RtlCreateHeap
+      kind: Function
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: XapiInitDebugHeap
+      kind: Function
+      optional: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+      optional: true
