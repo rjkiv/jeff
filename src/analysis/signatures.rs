@@ -18,12 +18,13 @@ use crate::{
     },
 };
 
-const SIGNATURES: [(&str, &str); 6] = [
+const SIGNATURES: [(&str, &str); 7] = [
     ("mainCRTStartup", include_str!("../../assets/signatures_x360/entry.yml")),
     ("_rtinit", include_str!("../../assets/signatures_x360/_rtinit.yml")),
     ("_cinit", include_str!("../../assets/signatures_x360/_cinit.yml")),
     ("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml")),
     ("doexit", include_str!("../../assets/signatures_x360/doexit.yml")),
+    ("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml")),
     ("memset", include_str!("../../assets/signatures_x360/memset.yml")),
 ];
 
@@ -259,19 +260,75 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
     // if we have a size but no concrete address, we'll have to filter pdata to find possible candidates for this function
     // at this point, we'll need a signature from the yml
     else if let Some(size) = size {
-        todo!("Func only has a size {:X}, need to find address!", size);
+        // if this func is in pdata, get possible candidates and try to apply the signature to each of them
+        // otherwise, we have to brute force it
+        match sig.pdata_type {
+            1 => {
+                let mut func_candidates = vec![];
+                // Normal
+                // get every pdata_func where the type is Normal, and end - start == size
+                for (addr, exception_type) in obj.pdata_funcs.iter() {
+                    // there must also not be a known symbol associated with this address
+                    if matches!(exception_type, Normal { end } if end.address - addr.address == size)
+                        && obj
+                            .symbols
+                            .kind_at_section_address(addr.section, addr.address, Function)?
+                            .is_none()
+                    {
+                        func_candidates.push(addr.clone());
+                    }
+                }
+                // println!("Candidates found: {}", func_candidates.len());
+                for cand in func_candidates {
+                    if check_signature(obj, cand.address, &sig.signature)? {
+                        log::debug!("Found function at {:08X}!", cand);
+                        add_symbol_from_reference(obj, &cand, &OutReference {
+                            name: String::from(name),
+                            kind: Function,
+                            size,
+                            optional: false,
+                            skip: false,
+                        })?;
+                        // add function references from this func
+                        let refs = get_function_references(obj, name, &cand)?;
+                        let sig_refs = {
+                            let mut sig_refs = sig.references.clone();
+                            if sig_refs.len() != refs.len() {
+                                sig_refs.retain(|x| !x.optional);
+                            }
+                            sig_refs
+                        };
+                        // if we don't have a matching OutReference count by this point, this ain't our func, skip
+                        if sig_refs.len() != refs.len() {
+                            return Ok(());
+                        }
+                        for i in 0..refs.len() {
+                            if !sig_refs[i].skip {
+                                add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
+                            }
+                        }
+
+                        break;
+                    }
+                }
+            }
+            _ => {
+                todo!("Func only has a size {:X}, need to find address!", size);
+            }
+        }
     }
 
     Ok(())
 }
 
 // check_signature - this is where we actually compare the instruction bytes/pattern masks to make sure we've got the function locked down
-fn check_signature(obj: &ObjInfo, addr: u32, size: u32, sig: &String) -> Result<bool> {
+fn check_signature(obj: &ObjInfo, addr: u32, sig: &String) -> Result<bool> {
     // get the data bytes starting at addr
     let section = obj.sections.at_address(addr)?.1;
     let bytes = section.data_range(addr, 0)?; // the data bytes
     let signature = STANDARD.decode(sig)?; // the signature
-    if bytes.len() < size as usize {
+    let funcs_size = signature.len() / 2;
+    if bytes.len() < funcs_size {
         return Ok(false);
     }
 
@@ -279,10 +336,9 @@ fn check_signature(obj: &ObjInfo, addr: u32, size: u32, sig: &String) -> Result<
     for chunk in signature.chunks_exact(8) {
         let ins = u32::from_be_bytes(chunk[0..4].try_into()?);
         let pat = u32::from_be_bytes(chunk[4..8].try_into()?);
-        let offset = i * 4;
-        let actual_ins = u32::from_be_bytes(bytes[offset..offset + 4].try_into()?);
+        let actual_ins = u32::from_be_bytes(bytes[i..i + 4].try_into()?);
         if actual_ins & pat != ins {
-            log::debug!("Mismatch: {:08X} & {:08X} != {:08X}!", actual_ins, pat, ins);
+            // log::debug!("Mismatch: {:08X} & {:08X} != {:08X}!", actual_ins, pat, ins);
             return Ok(false);
         }
         i += 4;
@@ -468,6 +524,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
         process_crt(obj)?;
     }
 
+    apply_signature(obj, "_purecall")?;
+
     return Ok(());
 
     // // parse the entry point
@@ -483,7 +541,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     //
     // // _initterm is also in pdata
     // // _purecall is in pdata, size:0x4C
-    // // strstr, atexit
+    // // strstr, atexit, strrchr
     // // isalpha and all the other char checkers
     //
     // // match funcs with exact bytes here
