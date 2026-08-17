@@ -1,0 +1,14 @@
+- name: atexit # the "new" implementation, games around 2010-later use this version
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  size: 0x28
+  signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAMxY////////3xrWRD/////OCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+  references:
+    - name: _onexit
+      kind: Function
+- name: atexit # the "old" implementation, games earlier than 2008 use this version
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  size: 0x2C
+  signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAN8awA0/////1Vr3/7/////fGsA0P////84IQBg/////4GB//j/////fYgDpv////9OgAAg/////w==
+  references:
+    - name: _onexit
+      kind: Function

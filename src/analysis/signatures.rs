@@ -26,6 +26,7 @@ static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     map.insert("post-entry", include_str!("../../assets/signatures_x360/postentry.yml"));
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
+    map.insert("atexit", include_str!("../../assets/signatures_x360/atexit.yml"));
     map
 });
 
@@ -209,6 +210,9 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
     let sigs: Vec<FunctionSignature> =
         serde_yaml::from_str(SIGNATURES.get(name).expect("Missing signature!"))?;
 
+    // if this bool is true, then this yml is just multiple known versions of one func we're trying to match
+    let matching_one_func = sigs.iter().all(|sig| sig.name == sigs[0].name);
+
     for sig in sigs {
         let func_sym = obj.symbols.by_name(&*sig.name)?;
 
@@ -304,6 +308,11 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
                                 if !sig_refs[i].skip {
                                     add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
                                 }
+                            }
+
+                            // if we're ultimately just trying to find one func, and we found it just now, get outta here, we've done what we need to
+                            if matching_one_func {
+                                return Ok(());
                             }
 
                             break;
@@ -514,13 +523,8 @@ fn process_crt(obj: &mut ObjInfo) -> Result<()> {
 pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
-
+        // then CRT objects using the funcs we found from the entry point
         apply_signature(obj, "post-entry")?;
-
-        // // then CRT objects using the funcs we found from the entry point
-        // for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
-        //     apply_signature(obj, func)?;
-        // }
         // after all that's been applied, peruse through the xa/z's
         process_crt(obj)?;
     }
@@ -529,9 +533,11 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // older xexes may not have this function actually
     apply_signature(obj, "_beginthreadex")?;
 
+    apply_signature(obj, "atexit")?;
+    // atexit -> will lead to realloc -> malloc/free
+
     // funcs to find:
     // calloc, _errno, strstr, strrchr, isalpha and all the other char checkers
-    // atexit -> will lead to realloc -> malloc/free
     // _CxxThrowException
     // strncmp, printf
 
