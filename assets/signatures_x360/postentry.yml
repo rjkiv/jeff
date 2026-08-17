@@ -102,3 +102,116 @@
   references:
     - name: memcpy
       kind: Function
+- name: _rtinit
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  # we can't have a concrete size/signature because some xexes use reg intrinsics while others don't
+  references:
+    - name: __savegprlr_29
+      size: 0x4
+      optional: true
+      skip: true
+    - name: __xri_a
+      kind: Object
+    - name: __xri_z
+      kind: Object
+      size: 0x4
+    - name: __restgprlr_29
+      size: 0x4
+      optional: true
+      skip: true
+- name: _cinit
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  # we can't have a concrete size/signature because some xexes use reg intrinsics while others don't
+  references:
+    - name: __savegprlr_29
+      size: 0x4
+      optional: true
+      skip: true
+    - name: _FPinit
+      kind: Object
+      size: 0x4
+    - name: __xi_a
+      kind: Object
+    - name: __xi_z
+      kind: Object
+      size: 0x4
+    - name: __xc_a
+      kind: Object
+    - name: __xc_z
+      kind: Object
+      size: 0x4
+    - name: __restgprlr_29
+      size: 0x4
+      optional: true
+      skip: true
+- name: _cexit
+  size: 0xC
+  signature: OIAAAf////84YAAA/////0gAAAD8AAAA
+  references:
+    - name: doexit
+      kind: Function
+- name: doexit
+  pdata_type: 2 # C - in pdata, C exceptions
+  num_handlers: 1
+  references:
+    # we actually don't care about most of these lol
+    - name: __savegprlr_24 # depending on xex this can also be 28
+      size: 0x4
+      skip: true
+    - name: _lock
+      kind: Function
+    - name: _C_Exit_Done
+      kind: Object
+      size: 0x4
+    - name: _C_Termination_Done
+      kind: Object
+      size: 0x4
+    - name: KeBugCheck
+      kind: Function
+      skip: true
+    - name: _C_Termination_Done
+      kind: Object
+      skip: true
+    - name: _exitflag
+      kind: Object
+      size: 0x4
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: __onexitbegin # depending on xex this can potentially not show up
+      kind: Object
+      optional: true
+      skip: true
+    - name: __onexitend # depending on xex this can potentially not show up
+      kind: Object
+      optional: true
+      skip: true
+    - name: __xp_z
+      kind: Object
+      size: 0x4
+    - name: __xp_a
+      kind: Object
+    - name: _initterm
+      kind: Function
+    - name: __xt_z
+      kind: Object
+      size: 0x4
+    - name: __xt_a
+      kind: Object
+    - name: _initterm
+      kind: Function
+    - name: the_exception_handler_i_guess_lol
+      kind: Function
+      skip: true
+    - name: KeBugCheck
+      kind: Function
+      skip: true
+    - name: __restgprlr_24 # depending on xex this can also be 28
+      size: 0x4
+      skip: true
+    - name: more_handler_crap
+      kind: Function
+      skip: true

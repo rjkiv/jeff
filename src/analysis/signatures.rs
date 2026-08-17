@@ -22,14 +22,10 @@ use crate::{
 
 static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    map.insert("mainCRTStartup", include_str!("../../assets/signatures_x360/entry.yml"));
-    map.insert("_rtinit", include_str!("../../assets/signatures_x360/_rtinit.yml"));
-    map.insert("_cinit", include_str!("../../assets/signatures_x360/_cinit.yml"));
-    map.insert("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml"));
-    map.insert("doexit", include_str!("../../assets/signatures_x360/doexit.yml"));
+    map.insert("entry", include_str!("../../assets/signatures_x360/entry.yml"));
+    map.insert("post-entry", include_str!("../../assets/signatures_x360/postentry.yml"));
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
-    map.insert("post-entry", include_str!("../../assets/signatures_x360/postentry.yml"));
     map
 });
 
@@ -521,10 +517,10 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
 
         apply_signature(obj, "post-entry")?;
 
-        // then CRT objects using the funcs we found from the entry point
-        for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
-            apply_signature(obj, func)?;
-        }
+        // // then CRT objects using the funcs we found from the entry point
+        // for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
+        //     apply_signature(obj, func)?;
+        // }
         // after all that's been applied, peruse through the xa/z's
         process_crt(obj)?;
     }
