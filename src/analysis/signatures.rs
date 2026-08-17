@@ -204,7 +204,9 @@ fn apply_entry(obj: &mut ObjInfo) -> Result<bool> {
     Ok(true)
 }
 
-fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
+// returns true if everything was successfully applied
+// false if any signature could not be applied
+fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<bool> {
     log::debug!("Name: {}", name);
 
     let sigs: Vec<FunctionSignature> =
@@ -248,7 +250,7 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
             };
             // if we don't have a matching OutReference count by this point, this ain't our func, skip
             if sig_refs.len() != refs.len() {
-                return Ok(());
+                return Ok(false);
             }
             for i in 0..refs.len() {
                 if !sig_refs[i].skip {
@@ -302,7 +304,7 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
                             };
                             // if we don't have a matching OutReference count by this point, this ain't our func, skip
                             if sig_refs.len() != refs.len() {
-                                return Ok(());
+                                return Ok(false);
                             }
                             for i in 0..refs.len() {
                                 if !sig_refs[i].skip {
@@ -312,7 +314,7 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
 
                             // if we're ultimately just trying to find one func, and we found it just now, get outta here, we've done what we need to
                             if matching_one_func {
-                                return Ok(());
+                                return Ok(true);
                             }
 
                             break;
@@ -326,7 +328,7 @@ fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 // check_signature - this is where we actually compare the instruction bytes/pattern masks to make sure we've got the function locked down
@@ -524,17 +526,21 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
         // then CRT objects using the funcs we found from the entry point
-        apply_signature(obj, "post-entry")?;
-        // after all that's been applied, peruse through the xa/z's
-        process_crt(obj)?;
+        if apply_signature(obj, "post-entry")? {
+            log::debug!("Post-entry successfully parsed!");
+            // after all that's been applied, peruse through the xa/z's
+            process_crt(obj)?;
+        }
     }
 
     apply_signature(obj, "_purecall")?;
     // older xexes may not have this function actually
     apply_signature(obj, "_beginthreadex")?;
 
-    apply_signature(obj, "atexit")?;
-    // atexit -> will lead to realloc -> malloc/free
+    if apply_signature(obj, "atexit")? {
+        log::debug!("atexit found!");
+        // atexit -> will lead to realloc -> malloc/free
+    }
 
     // funcs to find:
     // calloc, _errno, strstr, strrchr, isalpha and all the other char checkers
