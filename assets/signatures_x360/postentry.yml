@@ -1,3 +1,40 @@
+- name: XapiInitProcess
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  size: 0x60
+  signature: fYgCpv////+Rgf/4/////5Qh/6D/////S///HfwAAAMsAwAA/////0CCADT/////PWCCAP//AACBawd4//8AAIFrAAD/////KwsAAP////9BmgAY/////4FrABj/////OIAAAP////84YAAC/////31pA6b/////ToAEIf////84YAAB/////0hAegH8AAADOCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+  references:
+    - name: XapiInitHeap
+      kind: Function
+    - name: __imp_KeDebugMonitorData
+      kind: Object
+      size: 0x4
+      skip: true
+    - name: HalReturnToFirmware
+      kind: Function
+      skip: true
+- name: XapiInitHeap
+  pdata_type: 1 # Normal - in pdata, no exceptions
+  references:
+    - name: __imp_XexExecutableModuleHandle
+      skip: true
+    - name: RtlImageXexHeaderField
+      kind: Function
+      skip: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: RtlCreateHeap
+      kind: Function
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: XapiInitDebugHeap
+      kind: Function
+      optional: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+      optional: true
 - name: RtlCreateHeap
   pdata_type: 2 # C - in pdata, C exceptions
   num_handlers: 1
@@ -60,3 +97,8 @@
       kind: Function
     - name: __restgprlr_20
       skip: true
+- name: memmove
+  # should've gotten this from RtlCreateHeap, so no need for a size/signature
+  references:
+    - name: memcpy
+      kind: Function

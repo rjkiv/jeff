@@ -1,5 +1,0 @@
-- name: memmove
-  # should've gotten this from RtlCreateHeap, so no need for a size/signature
-  references:
-    - name: memcpy
-      kind: Function

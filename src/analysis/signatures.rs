@@ -29,10 +29,7 @@ static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     map.insert("doexit", include_str!("../../assets/signatures_x360/doexit.yml"));
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
-    map.insert("XapiInitProcess", include_str!("../../assets/signatures_x360/XapiInitProcess.yml"));
-    map.insert("XapiInitHeap", include_str!("../../assets/signatures_x360/XapiInitHeap.yml"));
-    map.insert("RtlCreateHeap", include_str!("../../assets/signatures_x360/RtlCreateHeap.yml"));
-    map.insert("memmove", include_str!("../../assets/signatures_x360/memmove.yml"));
+    map.insert("post-entry", include_str!("../../assets/signatures_x360/postentry.yml"));
     map
 });
 
@@ -212,111 +209,114 @@ fn apply_entry(obj: &mut ObjInfo) -> Result<bool> {
 
 fn apply_signature(obj: &mut ObjInfo, name: &str) -> Result<()> {
     log::debug!("Name: {}", name);
-    let sig = {
-        let sigs: Vec<FunctionSignature> =
-            serde_yaml::from_str(SIGNATURES.get(name).expect("Missing signature!"))?;
-        sigs[0].clone()
-    };
 
-    let func_sym = obj.symbols.by_name(name)?;
+    let sigs: Vec<FunctionSignature> =
+        serde_yaml::from_str(SIGNATURES.get(name).expect("Missing signature!"))?;
 
-    // either we know the size from a symbol, or it was given to us in our yml
-    let size = match sig.size {
-        0 => match func_sym {
-            Some((_, sym)) => {
-                if sym.size_known {
-                    Some(sym.size)
-                } else {
-                    None
+    for sig in sigs {
+        let func_sym = obj.symbols.by_name(&*sig.name)?;
+
+        // either we know the size from a symbol, or it was given to us in our yml
+        let size = match sig.size {
+            0 => match func_sym {
+                Some((_, sym)) => {
+                    if sym.size_known {
+                        Some(sym.size)
+                    } else {
+                        None
+                    }
                 }
-            }
-            None => None,
-        },
-        _ => Some(sig.size),
-    };
-    // func_addr we have to have gotten from a symbol
-    let func_addr = func_sym.map(|(_, sym)| sym.address);
-
-    // if we have a concrete address, go straight to finding references
-    if let Some(func_addr) = func_addr {
-        let sec_addr = SectionAddress::new(obj.sections.at_address(func_addr)?.0, func_addr);
-        // get_function_references will infer the size from pdata, doesn't matter if we know it or not
-        // if it can't find a size, refs will be empty, nothing new will be marked
-        let refs = get_function_references(obj, name, &sec_addr)?;
-        let sig_refs = {
-            let mut sig_refs = sig.references.clone();
-            if sig_refs.len() != refs.len() {
-                sig_refs.retain(|x| !x.optional);
-            }
-            sig_refs
+                None => None,
+            },
+            _ => Some(sig.size),
         };
-        // if we don't have a matching OutReference count by this point, this ain't our func, skip
-        if sig_refs.len() != refs.len() {
-            return Ok(());
-        }
-        for i in 0..refs.len() {
-            if !sig_refs[i].skip {
-                add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
-            }
-        }
-    }
-    // if we have a size but no concrete address, we'll have to filter pdata to find possible candidates for this function
-    // at this point, we'll need a signature from the yml
-    else if let Some(size) = size {
-        // if this func is in pdata, get possible candidates and try to apply the signature to each of them
-        // otherwise, we have to brute force it
-        match sig.pdata_type {
-            1 => {
-                let mut func_candidates = vec![];
-                // Normal
-                // get every pdata_func where the type is Normal, and end - start == size
-                for (addr, exception_type) in obj.pdata_funcs.iter() {
-                    // there must also not be a known symbol associated with this address
-                    if matches!(exception_type, Normal { end } if end.address - addr.address == size)
-                        && obj
-                            .symbols
-                            .kind_at_section_address(addr.section, addr.address, Function)?
-                            .is_none()
-                    {
-                        func_candidates.push(*addr);
-                    }
-                }
-                // println!("Candidates found: {}", func_candidates.len());
-                for cand in func_candidates {
-                    if check_signature(obj, cand.address, &sig.signature)? {
-                        log::debug!("Found function at {:08X}!", cand);
-                        add_symbol_from_reference(obj, &cand, &OutReference {
-                            name: String::from(name),
-                            kind: Function,
-                            size,
-                            optional: false,
-                            skip: false,
-                        })?;
-                        // add function references from this func
-                        let refs = get_function_references(obj, name, &cand)?;
-                        let sig_refs = {
-                            let mut sig_refs = sig.references.clone();
-                            if sig_refs.len() != refs.len() {
-                                sig_refs.retain(|x| !x.optional);
-                            }
-                            sig_refs
-                        };
-                        // if we don't have a matching OutReference count by this point, this ain't our func, skip
-                        if sig_refs.len() != refs.len() {
-                            return Ok(());
-                        }
-                        for i in 0..refs.len() {
-                            if !sig_refs[i].skip {
-                                add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
-                            }
-                        }
+        // func_addr we have to have gotten from a symbol
+        let func_addr = func_sym.map(|(_, sym)| sym.address);
 
-                        break;
-                    }
+        // if we have a concrete address, go straight to finding references
+        if let Some(func_addr) = func_addr {
+            let sec_addr = SectionAddress::new(obj.sections.at_address(func_addr)?.0, func_addr);
+            // get_function_references will infer the size from pdata, doesn't matter if we know it or not
+            // if it can't find a size, refs will be empty, nothing new will be marked
+            let refs = get_function_references(obj, &*sig.name, &sec_addr)?;
+            let sig_refs = {
+                let mut sig_refs = sig.references.clone();
+                if sig_refs.len() != refs.len() {
+                    sig_refs.retain(|x| !x.optional);
+                }
+                sig_refs
+            };
+            // if we don't have a matching OutReference count by this point, this ain't our func, skip
+            if sig_refs.len() != refs.len() {
+                return Ok(());
+            }
+            for i in 0..refs.len() {
+                if !sig_refs[i].skip {
+                    add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
                 }
             }
-            _ => {
-                todo!("Func only has a size {:X}, need to find address!", size);
+        }
+        // if we have a size but no concrete address, we'll have to filter pdata to find possible candidates for this function
+        // at this point, we'll need a signature from the yml
+        else if let Some(size) = size {
+            // if this func is in pdata, get possible candidates and try to apply the signature to each of them
+            // otherwise, we have to brute force it
+            match sig.pdata_type {
+                1 => {
+                    let mut func_candidates = vec![];
+                    // Normal
+                    // get every pdata_func where the type is Normal, and end - start == size
+                    for (addr, exception_type) in obj.pdata_funcs.iter() {
+                        // there must also not be a known symbol associated with this address
+                        if matches!(exception_type, Normal { end } if end.address - addr.address == size)
+                            && obj
+                                .symbols
+                                .kind_at_section_address(addr.section, addr.address, Function)?
+                                .is_none()
+                        {
+                            func_candidates.push(*addr);
+                        }
+                    }
+                    // println!("Candidates found: {}", func_candidates.len());
+                    for cand in func_candidates {
+                        // TODO: accept multiple possible sizes/signatures for one function?
+                        // thanks to reg intrinsics and XDK versions varying
+                        if check_signature(obj, cand.address, &sig.signature)? {
+                            log::debug!("Found function at {:08X}!", cand);
+                            let sig_name_str = String::from(sig.name);
+                            add_symbol_from_reference(obj, &cand, &OutReference {
+                                name: sig_name_str.clone(),
+                                kind: Function,
+                                size,
+                                optional: false,
+                                skip: false,
+                            })?;
+                            // add function references from this func
+                            let refs = get_function_references(obj, &*sig_name_str, &cand)?;
+                            let sig_refs = {
+                                let mut sig_refs = sig.references.clone();
+                                if sig_refs.len() != refs.len() {
+                                    sig_refs.retain(|x| !x.optional);
+                                }
+                                sig_refs
+                            };
+                            // if we don't have a matching OutReference count by this point, this ain't our func, skip
+                            if sig_refs.len() != refs.len() {
+                                return Ok(());
+                            }
+                            for i in 0..refs.len() {
+                                if !sig_refs[i].skip {
+                                    add_symbol_from_reference(obj, &refs[i], &sig_refs[i])?;
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    todo!("Func only has a size {:X}, need to find address!", size);
+                }
             }
         }
     }
@@ -519,10 +519,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     if apply_entry(obj)? {
         log::debug!("Entry successfully parsed!");
 
-        apply_signature(obj, "XapiInitProcess")?;
-        apply_signature(obj, "XapiInitHeap")?;
-        apply_signature(obj, "RtlCreateHeap")?;
-        apply_signature(obj, "memmove")?;
+        apply_signature(obj, "post-entry")?;
 
         // then CRT objects using the funcs we found from the entry point
         for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {
@@ -536,45 +533,19 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // older xexes may not have this function actually
     apply_signature(obj, "_beginthreadex")?;
 
-    return Ok(());
+    // funcs to find:
+    // calloc, _errno, strstr, strrchr, isalpha and all the other char checkers
+    // atexit -> will lead to realloc -> malloc/free
+    // _CxxThrowException
+    // strncmp, printf
 
-    // // parse the entry point
-    // if parse_entry(obj, &mut funcs_to_analyze)? {
-    //     // then CRT objects using the funcs we found from the entry point
-    //     parse_crt(obj, &mut funcs_to_analyze)?;
-    //
-    //     // get calloc and _errno from what we've parsed up to this point
-    // }
-    //
-    // // NOTE: a lot of these come from pdata, we can use that as a starting point or reference
-    // // like, filter by exception type, size range, a set of instructions you know will appear in there
-    //
-    // // _initterm is also in pdata
-    // // _purecall is in pdata, size:0x4C
-    // // strstr, atexit, strrchr
-    // // isalpha and all the other char checkers
-    //
-    // // match funcs with exact bytes here
-    // match_function_bytes(obj)?;
-    // // match funcs with looser signatures here
-    //
-    // // parse throw info and RTTI here?
-    // // if, after the C scope tables, there's still .rdata left, check for _CxxThrowException, then throw info
-    // // _CxxThrowException is in pdata, Normal exception type
-    //
-    // // more common funcs to search patterns of:
-    // // memmove, strncmp
-    // // in pdata: malloc, free, errno, printf
-    //
-    // // if we have RTTI, these two *should* exist somewhere:
-    // // typeid - is a C except func with one exception
-    // // dynamic_cast - is a C except func with one exception
-    // // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
-    //
-    // // XGetOverlappedResult - can't rely on signature, two versions, one with reg intrinsics and one without
-    // // CreateThread - can't rely on signature, two versions, one with reg intrinsics and one without
-    //
-    // // move _RtlCheckStack/12 check here
+    // if we have RTTI, these two *should* exist somewhere:
+    // typeid - is a C except func with one exception
+    // dynamic_cast - is a C except func with one exception
+    // look for the strings "Bad dynamic_cast!" and "no RTTI data!"
 
-    // Ok(())
+    // XGetOverlappedResult - can't rely on signature, two versions, one with reg intrinsics and one without
+    // CreateThread - can't rely on signature, two versions, one with reg intrinsics and one without
+
+    Ok(())
 }
