@@ -28,10 +28,11 @@ static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     map.insert("_cexit", include_str!("../../assets/signatures_x360/_cexit.yml"));
     map.insert("doexit", include_str!("../../assets/signatures_x360/doexit.yml"));
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
-    map.insert("memset", include_str!("../../assets/signatures_x360/memset.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
     map.insert("XapiInitProcess", include_str!("../../assets/signatures_x360/XapiInitProcess.yml"));
     map.insert("XapiInitHeap", include_str!("../../assets/signatures_x360/XapiInitHeap.yml"));
+    map.insert("RtlCreateHeap", include_str!("../../assets/signatures_x360/RtlCreateHeap.yml"));
+    map.insert("memmove", include_str!("../../assets/signatures_x360/memmove.yml"));
     map
 });
 
@@ -520,6 +521,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
 
         apply_signature(obj, "XapiInitProcess")?;
         apply_signature(obj, "XapiInitHeap")?;
+        apply_signature(obj, "RtlCreateHeap")?;
+        apply_signature(obj, "memmove")?;
 
         // then CRT objects using the funcs we found from the entry point
         for func in ["_rtinit", "_cinit", "_cexit", "doexit"] {

@@ -1,6 +1,0 @@
-- name: memset
-  pdata_type: 0 # None - not in pdata
-  num_handlers: 0 # None - not in pdata
-  size: 0xA0
-  signature: OAUAAf////98CQOm/////2BmAAD/////SAAAEP////84pf///////5iGAAD/////OMYAAf////9wwAAD/////0AC//D/////UIRELv////9UoOE//////1CEgB7/////QeIAIP////98CQOm/////5CGAAD/////kIYABP////+QhgAI/////5CGAAz/////OMYAEP////9DIP/s/////1Sg97//////QcIAKP////98CQOm/////5CGAAD/////OMYABP////9DQAAY/////5CGAAD/////OMYABP////9DQAAM/////5CGAAD/////OMYABP////9woAAD/////3wJA6b/////TeIAIP////+YhgAA/////09AACD/////mIYAAf////9PQAAg/////5iGAAL/////ToAAIP////8=
-  # this doesn't reference anything
