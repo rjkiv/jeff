@@ -27,6 +27,7 @@ static SIGNATURES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {
     map.insert("_purecall", include_str!("../../assets/signatures_x360/_purecall.yml"));
     map.insert("_beginthreadex", include_str!("../../assets/signatures_x360/_beginthreadex.yml"));
     map.insert("atexit", include_str!("../../assets/signatures_x360/atexit.yml"));
+    map.insert("post-atexit", include_str!("../../assets/signatures_x360/postatexit.yml"));
     map
 });
 
@@ -538,7 +539,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     apply_signature(obj, "_beginthreadex")?;
 
     if apply_signature(obj, "atexit")? {
-        log::debug!("atexit found!");
+        apply_signature(obj, "post-atexit")?;
         // atexit -> will lead to realloc -> malloc/free
     }
 
@@ -554,6 +555,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
 
     // XGetOverlappedResult - can't rely on signature, two versions, one with reg intrinsics and one without
     // CreateThread - can't rely on signature, two versions, one with reg intrinsics and one without
+    // look at more XAPILIB funcs, LIBCMT funcs
 
     Ok(())
 }

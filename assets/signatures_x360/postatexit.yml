@@ -1,0 +1,43 @@
+- name: _onexit
+  pdata_type: 2
+  num_handlers: 1
+  references:
+    - name: __savegprlr_23
+      skip: true
+    - name: _lockexit
+      kind: Function
+      size: 0x8
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: _msize
+      kind: Function
+    - name: realloc
+      kind: Function
+    - name: realloc
+      kind: Function
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: the_exception_handler_lol
+      kind: Function
+      skip: true
+    - name: __restgprlr_23
+      skip: true
+    - name: _unlockexit
+      kind: Function
+      size: 0x8
+- name: _lockexit
+  references:
+    - name: _lock
+      kind: Function
+- name: _unlockexit
+  references:
+    - name: _unlock
+      kind: Function
