@@ -88,6 +88,7 @@ impl InputtedExecutable {
 
     pub fn extract(&self) -> (String, &Vec<u8>) { (self.exe_name.clone(), &self.exe_bytes) }
 
+    // everything that occurs in here, is before map/pdb symbols/splits are applied
     pub fn process(&mut self) -> Result<ObjInfo> {
         let obj_file = PeFile32::parse(&*self.exe_bytes).expect("Failed to parse object file");
 
@@ -369,6 +370,8 @@ impl InputtedExecutable {
         process_xidata(&mut obj)?;
         process_rtti(&mut obj)?;
 
+        // traverse entrypoint call chain here? has to be after the seh call because pdata
+
         const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
         let rtl_bytes = STANDARD.decode(RTL_CHECK_STACK)?;
 
@@ -408,6 +411,7 @@ impl InputtedExecutable {
         // TODO: mark subsections within sections, so that in splits.txt they're renamed as such
 
         // .rdata subsections:
+        // -.idata$5: __imps
         // -.rdata: the regular ole .rdata we all know and love
         // -.rdata$r: RTTI structures
         // -.xdata: C exception scope table infos
@@ -438,7 +442,7 @@ impl InputtedExecutable {
 }
 
 fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
-    // if this xex has an .xidata section, mark down the funcs in there
+    // if this xex has an explicit .xidata section (most exes i've seen have .xidata as a subection of .text), mark down the funcs in there
     if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
         let mut num_xidatas = 0;
         for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {

@@ -547,6 +547,8 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // calloc, _errno, strstr, strrchr, isalpha and all the other char checkers
     // _CxxThrowException
     // __security_init_cookie - will need to find this for yc bounds
+    // _NLG_Notify/__NLG_Dispatch
+    // _CallSettingFrame/__NLG_Return
     // strncmp, printf
 
     // if we have RTTI, these two *should* exist somewhere:

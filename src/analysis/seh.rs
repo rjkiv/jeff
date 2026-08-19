@@ -438,6 +438,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             },
             false,
         )?;
+        // traverse call chain from __CxxFrameHandler?
     }
 
     // then for each except_data/except_record symbol (might remove later idk)
