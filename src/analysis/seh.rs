@@ -431,7 +431,8 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                 name: String::from("__CxxFrameHandler"),
                 address: cxx_handler.address,
                 section: Some(cxx_handler.section),
-                size_known: false,
+                size: 0x38,
+                size_known: true,
                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                 kind: ObjSymbolKind::Function,
                 ..Default::default()

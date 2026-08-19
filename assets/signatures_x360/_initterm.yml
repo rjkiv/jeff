@@ -1,6 +1,0 @@
-- name: _initterm
-  pdata_type: 1 # Normal - in pdata, no exceptions
-  num_handlers: 0
-  size: 0x58
-  signature: fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf+Q/////3x/G3j/////fJ4jeP////9IAAAc/////4F/AAD/////KAsAAPw///9BggAM/+f//31pA6b/////ToAEIf////87/wAE/////38f8ED/////QZj/5P////84IQBw/////4GB//j/////fYgDpv/////rwf/o/////+vh//D/////ToAAIP////8=
-  # this doesn't reference anything

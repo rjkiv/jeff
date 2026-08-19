@@ -196,6 +196,7 @@
       kind: Object
     - name: _initterm
       kind: Function
+      size: 0x58
     - name: __xt_z
       kind: Object
       size: 0x4
@@ -203,6 +204,7 @@
       kind: Object
     - name: _initterm
       kind: Function
+      size: 0x58
     - name: the_exception_handler_i_guess_lol
       kind: Function
       skip: true
