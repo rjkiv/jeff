@@ -405,6 +405,8 @@ impl InputtedExecutable {
             obj.add_symbol(sym, false)?;
         }
 
+        // TODO: mark subsections within sections, so that in splits.txt they're renamed as such
+
         // .rdata subsections:
         // -.rdata: the regular ole .rdata we all know and love
         // -.rdata$r: RTTI structures
@@ -416,6 +418,8 @@ impl InputtedExecutable {
         // -.text$yc: static ctors - supposedly get this from CRT, but the first entry in __xc_a isn't always in yc (security init cookie)
         //      -first entry is either security init cookie, or the first func in yc
         // -.text$yd: static dtors - after the last entry in __xc_a
+        // -.xidata: xdk imports (the ones we add/unstrip when we first process the exe)
+        // -.xedata: currently unknown
 
         // .data subsections:
         // -.CRT: C runtime info

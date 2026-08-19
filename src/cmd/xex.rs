@@ -447,14 +447,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         // apply_signatures_post(&mut obj)?;
     }
 
-    if !config.symbols_known && !config.quick_analysis {
-        let mut state = AnalyzerState::default();
-        debug!("Detecting function boundaries");
-        FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-        state.detect_functions(&obj)?; // perform CFA
-        state.apply(&mut obj)?; // give each found function a symbol
-    }
-
     // Apply additional relocations from config
     apply_add_relocations(&mut obj, &config.base.add_relocations)?;
 
