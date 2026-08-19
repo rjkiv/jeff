@@ -546,6 +546,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     // funcs to find:
     // calloc, _errno, strstr, strrchr, isalpha and all the other char checkers
     // _CxxThrowException
+    // __security_init_cookie - will need to find this for yc bounds
     // strncmp, printf
 
     // if we have RTTI, these two *should* exist somewhere:

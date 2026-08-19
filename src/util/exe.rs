@@ -411,10 +411,17 @@ impl InputtedExecutable {
         // -.xdata: C exception scope table infos
         // -.xdata$x: throw infos
 
+        // .text subsections:
+        // -.text: the regular ole .text we all know and love
+        // -.text$yc: static ctors - supposedly get this from CRT, but the first entry in __xc_a isn't always in yc (security init cookie)
+        //      -first entry is either security init cookie, or the first func in yc
+        // -.text$yd: static dtors - after the last entry in __xc_a
+
         // .data subsections:
         // -.CRT: C runtime info
         // some NUI thing
         // -.data: the regular ole .data we all know and love
+        // bss is contained somewhere in .data but i don't know how to get the start of it at this time
 
         // .XBMOVIE: matches up with ground truth...but it's mostly a sea of 0's
         // .idata: partially zero'ed out and offsetted from ground truth in debug, completely gone from release
