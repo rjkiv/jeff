@@ -12,13 +12,13 @@ use crate::{
     analysis::{
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
-        relocation_target_for, uniq_jump_table_entries,
+        read_u32, relocation_target_for, uniq_jump_table_entries,
         vm::{BranchTarget, GprValue, StepResult, VM},
         RelocationTarget,
     },
     obj::{
-        ExceptionType::CXX, ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection,
-        ObjSectionKind, ObjSymbol, ObjSymbolKind, SectionIndex,
+        ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
+        ObjSymbol, ObjSymbolKind, SectionIndex,
     },
 };
 
@@ -119,6 +119,29 @@ impl Tracker {
     }
 
     fn process_code(&mut self, obj: &ObjInfo) -> Result<()> {
+        // add exception infos
+        for info in &obj.exception_data_infos {
+            let handler = read_u32(&obj.sections[info.section], info.address).unwrap();
+            if let Some(handler_addr) = self.is_valid_address(obj, *info, handler) {
+                self.relocations
+                    .insert(*info, Relocation::Absolute(RelocationTarget::Address(handler_addr)));
+            } else {
+                panic!("Invalid exception data at {:08X}!", info);
+            }
+
+            // read u32 at info + 4, should be an absolute reloc to exception record
+            let record = read_u32(&obj.sections[info.section], info.address + 4).unwrap();
+            if record != 0 {
+                if let Some(record_addr) = self.is_valid_address(obj, *info + 4, record) {
+                    self.relocations.insert(
+                        *info + 4,
+                        Relocation::Absolute(RelocationTarget::Address(record_addr)),
+                    );
+                } else {
+                    panic!("Invalid exception data at {:08X}!", info);
+                }
+            }
+        }
         if let Some(entry) = obj.entry {
             let (section_index, _) = obj.sections.at_address(entry)?;
             let entry_addr = SectionAddress::new(section_index, entry);
@@ -411,22 +434,9 @@ impl Tracker {
         // but we still want to track them.
         let mut possible_missed_branches = BTreeMap::new();
 
-        if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&function_start) {
-            for unwind in cxx_eh_func_info.unwinds.iter().flatten() {
-                possible_missed_branches.insert(*unwind, VM::new());
-            }
-            for catch in cxx_eh_func_info.catches.iter().flatten() {
-                // the previous two instructions are ptrs, mark their relocs down
-                self.relocations.insert(
-                    *catch - 8,
-                    Relocation::Absolute(RelocationTarget::Address(
-                        obj.cxx_handler.expect("Catches, but no C++ handler?"),
-                    )),
-                );
-                self.relocations.insert(
-                    *catch - 4,
-                    Relocation::Absolute(RelocationTarget::Address(cxx_eh_func_info.addr)),
-                );
+        if let Some(info) = &obj.pdata_funcs.get(&function_start) {
+            for handler in info.handlers.keys() {
+                possible_missed_branches.insert(*handler, VM::new());
             }
         }
 

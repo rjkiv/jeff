@@ -22,7 +22,7 @@ pub use symbols::{
 };
 
 use crate::{
-    analysis::{cfa::SectionAddress, seh::CXXEhFuncInfo},
+    analysis::{cfa::SectionAddress, seh::CxxEhFuncInfo},
     obj::addresses::AddressRanges,
 };
 
@@ -46,18 +46,24 @@ pub struct ObjUnit {
     pub order: Option<i32>,
 }
 
-/// The exception type for a func that came from pdata.
 #[derive(Debug, Clone)]
-pub enum ExceptionType {
-    /// This func has no exceptions, the end that's listed is the canonical end
-    Normal { end: SectionAddress },
-    /// This is a C func with exceptions, get the bounds of its handlers
-    C {
-        // the start and end addresses of this function's C handlers
-        handlers: BTreeMap<SectionAddress, SectionAddress>,
-    },
-    /// This is a CXX func with exceptions, track all its info
-    CXX { info: CXXEhFuncInfo },
+pub struct PdataFuncInfo {
+    // The size of the function's main body, excluding any exception handlers
+    pub main_size: u32,
+    // The "full" size of the function - main body plus exception handlers
+    pub full_size: u32,
+    // This function's exception handlers' start addresses and sizes
+    pub handlers: BTreeMap<SectionAddress, u32>,
+    // Any additional exception info this function may or may not have
+    pub exception_info: Option<CxxEhFuncInfo>,
+}
+
+impl PdataFuncInfo {
+    // C exception funcs will have at least 1 handler, but no CXX info
+    pub fn is_c(&self) -> bool { !self.handlers.is_empty() && self.exception_info.is_none() }
+
+    // CXX exception funcs will have extended exception info
+    pub fn is_cxx(&self) -> bool { self.exception_info.is_some() }
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +81,7 @@ pub struct ObjInfo {
 
     // Compiler generated info
     /// Functions that have an entry in .pdata.
-    pub pdata_funcs: BTreeMap<SectionAddress, ExceptionType>,
+    pub pdata_funcs: BTreeMap<SectionAddress, PdataFuncInfo>,
     // Addresses for 8-byte exception data info.
     // If need be, can use this to block CFA/function detection/the like
     pub exception_data_infos: BTreeSet<SectionAddress>,

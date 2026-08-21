@@ -96,25 +96,24 @@ impl XexOptionalHeaderData {
     pub fn new(data: &[u8], index: usize) -> Self {
         let id = read_word(data, index);
         let value = read_word(data, index + 4);
-        let hdr_data;
 
         let mask = id & 0xFF;
-        if mask == 0xFF {
+        let hdr_data = if mask == 0xFF {
             // seek the binstream to value, read the word (that's your len)
             let len = read_word(data, value as usize);
             let start: usize = (value + 4) as usize;
             let end: usize = (value + len) as usize;
-            hdr_data = data[start..end].to_vec();
+            data[start..end].to_vec()
         } else if mask < 2 {
             // data = value as a Vec<u8>
             // println!("for ID 0x{:X}, value = 0x{:X}", id_as_u32, value);
-            hdr_data = data[index + 4..index + 8].to_vec();
+            data[index + 4..index + 8].to_vec()
         } else {
             let len = mask * 4;
             let start: usize = (value + 4) as usize;
             let end: usize = (value + len) as usize;
-            hdr_data = data[start..end].to_vec();
-        }
+            data[start..end].to_vec()
+        };
         Self { id, data: hdr_data }
     }
 }
