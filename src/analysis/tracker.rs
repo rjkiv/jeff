@@ -121,28 +121,27 @@ impl Tracker {
     fn process_code(&mut self, obj: &ObjInfo) -> Result<()> {
         // add exception infos
         for info in &obj.exception_data_infos {
-            // read u32 at info, should be an absolute reloc to handler
             let handler = read_u32(&obj.sections[info.section], info.address).unwrap();
+            if let Some(handler_addr) = self.is_valid_address(obj, *info, handler) {
+                self.relocations
+                    .insert(*info, Relocation::Absolute(RelocationTarget::Address(handler_addr)));
+            } else {
+                panic!("Invalid exception data at {:08X}!", info);
+            }
+
             // read u32 at info + 4, should be an absolute reloc to exception record
             let record = read_u32(&obj.sections[info.section], info.address + 4).unwrap();
-            // println!(
-            //     "TODO: add relocs for exception data at {:08X} ({:08X}) and {:08X} ({:08X})",
-            //     info.address,
-            //     handler,
-            //     info.address + 4,
-            //     record
-            // );
-            // let mut addr = SectionAddress::new(section_index, section.address);
-            // for chunk in section.data.chunks_exact(4) {
-            //     let value = u32::from_be_bytes(chunk.try_into()?);
-            //     if let Some(value) = self.is_valid_address(obj, addr, value) {
-            //         self.relocations
-            //             .insert(addr, Relocation::Absolute(RelocationTarget::Address(value)));
-            //     }
-            //     addr += 4;
-            // }
+            if record != 0 {
+                if let Some(record_addr) = self.is_valid_address(obj, *info + 4, record) {
+                    self.relocations.insert(
+                        *info + 4,
+                        Relocation::Absolute(RelocationTarget::Address(record_addr)),
+                    );
+                } else {
+                    panic!("Invalid exception data at {:08X}!", info);
+                }
+            }
         }
-
         if let Some(entry) = obj.entry {
             let (section_index, _) = obj.sections.at_address(entry)?;
             let entry_addr = SectionAddress::new(section_index, entry);
