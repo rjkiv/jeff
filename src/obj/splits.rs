@@ -1,6 +1,6 @@
 use std::{cmp::max, collections::BTreeMap, ops::RangeBounds};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
 use crate::{
@@ -56,14 +56,20 @@ pub struct ObjSplits {
 
 impl ObjSplits {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (u32, &ObjSplit)> {
-        self.splits.iter().flat_map(|(addr, v)| v.iter().map(move |u| (*addr, u)))
+        self.splits
+            .iter()
+            .flat_map(|(addr, v)| v.iter().map(move |u| (*addr, u)))
     }
 
     pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = (u32, &mut ObjSplit)> {
-        self.splits.iter_mut().flat_map(|(addr, v)| v.iter_mut().map(move |u| (*addr, u)))
+        self.splits
+            .iter_mut()
+            .flat_map(|(addr, v)| v.iter_mut().map(move |u| (*addr, u)))
     }
 
-    pub fn has_split_at(&self, address: u32) -> bool { self.splits.contains_key(&address) }
+    pub fn has_split_at(&self, address: u32) -> bool {
+        self.splits.contains_key(&address)
+    }
 
     /// Locate an existing split for the given address.
     pub fn for_address(&self, address: u32) -> Option<(u32, &ObjSplit)> {
@@ -82,8 +88,12 @@ impl ObjSplits {
 
     /// Locate existing splits within the given address range.
     pub fn for_range<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (u32, &ObjSplit)>
-    where R: RangeBounds<u32> {
-        self.splits.range(range).flat_map(|(addr, v)| v.iter().map(move |u| (*addr, u)))
+    where
+        R: RangeBounds<u32>,
+    {
+        self.splits
+            .range(range)
+            .flat_map(|(addr, v)| v.iter().map(move |u| (*addr, u)))
     }
 
     /// Locate existing splits within the given address range.
@@ -94,7 +104,9 @@ impl ObjSplits {
     where
         R: RangeBounds<u32>,
     {
-        self.splits.range_mut(range).flat_map(|(addr, v)| v.iter_mut().map(move |u| (*addr, u)))
+        self.splits
+            .range_mut(range)
+            .flat_map(|(addr, v)| v.iter_mut().map(move |u| (*addr, u)))
     }
 
     pub fn for_unit(&self, unit: &str) -> Result<Option<(u32, &ObjSplit)>> {
@@ -129,7 +141,11 @@ impl ObjSplits {
         out.last_mut().unwrap()
     }
 
-    pub fn remove(&mut self, address: u32) -> Option<Vec<ObjSplit>> { self.splits.remove(&address) }
+    pub fn remove(&mut self, address: u32) -> Option<Vec<ObjSplit>> {
+        self.splits.remove(&address)
+    }
 
-    pub fn clear(&mut self) { self.splits.clear(); }
+    pub fn clear(&mut self) {
+        self.splits.clear();
+    }
 }

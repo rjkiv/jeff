@@ -106,7 +106,11 @@ pub fn detect_objects(obj: &mut ObjInfo) -> Result<()> {
         for (sym, new_end) in symbol_sizes_to_replace {
             let mut new_sym = obj.symbols[sym].clone();
             new_sym.size = new_end - new_sym.address;
-            log::debug!("Adjusting symbol bounds to {:08X}-{:08X}", new_sym.address, new_end);
+            log::debug!(
+                "Adjusting symbol bounds to {:08X}-{:08X}",
+                new_sym.address,
+                new_end
+            );
             obj.symbols.replace(sym, new_sym)?;
         }
     }
@@ -135,7 +139,11 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
         fn is_string(data: &[u8]) -> StringResult {
             // because symbol sizes are unreliable we're passing in the remaining data for the section
             // so, trim up to the first zero instead of the last
-            let bytes = data.iter().position(|&b| b == 0).map(|pos| &data[..pos]).unwrap_or(data);
+            let bytes = data
+                .iter()
+                .position(|&b| b == 0)
+                .map(|pos| &data[..pos])
+                .unwrap_or(data);
 
             // if no zeroes were stripped, probably not a string
             if bytes.len() == data.len() {
@@ -143,7 +151,9 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
             }
 
             if !bytes.is_empty()
-                && bytes.iter().all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+                && bytes
+                    .iter()
+                    .all(|&c| c.is_ascii_graphic() || c.is_ascii_whitespace())
             {
                 return StringResult::String {
                     length: bytes.len(),
@@ -185,7 +195,10 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                     }
                 }
                 if ok {
-                    return StringResult::WString { length: wide_bytes.len(), str };
+                    return StringResult::WString {
+                        length: wide_bytes.len(),
+                        str,
+                    };
                 }
             }
             StringResult::None

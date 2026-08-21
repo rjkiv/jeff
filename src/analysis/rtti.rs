@@ -391,7 +391,9 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
                             //     class_for_bcd.borrow().name
                             // );
                             // if we don't have it marked as missed, add it in
-                            missed_chds.entry(chd_addr).or_insert_with(|| class_for_bcd.clone());
+                            missed_chds
+                                .entry(chd_addr)
+                                .or_insert_with(|| class_for_bcd.clone());
                         }
 
                         let bcd_ptr = Rc::new(BaseClassDescriptor {
@@ -436,7 +438,10 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
         }
         let old_len = classes_by_chd_exe_addr.len();
         classes_by_chd_exe_addr.append(&mut missed_chds);
-        assert!(classes_by_chd_exe_addr.len() >= old_len, "Unbreakable loop while parsing CHDs!");
+        assert!(
+            classes_by_chd_exe_addr.len() >= old_len,
+            "Unbreakable loop while parsing CHDs!"
+        );
     }
 
     for sym in syms_to_add {
@@ -542,7 +547,9 @@ fn compute_superclass_info(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result
 // Allows us to mark them as known_symbols ahead of time, we have control over what the symbol sizes/scopes should be,
 // and by stepping through vftables, we have more known function start addresses we can provide to our object.
 pub fn process_rtti(obj: &mut ObjInfo) -> Result<()> {
-    let mut rtti_metadata = RTTIMetadata { discovered_classes: vec![] };
+    let mut rtti_metadata = RTTIMetadata {
+        discovered_classes: vec![],
+    };
     // when adding symbol, use replace = false
 
     // find all the RTTI structs you can
@@ -551,7 +558,10 @@ pub fn process_rtti(obj: &mut ObjInfo) -> Result<()> {
         return Ok(());
     }
 
-    log::info!("Found {} classes from RTTI!\n", rtti_metadata.discovered_classes.len());
+    log::info!(
+        "Found {} classes from RTTI!\n",
+        rtti_metadata.discovered_classes.len()
+    );
 
     // if we've reached this point, we have a full set of RTTI objects and their relationships
     // and everything except for COLs and vftables have been labeled

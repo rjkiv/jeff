@@ -117,8 +117,10 @@ fn main() {
     // in owo-colors removes set_override and if_supports_color entirely.
     owo_colors::set_override(use_colors);
 
-    let format =
-        tracing_subscriber::fmt::format().with_ansi(use_colors).with_target(false).without_time();
+    let format = tracing_subscriber::fmt::format()
+        .with_ansi(use_colors)
+        .with_target(false)
+        .without_time();
     let builder = tracing_subscriber::fmt().event_format(format);
     if let Some(level) = args.log_level {
         builder
@@ -143,8 +145,10 @@ fn main() {
     let mut result = Ok(());
     if let Some(dir) = &args.chdir {
         result = env::set_current_dir(dir).map_err(|e| {
-            Error::new(e)
-                .context(format!("Failed to change working directory to '{}'", dir.display()))
+            Error::new(e).context(format!(
+                "Failed to change working directory to '{}'",
+                dir.display()
+            ))
         });
     }
     result = result.and_then(|_| match args.command {

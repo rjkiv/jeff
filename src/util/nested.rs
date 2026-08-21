@@ -1,9 +1,9 @@
 use std::{
-    collections::{btree_map, hash_map, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, btree_map, hash_map},
     hash::Hash,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub trait NestedMap<T1, T2, T3> {
     fn nested_insert(&mut self, v1: T1, v2: T2, v3: T3) -> Result<()>;
@@ -47,7 +47,9 @@ where
     T1: Ord,
     T2: PartialEq,
 {
-    fn nested_push(&mut self, v1: T1, v2: T2) { self.entry(v1).or_default().push(v2); }
+    fn nested_push(&mut self, v1: T1, v2: T2) {
+        self.entry(v1).or_default().push(v2);
+    }
 
     fn nested_remove(&mut self, v1: &T1, v2: &T2) {
         if let Some(vec) = self.get_mut(v1) {
@@ -61,7 +63,9 @@ where
     T1: Ord + Hash,
     T2: PartialEq,
 {
-    fn nested_push(&mut self, v1: T1, v2: T2) { self.entry(v1).or_default().push(v2); }
+    fn nested_push(&mut self, v1: T1, v2: T2) {
+        self.entry(v1).or_default().push(v2);
+    }
 
     fn nested_remove(&mut self, v1: &T1, v2: &T2) {
         if let Some(vec) = self.get_mut(v1) {

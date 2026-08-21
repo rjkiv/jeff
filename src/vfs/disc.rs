@@ -13,7 +13,7 @@ use typed_path::Utf8UnixPath;
 use zerocopy::{FromZeros, IntoBytes};
 
 use super::{
-    next_non_empty, StaticFile, Vfs, VfsError, VfsFile, VfsFileType, VfsMetadata, VfsResult,
+    StaticFile, Vfs, VfsError, VfsFile, VfsFileType, VfsMetadata, VfsResult, next_non_empty,
 };
 
 #[derive(Clone)]
@@ -44,7 +44,12 @@ impl DiscFs {
         mtime: Option<FileTime>,
     ) -> io::Result<Self> {
         let meta = base.meta().map_err(nod_to_io_error)?;
-        Ok(Self { disc, base, meta, mtime })
+        Ok(Self {
+            disc,
+            base,
+            meta,
+            mtime,
+        })
     }
 
     fn find(&self, path: &Utf8UnixPath) -> VfsResult<DiscNode<'_>> {
@@ -93,24 +98,30 @@ impl DiscFs {
                 match segment.to_ascii_lowercase().as_str() {
                     "" => Ok(DiscNode::Special(SpecialDir::Disc)),
                     "header.bin" => Ok(DiscNode::Static(&self.disc.header().as_bytes()[..0x100])),
-                    "region.bin" => {
-                        Ok(DiscNode::Static(self.disc.region().ok_or(VfsError::NotFound)?))
-                    }
+                    "region.bin" => Ok(DiscNode::Static(
+                        self.disc.region().ok_or(VfsError::NotFound)?,
+                    )),
                     _ => Ok(DiscNode::None),
                 }
             }
-            "ticket.bin" => {
-                Ok(DiscNode::Static(self.meta.raw_ticket.as_deref().ok_or(VfsError::NotFound)?))
-            }
-            "tmd.bin" => {
-                Ok(DiscNode::Static(self.meta.raw_tmd.as_deref().ok_or(VfsError::NotFound)?))
-            }
-            "cert.bin" => {
-                Ok(DiscNode::Static(self.meta.raw_cert_chain.as_deref().ok_or(VfsError::NotFound)?))
-            }
-            "h3.bin" => {
-                Ok(DiscNode::Static(self.meta.raw_h3_table.as_deref().ok_or(VfsError::NotFound)?))
-            }
+            "ticket.bin" => Ok(DiscNode::Static(
+                self.meta.raw_ticket.as_deref().ok_or(VfsError::NotFound)?,
+            )),
+            "tmd.bin" => Ok(DiscNode::Static(
+                self.meta.raw_tmd.as_deref().ok_or(VfsError::NotFound)?,
+            )),
+            "cert.bin" => Ok(DiscNode::Static(
+                self.meta
+                    .raw_cert_chain
+                    .as_deref()
+                    .ok_or(VfsError::NotFound)?,
+            )),
+            "h3.bin" => Ok(DiscNode::Static(
+                self.meta
+                    .raw_h3_table
+                    .as_deref()
+                    .ok_or(VfsError::NotFound)?,
+            )),
             _ => Ok(DiscNode::None),
         }
     }
@@ -131,7 +142,10 @@ impl Vfs for DiscFs {
                         let mut file = self.base.open_file(node)?;
                         let mut data = vec![0u8; len];
                         file.read_exact(&mut data)?;
-                        Ok(Box::new(StaticFile::new(Arc::from(data.as_slice()), self.mtime)))
+                        Ok(Box::new(StaticFile::new(
+                            Arc::from(data.as_slice()),
+                            self.mtime,
+                        )))
                     }
                 }
                 NodeKind::Directory => Err(VfsError::IsADirectory),
@@ -215,16 +229,22 @@ impl Vfs for DiscFs {
     fn metadata(&mut self, path: &Utf8UnixPath) -> VfsResult<VfsMetadata> {
         match self.find(path)? {
             DiscNode::None => Err(VfsError::NotFound),
-            DiscNode::Special(_) => {
-                Ok(VfsMetadata { file_type: VfsFileType::Directory, len: 0, mtime: self.mtime })
-            }
+            DiscNode::Special(_) => Ok(VfsMetadata {
+                file_type: VfsFileType::Directory,
+                len: 0,
+                mtime: self.mtime,
+            }),
             DiscNode::Node(_, _, node) => {
                 let (file_type, len) = match node.kind() {
                     NodeKind::File => (VfsFileType::File, node.length()),
                     NodeKind::Directory => (VfsFileType::Directory, 0),
                     NodeKind::Invalid => return Err(VfsError::from("FST: Invalid node kind")),
                 };
-                Ok(VfsMetadata { file_type, len, mtime: self.mtime })
+                Ok(VfsMetadata {
+                    file_type,
+                    len,
+                    mtime: self.mtime,
+                })
             }
             DiscNode::Static(data) => Ok(VfsMetadata {
                 file_type: VfsFileType::File,
@@ -249,7 +269,10 @@ struct DiscFile {
 
 impl DiscFile {
     pub fn new(file: OwnedFileStream, mtime: Option<FileTime>) -> Self {
-        Self { inner: DiscFileInner::Stream(file), mtime }
+        Self {
+            inner: DiscFileInner::Stream(file),
+            mtime,
+        }
     }
 
     fn convert_to_mapped(&mut self) -> io::Result<()> {
@@ -328,7 +351,9 @@ impl VfsFile for DiscFile {
         }
     }
 
-    fn into_disc_stream(self: Box<Self>) -> Box<dyn DiscStream> { self }
+    fn into_disc_stream(self: Box<Self>) -> Box<dyn DiscStream> {
+        self
+    }
 }
 
 pub fn nod_to_io_error(e: nod::Error) -> io::Error {

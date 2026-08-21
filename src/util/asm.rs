@@ -30,7 +30,9 @@ struct SymbolEntry {
 }
 
 pub fn write_asm<W>(w: &mut W, obj: &ObjInfo) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     writeln!(w, ".include \"macros.inc\"")?;
     if !obj.name.is_empty() {
         let name = obj
@@ -51,15 +53,21 @@ where W: Write + ?Sized {
         // Build symbol start/end entries
         let mut entries = BTreeMap::<u32, Vec<SymbolEntry>>::new();
         for (symbol_index, symbol) in obj.symbols.for_section(section_idx) {
-            entries.nested_push(symbol.address, SymbolEntry {
-                index: symbol_index,
-                kind: SymbolEntryKind::Start,
-            });
-            if symbol.size > 0 {
-                entries.nested_push(symbol.address + symbol.size, SymbolEntry {
+            entries.nested_push(
+                symbol.address,
+                SymbolEntry {
                     index: symbol_index,
-                    kind: SymbolEntryKind::End,
-                });
+                    kind: SymbolEntryKind::Start,
+                },
+            );
+            if symbol.size > 0 {
+                entries.nested_push(
+                    symbol.address + symbol.size,
+                    SymbolEntry {
+                        index: symbol_index,
+                        kind: SymbolEntryKind::End,
+                    },
+                );
             }
         }
 
@@ -98,20 +106,26 @@ where W: Write + ?Sized {
                             size_known: true,
                             ..Default::default()
                         });
-                        vec.push(SymbolEntry { index: symbol_idx, kind: SymbolEntryKind::Label });
+                        vec.push(SymbolEntry {
+                            index: symbol_idx,
+                            kind: SymbolEntryKind::Label,
+                        });
                         target_symbol_idx = Some(symbol_idx);
                     }
                     if let Some(symbol_idx) = target_symbol_idx {
-                        relocations.insert(addr, ObjReloc {
-                            kind: match ins.op {
-                                Opcode::B => ObjRelocKind::PpcRel24,
-                                Opcode::Bc => ObjRelocKind::PpcRel14,
-                                _ => unreachable!(),
+                        relocations.insert(
+                            addr,
+                            ObjReloc {
+                                kind: match ins.op {
+                                    Opcode::B => ObjRelocKind::PpcRel24,
+                                    Opcode::Bc => ObjRelocKind::PpcRel14,
+                                    _ => unreachable!(),
+                                },
+                                target_symbol: symbol_idx,
+                                addend: 0,
+                                module: None,
                             },
-                            target_symbol: symbol_idx,
-                            addend: 0,
-                            module: None,
-                        });
+                        );
                     }
                 }
             }
@@ -137,7 +151,11 @@ where W: Write + ?Sized {
                 None => continue,
             };
             let target_section = obj.sections.get(target_section_idx).ok_or_else(|| {
-                anyhow!("Invalid relocation target section: {:#010X} {:?}", reloc_address, target)
+                anyhow!(
+                    "Invalid relocation target section: {:#010X} {:?}",
+                    reloc_address,
+                    target
+                )
             })?;
             let address = (target.address as i64 + reloc.addend) as u32;
             let vec = match section_entries[target_section_idx as usize].entry(address) {
@@ -157,7 +175,10 @@ where W: Write + ?Sized {
                     size_known: true,
                     ..Default::default()
                 });
-                vec.push(SymbolEntry { index: symbol_idx, kind: SymbolEntryKind::Label });
+                vec.push(SymbolEntry {
+                    index: symbol_idx,
+                    kind: SymbolEntryKind::Label,
+                });
             }
         }
     }
@@ -165,7 +186,11 @@ where W: Write + ?Sized {
     // Write common symbols
     let mut common_symbols = Vec::new();
     for symbol in symbols.iter().filter(|s| s.flags.is_common()) {
-        ensure!(symbol.section.is_none(), "Invalid: common symbol with section {:?}", symbol);
+        ensure!(
+            symbol.section.is_none(),
+            "Invalid: common symbol with section {:?}",
+            symbol
+        );
         common_symbols.push(symbol);
     }
     if !common_symbols.is_empty() {
@@ -250,7 +275,15 @@ where
     for (addr, ins) in InsIter::new(data, address, Extensions::xenon()) {
         let reloc = relocations.get(&addr);
         let file_offset = section.file_offset + (addr - section.address) as u64;
-        write_ins(w, symbols, addr, ins, reloc, file_offset, section.virtual_address)?;
+        write_ins(
+            w,
+            symbols,
+            addr,
+            ins,
+            reloc,
+            file_offset,
+            section.virtual_address,
+        )?;
     }
     Ok(())
 }
@@ -342,7 +375,9 @@ where
 }
 
 fn write_reloc<W>(w: &mut W, symbols: &[ObjSymbol], reloc: &ObjReloc) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     write_reloc_symbol(w, symbols, reloc)?;
     match reloc.kind {
         ObjRelocKind::Absolute | ObjRelocKind::PpcRel24 | ObjRelocKind::PpcRel14 => {
@@ -549,7 +584,15 @@ where
                 entry,
                 reloc,
             );
-            write_code_chunk(w, symbols, entries, relocations, section, current_address, data)?;
+            write_code_chunk(
+                w,
+                symbols,
+                entries,
+                relocations,
+                section,
+                current_address,
+                data,
+            )?;
         } else {
             write_data_chunk(w, data, current_data_kind)?;
         }
@@ -643,7 +686,9 @@ fn find_data_kind(
 }
 
 fn write_string<W>(w: &mut W, data: &[u8]) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     let terminated = matches!(data.last(), Some(&b) if b == 0);
     if terminated {
         write!(w, "\t.string \"")?;
@@ -670,7 +715,9 @@ where W: Write + ?Sized {
 use encoding_rs::SHIFT_JIS;
 
 fn write_string_shiftjis<W>(w: &mut W, data: &[u8]) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     if data.last() != Some(&0x00) {
         bail!("Non-terminated Shift-JIS string");
     }
@@ -700,7 +747,9 @@ where W: Write + ?Sized {
 }
 
 fn write_string16<W>(w: &mut W, data: &[u16]) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     if matches!(data.last(), Some(&b) if b == 0) {
         write!(w, "\t.string16 \"")?;
     } else {
@@ -730,7 +779,9 @@ where W: Write + ?Sized {
 }
 
 fn write_data_chunk<W>(w: &mut W, data: &[u8], data_kind: ObjDataKind) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     let remain = data;
     match data_kind {
         ObjDataKind::String => {
@@ -762,7 +813,10 @@ where W: Write + ?Sized {
         }
         ObjDataKind::String16Table => {
             if !data.len().is_multiple_of(2) {
-                bail!("Attempted to write wstring_table with length {:#X}", data.len());
+                bail!(
+                    "Attempted to write wstring_table with length {:#X}",
+                    data.len()
+                );
             }
             let data = data
                 .as_chunks::<2>()
@@ -796,7 +850,10 @@ where W: Write + ?Sized {
     };
     for chunk in remain.chunks(chunk_size) {
         if data_kind == ObjDataKind::Byte || matches!(chunk.len(), 1 | 3 | 5..=7) {
-            let bytes = chunk.iter().map(|c| format!("{c:#04X}")).collect::<Vec<String>>();
+            let bytes = chunk
+                .iter()
+                .map(|c| format!("{c:#04X}"))
+                .collect::<Vec<String>>();
             writeln!(w, "\t.byte {}", bytes.join(", "))?;
         } else {
             match chunk.len() {
@@ -835,7 +892,11 @@ where W: Write + ?Sized {
                     writeln!(w, "\t.short {data}")?;
                 }
                 2 => {
-                    writeln!(w, "\t.2byte {:#06X}", u16::from_be_bytes(chunk.try_into().unwrap()))?;
+                    writeln!(
+                        w,
+                        "\t.2byte {:#06X}",
+                        u16::from_be_bytes(chunk.try_into().unwrap())
+                    )?;
                 }
                 _ => unreachable!(),
             }
@@ -1008,11 +1069,7 @@ where
     Ok(())
 }
 
-fn write_reloc_symbol<W>(
-    w: &mut W,
-    symbols: &[ObjSymbol],
-    reloc: &ObjReloc,
-) -> std::io::Result<()>
+fn write_reloc_symbol<W>(w: &mut W, symbols: &[ObjSymbol], reloc: &ObjReloc) -> std::io::Result<()>
 where
     W: Write + ?Sized,
 {
@@ -1025,7 +1082,9 @@ where
 }
 
 fn write_symbol_name<W>(w: &mut W, name: &str) -> std::io::Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     if name.contains('@')
         || name.contains('<')
         || name.contains('\\')
@@ -1041,7 +1100,10 @@ where W: Write + ?Sized {
 
 #[inline]
 fn is_illegal_instruction(code: u32) -> bool {
-    matches!(code, 0x43000000 /* bc 24, lt, 0x0 */ | 0xB8030000 /* lmw r0, 0(r3) */)
+    matches!(
+        code,
+        0x43000000 /* bc 24, lt, 0x0 */ | 0xB8030000 /* lmw r0, 0(r3) */
+    )
 }
 
 #[cfg(test)]
@@ -1049,14 +1111,21 @@ mod tests {
     use super::*;
 
     fn make_test_symbol(kind: ObjSymbolKind) -> ObjSymbol {
-        ObjSymbol { name: "test".to_string(), kind, ..Default::default() }
+        ObjSymbol {
+            name: "test".to_string(),
+            kind,
+            ..Default::default()
+        }
     }
 
     /// Test that find_symbol_kind returns the symbol's kind when a Start entry is present.
     #[test]
     fn test_find_symbol_kind_start_entry() {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Object)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Start }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::Start,
+        }];
 
         let result = find_symbol_kind(ObjSymbolKind::Unknown, &symbols, &entries).unwrap();
         assert_eq!(result, ObjSymbolKind::Object);
@@ -1066,7 +1135,10 @@ mod tests {
     #[test]
     fn test_find_symbol_kind_label_entry() {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Function)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Label }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::Label,
+        }];
 
         let result = find_symbol_kind(ObjSymbolKind::Object, &symbols, &entries).unwrap();
         // Label entries should not change the kind
@@ -1092,7 +1164,10 @@ mod tests {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Object)];
 
         // At the end of the jump table, we have an End entry
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::End }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::End,
+        }];
 
         // FIXED behavior: End entry resets kind to Unknown
         let result = find_symbol_kind(ObjSymbolKind::Object, &symbols, &entries).unwrap();
@@ -1117,10 +1192,16 @@ mod tests {
         ];
 
         // End of A, Start of B at the same address
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::End }, SymbolEntry {
-            index: 1,
-            kind: SymbolEntryKind::Start,
-        }];
+        let entries = vec![
+            SymbolEntry {
+                index: 0,
+                kind: SymbolEntryKind::End,
+            },
+            SymbolEntry {
+                index: 1,
+                kind: SymbolEntryKind::Start,
+            },
+        ];
 
         let result = find_symbol_kind(ObjSymbolKind::Object, &symbols, &entries).unwrap();
         // B's Start entry should set the kind to Function
@@ -1131,7 +1212,10 @@ mod tests {
     #[test]
     fn test_find_symbol_kind_unknown_symbol() {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Unknown)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Start }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::Start,
+        }];
 
         let result = find_symbol_kind(ObjSymbolKind::Function, &symbols, &entries).unwrap();
         // Unknown symbols shouldn't change the kind
@@ -1142,7 +1226,10 @@ mod tests {
     #[test]
     fn test_find_symbol_kind_section_symbol() {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Section)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Start }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::Start,
+        }];
 
         let result = find_symbol_kind(ObjSymbolKind::Function, &symbols, &entries).unwrap();
         // Section symbols shouldn't change the kind
@@ -1158,10 +1245,16 @@ mod tests {
         ];
 
         // Two Start entries with different kinds at the same address
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Start }, SymbolEntry {
-            index: 1,
-            kind: SymbolEntryKind::Start,
-        }];
+        let entries = vec![
+            SymbolEntry {
+                index: 0,
+                kind: SymbolEntryKind::Start,
+            },
+            SymbolEntry {
+                index: 1,
+                kind: SymbolEntryKind::Start,
+            },
+        ];
 
         let result = find_symbol_kind(ObjSymbolKind::Unknown, &symbols, &entries);
         assert!(result.is_err(), "Should error on conflicting kinds");
@@ -1171,7 +1264,10 @@ mod tests {
     #[test]
     fn test_find_symbol_kind_function_end_resets() {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Function)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::End }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::End,
+        }];
 
         let result = find_symbol_kind(ObjSymbolKind::Function, &symbols, &entries).unwrap();
         assert_eq!(result, ObjSymbolKind::Unknown);
@@ -1183,7 +1279,10 @@ mod tests {
     fn test_find_symbol_kind_end_only_resets_matching() {
         // Symbol is Object, but current kind is Function
         let symbols = vec![make_test_symbol(ObjSymbolKind::Object)];
-        let entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::End }];
+        let entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::End,
+        }];
 
         // Current kind is Function, ending Object shouldn't reset it
         let result = find_symbol_kind(ObjSymbolKind::Function, &symbols, &entries).unwrap();
@@ -1197,19 +1296,37 @@ mod tests {
         let symbols = vec![make_test_symbol(ObjSymbolKind::Object)];
 
         // Step 1: At jump table start
-        let start_entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::Start }];
+        let start_entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::Start,
+        }];
         let kind = find_symbol_kind(ObjSymbolKind::Unknown, &symbols, &start_entries).unwrap();
-        assert_eq!(kind, ObjSymbolKind::Object, "Jump table start should set Object");
+        assert_eq!(
+            kind,
+            ObjSymbolKind::Object,
+            "Jump table start should set Object"
+        );
 
         // Step 2: At jump table end
-        let end_entries = vec![SymbolEntry { index: 0, kind: SymbolEntryKind::End }];
+        let end_entries = vec![SymbolEntry {
+            index: 0,
+            kind: SymbolEntryKind::End,
+        }];
         let kind = find_symbol_kind(ObjSymbolKind::Object, &symbols, &end_entries).unwrap();
-        assert_eq!(kind, ObjSymbolKind::Unknown, "Jump table end should reset to Unknown");
+        assert_eq!(
+            kind,
+            ObjSymbolKind::Unknown,
+            "Jump table end should reset to Unknown"
+        );
 
         // Step 3: After jump table (no entries)
         let empty_entries: Vec<SymbolEntry> = vec![];
         let kind = find_symbol_kind(ObjSymbolKind::Unknown, &symbols, &empty_entries).unwrap();
-        assert_eq!(kind, ObjSymbolKind::Unknown, "No entries should preserve Unknown");
+        assert_eq!(
+            kind,
+            ObjSymbolKind::Unknown,
+            "No entries should preserve Unknown"
+        );
         // In write_data(), Unknown would then default to Function for Code sections
     }
 }

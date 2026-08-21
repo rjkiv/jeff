@@ -1,6 +1,8 @@
 #[inline]
 fn from_lut(lut: &[&'static str], ordinal: usize) -> Option<String> {
-    lut.get(ordinal).filter(|s| !s.contains("Unused")).map(|s| s.to_string())
+    lut.get(ordinal)
+        .filter(|s| !s.contains("Unused"))
+        .map(|s| s.to_string())
 }
 
 fn table_for(lib_name: &str) -> Option<&'static [&'static str]> {
@@ -32,12 +34,19 @@ pub fn replace_ordinal(lib_name: &String, ordinal: usize) -> String {
         return name;
     }
 
-    log::warn!("import library {} ordinal {:04X} not found!", lib_name, ordinal);
+    log::warn!(
+        "import library {} ordinal {:04X} not found!",
+        lib_name,
+        ordinal
+    );
     format!("{:04X}", ordinal)
 }
 
-const CREATEPROFILE_FUNCS: [&str; 3] =
-    ["Unused0000", "CreateProfile_Register", "CreateProfile_Unregister"];
+const CREATEPROFILE_FUNCS: [&str; 3] = [
+    "Unused0000",
+    "CreateProfile_Register",
+    "CreateProfile_Unregister",
+];
 
 const CONNECTX_FUNCS: [&str; 25] = [
     "Unused0000",
@@ -188,8 +197,13 @@ const SYSCALL_FUNCS: [&str; 118] = [
     "HvxTest",
 ];
 
-const VK_FUNCS: [&str; 5] =
-    ["Unused0000", "RegisterXuiClasses", "VK_UnInit", "VK_CreateScene", "VK_GetUserCancelled"];
+const VK_FUNCS: [&str; 5] = [
+    "Unused0000",
+    "RegisterXuiClasses",
+    "VK_UnInit",
+    "VK_CreateScene",
+    "VK_GetUserCancelled",
+];
 
 static XAM_FUNCS: [&str; 2891] = [
     "Unused0000",

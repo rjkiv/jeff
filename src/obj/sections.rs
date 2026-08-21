@@ -4,7 +4,7 @@ use std::{
     ops::{Index, IndexMut, Range, RangeBounds},
 };
 
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{Result, anyhow, bail, ensure};
 use itertools::Itertools;
 
 use crate::{
@@ -44,21 +44,35 @@ pub struct ObjSections {
 pub type SectionIndex = u32;
 
 impl ObjSections {
-    pub fn new(obj_kind: ObjKind, sections: Vec<ObjSection>) -> Self { Self { obj_kind, sections } }
+    pub fn new(obj_kind: ObjKind, sections: Vec<ObjSection>) -> Self {
+        Self { obj_kind, sections }
+    }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (SectionIndex, &ObjSection)> {
-        self.sections.iter().enumerate().map(|(i, s)| (i as SectionIndex, s))
+        self.sections
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i as SectionIndex, s))
     }
 
     pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = (SectionIndex, &mut ObjSection)> {
-        self.sections.iter_mut().enumerate().map(|(i, s)| (i as SectionIndex, s))
+        self.sections
+            .iter_mut()
+            .enumerate()
+            .map(|(i, s)| (i as SectionIndex, s))
     }
 
-    pub fn len(&self) -> SectionIndex { self.sections.len() as SectionIndex }
+    pub fn len(&self) -> SectionIndex {
+        self.sections.len() as SectionIndex
+    }
 
-    pub fn is_empty(&self) -> bool { self.sections.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.sections.is_empty()
+    }
 
-    pub fn next_section_index(&self) -> SectionIndex { self.sections.len() as SectionIndex }
+    pub fn next_section_index(&self) -> SectionIndex {
+        self.sections.len() as SectionIndex
+    }
 
     pub fn get(&self, index: SectionIndex) -> Option<&ObjSection> {
         self.sections.get(index as usize)
@@ -93,9 +107,15 @@ impl ObjSections {
             self.obj_kind == ObjKind::Executable,
             "Use of ObjSections::with_range in relocatable object"
         );
-        self.iter().find(|&(_, s)| s.contains_range(range.clone())).ok_or_else(|| {
-            anyhow!("Failed to locate section @ {:#010X}-{:#010X}", range.start, range.end)
-        })
+        self.iter()
+            .find(|&(_, s)| s.contains_range(range.clone()))
+            .ok_or_else(|| {
+                anyhow!(
+                    "Failed to locate section @ {:#010X}-{:#010X}",
+                    range.start,
+                    range.end
+                )
+            })
     }
 
     pub fn by_kind(
@@ -121,8 +141,11 @@ impl ObjSections {
     pub fn all_splits(
         &self,
     ) -> impl DoubleEndedIterator<Item = (SectionIndex, &ObjSection, u32, &ObjSplit)> {
-        self.iter()
-            .flat_map(|(idx, s)| s.splits.iter().map(move |(addr, split)| (idx, s, addr, split)))
+        self.iter().flat_map(|(idx, s)| {
+            s.splits
+                .iter()
+                .map(move |(addr, split)| (idx, s, addr, split))
+        })
     }
 
     pub fn common_bss_start(&self) -> Option<SectionAddress> {
@@ -140,7 +163,9 @@ impl ObjSections {
 impl Index<SectionIndex> for ObjSections {
     type Output = ObjSection;
 
-    fn index(&self, index: SectionIndex) -> &Self::Output { &self.sections[index as usize] }
+    fn index(&self, index: SectionIndex) -> &Self::Output {
+        &self.sections[index as usize]
+    }
 }
 
 impl IndexMut<SectionIndex> for ObjSections {
@@ -197,7 +222,9 @@ impl ObjSection {
 
     #[inline]
     pub fn contains_range<R>(&self, range: R) -> bool
-    where R: RangeBounds<u32> {
+    where
+        R: RangeBounds<u32>,
+    {
         let start = self.address;
         let end = self.address + self.size;
         let start_in_range = match range.start_bound() {

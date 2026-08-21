@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, num::NonZeroU32};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use powerpc::{Extensions, Ins};
 
 use crate::{
@@ -63,7 +63,10 @@ fn is_valid_jump_table_addr(
             let kind = obj.sections[addr.section].kind;
             kind == ObjSectionKind::Code && kind != ObjSectionKind::Bss
         }
-        _ => !matches!(obj.sections[addr.section].kind, ObjSectionKind::Code | ObjSectionKind::Bss),
+        _ => !matches!(
+            obj.sections[addr.section].kind,
+            ObjSectionKind::Code | ObjSectionKind::Bss
+        ),
     }
 }
 
@@ -147,7 +150,13 @@ fn get_jump_table_entries(
                 .kind_at_section_address(addr.section, addr.address, ObjSymbolKind::Object)
                 .ok()
                 .flatten()
-                .and_then(|(_, s)| if s.size_known { NonZeroU32::new(s.size) } else { None });
+                .and_then(|(_, s)| {
+                    if s.size_known {
+                        NonZeroU32::new(s.size)
+                    } else {
+                        None
+                    }
+                });
             if let Some(size) = known_size.or(size).map(|n| n.get()) {
                 log::trace!(
                     "Located jump table @ {:#010X} with entry count {} (from {:#010X})",
@@ -175,7 +184,10 @@ fn get_jump_table_entries(
                             }
                         }
                     } else {
-                        assert!(target.is_some(), "We need a target address to apply offsets to!");
+                        assert!(
+                            target.is_some(),
+                            "We need a target address to apply offsets to!"
+                        );
                         let target = match target.unwrap() {
                             RelocationTarget::Address(addr) => addr,
                             _ => {
@@ -217,7 +229,10 @@ fn get_jump_table_entries(
             // target = the first addr immediately after the bctr
             // multiplier = how much to multiply each entry in the jump table by
         }
-        JumpTableType::RelativeShorts { target, multiplier: _ } => {
+        JumpTableType::RelativeShorts {
+            target,
+            multiplier: _,
+        } => {
             // Check for an existing symbol with a known size, and use that if available.
             // Allows overriding jump table size analysis.
             let known_size = obj
@@ -225,7 +240,13 @@ fn get_jump_table_entries(
                 .kind_at_section_address(addr.section, addr.address, ObjSymbolKind::Object)
                 .ok()
                 .flatten()
-                .and_then(|(_, s)| if s.size_known { NonZeroU32::new(s.size) } else { None });
+                .and_then(|(_, s)| {
+                    if s.size_known {
+                        NonZeroU32::new(s.size)
+                    } else {
+                        None
+                    }
+                });
             if let Some(size) = known_size.or(size).map(|n| n.get()) {
                 log::trace!(
                     "Located jump table @ {:#010X} with entry count {} (from {:#010X})",
@@ -253,7 +274,10 @@ fn get_jump_table_entries(
                             }
                         }
                     } else {
-                        assert!(target.is_some(), "We need a target address to apply offsets to!");
+                        assert!(
+                            target.is_some(),
+                            "We need a target address to apply offsets to!"
+                        );
                         let target = match target.unwrap() {
                             RelocationTarget::Address(addr) => addr,
                             _ => {
