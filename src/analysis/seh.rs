@@ -23,23 +23,7 @@ pub struct CScopeTableInfo {
 
 // info on CXX exception info structs: https://www.openrce.org/articles/full_view/21
 #[derive(Debug, Clone)]
-pub struct CXXEhFuncInfo {
-    // The address of the __ehfuncinfo$ itself
-    pub addr: SectionAddress,
-    // unwind map addr and its entries - __unwindtable$
-    pub unwind_map_addr: Option<SectionAddress>,
-    pub unwinds: Vec<Option<SectionAddress>>,
-    // try map addr, and number of entries - __tryblocktable$, which contains __catchsym$
-    pub num_tries: u32,
-    pub try_map_addr: Option<SectionAddress>,
-    pub catches: Vec<Option<SectionAddress>>,
-    // iptostate map addr, and number of entries - parsing this map likely not needed for the purposes of labeling functions/eh objects
-    pub num_ip_to_states: u32,
-    pub ip_to_state_map_addr: Option<SectionAddress>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CxxEhFuncInfoRedo {
+pub struct CxxEhFuncInfo {
     // The address of the __ehfuncinfo$ itself
     pub addr: SectionAddress,
     // unwind map addr and number of entries - __unwindtable$
@@ -336,7 +320,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     main_size: num_insts_in_func * 4,
                     full_size: num_insts_in_func * 4,
                     handlers: cur_exceptions,
-                    exception_info: Some(CxxEhFuncInfoRedo {
+                    exception_info: Some(CxxEhFuncInfo {
                         addr: cur_func_except_record,
                         unwind_map,
                         num_tries,
