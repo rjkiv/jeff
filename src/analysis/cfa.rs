@@ -14,7 +14,6 @@ use crate::{
         slices::{FunctionSlices, TailCallResult},
     },
     obj::{
-        ExceptionType::{C, CXX},
         ObjInfo, ObjSectionKind, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind,
         SectionIndex,
     },
@@ -159,59 +158,68 @@ impl AnalyzerState {
             };
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
-
             // if this func has a C++ exception, add/replace ehfuncinfo symbols
-            if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&sym_addr) {
-                let mut syms_to_add: Vec<ObjSymbol> = Vec::new();
-                syms_to_add.push(ObjSymbol {
-                    name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
-                    address: cxx_eh_func_info.addr.address,
-                    section: Some(cxx_eh_func_info.addr.section),
-                    // if this exception record has any try/catches, there's no extra 0 at the end
-                    size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    kind: ObjSymbolKind::Object,
-                    ..Default::default()
-                });
-                if let Some(unwind_map_addr) = cxx_eh_func_info.unwind_map_addr {
-                    syms_to_add.push(ObjSymbol {
-                        name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
-                        address: unwind_map_addr.address,
-                        section: Some(unwind_map_addr.section),
-                        size: (cxx_eh_func_info.unwinds.len() * 8) as u32,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    });
-                }
-                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
-                    syms_to_add.push(ObjSymbol {
-                        name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
-                        address: try_map_addr.address,
-                        section: Some(try_map_addr.section),
-                        size: cxx_eh_func_info.num_tries * 0x14,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    });
-                }
-                if let Some(ip_to_state_map_addr) = cxx_eh_func_info.ip_to_state_map_addr {
-                    syms_to_add.push(ObjSymbol {
-                        name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
-                        address: ip_to_state_map_addr.address,
-                        section: Some(ip_to_state_map_addr.section),
-                        size: cxx_eh_func_info.num_ip_to_states * 8,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Object,
-                        ..Default::default()
-                    });
-                }
-                for sym in syms_to_add {
-                    obj.add_symbol(sym, true)?;
+            if let Some(info) = &obj.pdata_funcs.get(&sym_addr) {
+                if let Some(cxx_eh_func_info) = &info.exception_info {
+                    obj.symbols.add(
+                        ObjSymbol {
+                            name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
+                            address: cxx_eh_func_info.addr.address,
+                            section: Some(cxx_eh_func_info.addr.section),
+                            // if this exception record has any try/catches, there's no extra 0 at the end
+                            size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Object,
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
+                    if let Some((unwind_addr, num_unwinds)) = cxx_eh_func_info.unwind_map {
+                        obj.symbols.add(
+                            ObjSymbol {
+                                name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
+                                address: unwind_addr.address,
+                                section: Some(unwind_addr.section),
+                                size: num_unwinds * 8,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object,
+                                ..Default::default()
+                            },
+                            false,
+                        )?;
+                    }
+                    if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                        obj.symbols.add(
+                            ObjSymbol {
+                                name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
+                                address: try_map_addr.address,
+                                section: Some(try_map_addr.section),
+                                size: cxx_eh_func_info.num_tries * 0x14,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object,
+                                ..Default::default()
+                            },
+                            false,
+                        )?;
+                    }
+                    if let Some((addr, num_entries)) = cxx_eh_func_info.ip_to_state_map {
+                        obj.symbols.add(
+                            ObjSymbol {
+                                name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
+                                address: addr.address,
+                                section: Some(addr.section),
+                                size: num_entries * 8,
+                                size_known: true,
+                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                kind: ObjSymbolKind::Object,
+                                ..Default::default()
+                            },
+                            false,
+                        )?;
+                    }
                 }
             }
         }
@@ -309,11 +317,9 @@ impl AnalyzerState {
         // Also check the beginning of every code section
         for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
             let this_sec_start = SectionAddress::new(section_index, section.address);
-            let possible_func_addr = SectionAddress::new(section_index, section.address + 8);
-            if obj.pdata_funcs.contains_key(&possible_func_addr) {
-                continue;
+            if !obj.exception_data_infos.contains(&this_sec_start) {
+                self.functions.entry(this_sec_start).or_default();
             }
-            self.functions.entry(this_sec_start).or_default();
         }
 
         // Process known functions first
@@ -542,48 +548,20 @@ impl AnalyzerState {
         let function_end = self.functions.get(&start).and_then(|info| info.end);
 
         // if there are exception structures coming after the main function, analyze those first
-        if let Some(C { handlers }) = obj.pdata_funcs.get(&start) {
-            for (handler_start, handler_end) in handlers {
+        if let Some(info) = obj.pdata_funcs.get(&start) {
+            for (handler_start, handler_size) in &info.handlers {
                 // FIXME: C funcs with excepts currently have a broken bl reloc
                 if !slices.analyze(
                     obj,
                     *handler_start,
                     start,
-                    Some(*handler_end),
+                    Some(*handler_start + *handler_size),
                     &self.functions,
                     None,
                 )? {
                     return Ok(None);
                 }
             }
-            // TODO: get the max end from our handlers? - that's what function_end should be
-        } else if let Some(CXX { info: cxx_eh_func_info }) = &obj.pdata_funcs.get(&start) {
-            // analyze unwinds, then catches
-            for unwind_start in cxx_eh_func_info.unwinds.iter().flatten() {
-                if !slices.analyze(
-                    obj,
-                    *unwind_start,
-                    start,
-                    function_end,
-                    &self.functions,
-                    None,
-                )? {
-                    return Ok(None);
-                }
-            }
-            for catch_start in cxx_eh_func_info.catches.iter().flatten() {
-                if !slices.analyze(
-                    obj,
-                    *catch_start,
-                    start,
-                    Some(obj.catches[catch_start]),
-                    &self.functions,
-                    None,
-                )? {
-                    return Ok(None);
-                }
-            }
-            // TODO: get the max end from our unwinds/catches? - that's what function_end should be
         }
         // finally, analyze the main function
         if !slices.analyze(obj, start, start, function_end, &self.functions, None)? {
@@ -613,30 +591,26 @@ impl AnalyzerState {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
                             // if first is a C func with excepts, and the second is not
-                            if let Some(C { handlers }) = obj.pdata_funcs.get(&first) {
-                                if !matches!(obj.pdata_funcs.get(&second), Some(&C { .. })) {
-                                    // using unwrap because there's no way this could possibly be None
-                                    let max_except_end =
-                                        handlers.last_key_value().map(|(_, v)| v).unwrap();
-
+                            if let Some(first_info) = obj.pdata_funcs.get(&first) {
+                                if obj.pdata_funcs.get(&second).is_none() {
+                                    let max_except_end = first + first_info.full_size;
                                     // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
                                     // delete it, and set first's end to max end
-                                    if first <= second && second < *max_except_end {
+                                    if first <= second && second < max_except_end {
                                         assert_eq!(
-                                            first_end, *max_except_end,
+                                            first_end, max_except_end,
                                             "Expected end {:?}, calculated end {:?}",
                                             max_except_end, first
                                         );
                                         c_exception_truncations.push((
                                             first,
                                             second,
-                                            *max_except_end,
+                                            max_except_end,
                                         ));
                                         continue;
                                     }
                                 }
                             }
-
                             log::warn!(
                                 "Overlapping functions {}-{} -> {}, truncating end of {}",
                                 first,
@@ -653,11 +627,7 @@ impl AnalyzerState {
                         };
                         if second > addr {
                             // don't try to add a function where there's an exception symbol
-                            let possible_func_addr =
-                                SectionAddress::new(section_index, addr.address + 8);
-                            if obj.pdata_funcs.contains_key(&possible_func_addr)
-                                || obj.catches.contains_key(&possible_func_addr)
-                            {
+                            if obj.exception_data_infos.contains(&addr) {
                                 continue;
                             }
                             log::trace!(

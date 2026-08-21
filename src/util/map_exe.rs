@@ -11,8 +11,8 @@ use typed_path::Utf8NativePathBuf;
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{
-        ExceptionType::Normal, ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet,
-        ObjSymbolFlags, ObjSymbolKind, ObjUnit,
+        ObjInfo, ObjSectionKind, ObjSplit, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags,
+        ObjSymbolKind, ObjUnit,
     },
 };
 // SymbolRef: the symbol name, and the obj it came from
@@ -292,12 +292,12 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                     // if func came from pdata, DO NOT override the size
                     let the_sec_addr = SectionAddress::new(sec_idx, sym.addr);
                     let sym_to_add: ObjSymbol =
-                        if let Some(Normal { end }) = obj.pdata_funcs.get(&the_sec_addr) {
+                        if let Some(info) = obj.pdata_funcs.get(&the_sec_addr) {
                             ObjSymbol {
                                 name: sym.symbol,
                                 address: sym.addr,
                                 section: Some(sec_idx),
-                                size: (end.address - the_sec_addr.address),
+                                size: info.full_size,
                                 size_known: true,
                                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                                 kind: if sec.kind == ObjSectionKind::Code && sym.is_function {
