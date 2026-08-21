@@ -592,7 +592,7 @@ impl AnalyzerState {
                         if first_end > second {
                             // if first is a C func with excepts, and the second is not
                             if let Some(first_info) = obj.pdata_funcs.get(&first) {
-                                if obj.pdata_funcs.get(&second).is_none() {
+                                if !obj.pdata_funcs.contains_key(&second) {
                                     let max_except_end = first + first_info.full_size;
                                     // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
                                     // delete it, and set first's end to max end
