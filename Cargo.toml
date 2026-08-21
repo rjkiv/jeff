@@ -4,12 +4,12 @@ description = "An Xbox 360 decompilation toolkit."
 authors = ["rjkiv"]
 license = "MIT OR Apache-2.0"
 version = "0.5.0"
-edition = "2021"
+edition = "2024"
 publish = false
 repository = "https://github.com/rjkiv/jeff"
 readme = "README.md"
 categories = ["command-line-utilities"]
-rust-version = "1.82"
+rust-version = "1.98.0"
 
 [[bin]]
 name = "jeff"
@@ -42,16 +42,12 @@ fixedbitset = "0.5"
 flagset = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 hex = "0.4"
-indexmap = "2.6"
 itertools = "0.13"
 log = "0.4"
 memchr = "2.7"
 memmap2 = "0.9.11"
-multimap = "0.10"
 nodtool = "1.4.4"
-#nodtool = { path = "../nod-rs/nodtool" }
 #objdiff-core = { version = "2.2", features = ["ppc"] }
-#objdiff-core = { path = "../objdiff/objdiff-core", features = ["ppc"] }
 objdiff-core = { git = "https://github.com/rjkiv/objdiff.git", branch = "main2.2.0", features = ["ppc"] }
 #object = { version = "0.37.1", features = ["read_core", "write_core", "std", "elf", "write_std"], default-features = false }
 object = { git = "https://github.com/rjkiv/object.git ", features = ["read_core", "write_core", "std", "elf", "write_std"] }

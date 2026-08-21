@@ -5,7 +5,7 @@ use std::{
     ops::{Add, AddAssign, BitAnd, Sub},
 };
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use itertools::Itertools;
 
 use crate::{
@@ -226,7 +226,7 @@ impl AnalyzerState {
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {
             // Truncate overlapping jump tables
-            if let Some((&next_addr, _)) = iter.peek() {
+            if let Some(&(&next_addr, _)) = iter.peek() {
                 if next_addr.section == addr.section {
                     size = min(size, next_addr.address - addr.address);
                 }
@@ -368,11 +368,7 @@ impl AnalyzerState {
             .functions
             .iter()
             .filter_map(|(&addr, info)| {
-                if info.is_unfinalized() {
-                    info.slices.clone().map(|s| (addr, s))
-                } else {
-                    None
-                }
+                if info.is_unfinalized() { info.slices.clone().map(|s| (addr, s)) } else { None }
             })
             .collect_vec();
         for (addr, mut slices) in unfinalized {
