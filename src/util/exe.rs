@@ -100,6 +100,9 @@ impl InputtedExecutable {
             } else {
                 section.name()?.to_string()
             };
+
+            // NOTE: to calculate bss start within .data, do virtual address + size of raw data
+
             let section_kind = match section.kind() {
                 SectionKind::Text => ObjSectionKind::Code,
                 SectionKind::Data => ObjSectionKind::Data,

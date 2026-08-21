@@ -42,8 +42,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Rust toolchain
-        # We use nightly options in rustfmt.toml
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - name: Cargo fmt
