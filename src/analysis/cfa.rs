@@ -159,15 +159,30 @@ impl AnalyzerState {
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
             // if this func has a C++ exception, add/replace ehfuncinfo symbols
-            if let Some(info) = &obj.pdata_funcs.get(&sym_addr) {
-                if let Some(cxx_eh_func_info) = &info.exception_info {
+            if let Some(info) = &obj.pdata_funcs.get(&sym_addr)
+                && let Some(cxx_eh_func_info) = &info.exception_info
+            {
+                obj.symbols.add(
+                    ObjSymbol {
+                        name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
+                        address: cxx_eh_func_info.addr.address,
+                        section: Some(cxx_eh_func_info.addr.section),
+                        // if this exception record has any try/catches, there's no extra 0 at the end
+                        size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+                if let Some((unwind_addr, num_unwinds)) = cxx_eh_func_info.unwind_map {
                     obj.symbols.add(
                         ObjSymbol {
-                            name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
-                            address: cxx_eh_func_info.addr.address,
-                            section: Some(cxx_eh_func_info.addr.section),
-                            // if this exception record has any try/catches, there's no extra 0 at the end
-                            size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                            name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
+                            address: unwind_addr.address,
+                            section: Some(unwind_addr.section),
+                            size: num_unwinds * 8,
                             size_known: true,
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                             kind: ObjSymbolKind::Object,
@@ -175,61 +190,46 @@ impl AnalyzerState {
                         },
                         false,
                     )?;
-                    if let Some((unwind_addr, num_unwinds)) = cxx_eh_func_info.unwind_map {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
-                                address: unwind_addr.address,
-                                section: Some(unwind_addr.section),
-                                size: num_unwinds * 8,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
-                    if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
-                                address: try_map_addr.address,
-                                section: Some(try_map_addr.section),
-                                size: cxx_eh_func_info.num_tries * 0x14,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
-                    if let Some((addr, num_entries)) = cxx_eh_func_info.ip_to_state_map {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
-                                address: addr.address,
-                                section: Some(addr.section),
-                                size: num_entries * 8,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
+                }
+                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                    obj.symbols.add(
+                        ObjSymbol {
+                            name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
+                            address: try_map_addr.address,
+                            section: Some(try_map_addr.section),
+                            size: cxx_eh_func_info.num_tries * 0x14,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Object,
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
+                }
+                if let Some((addr, num_entries)) = cxx_eh_func_info.ip_to_state_map {
+                    obj.symbols.add(
+                        ObjSymbol {
+                            name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
+                            address: addr.address,
+                            section: Some(addr.section),
+                            size: num_entries * 8,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Object,
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
                 }
             }
         }
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {
             // Truncate overlapping jump tables
-            if let Some(&(&next_addr, _)) = iter.peek() {
-                if next_addr.section == addr.section {
-                    size = min(size, next_addr.address - addr.address);
-                }
+            if let Some(&(&next_addr, _)) = iter.peek()
+                && next_addr.section == addr.section
+            {
+                size = min(size, next_addr.address - addr.address);
             }
             let section = &obj.sections[addr.section];
             ensure!(
@@ -587,24 +587,20 @@ impl AnalyzerState {
                         let Some(first_end) = first_info.end else { continue };
                         if first_end > second {
                             // if first is a C func with excepts, and the second is not
-                            if let Some(first_info) = obj.pdata_funcs.get(&first) {
-                                if !obj.pdata_funcs.contains_key(&second) {
-                                    let max_except_end = first + first_info.full_size;
-                                    // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
-                                    // delete it, and set first's end to max end
-                                    if first <= second && second < max_except_end {
-                                        assert_eq!(
-                                            first_end, max_except_end,
-                                            "Expected end {:?}, calculated end {:?}",
-                                            max_except_end, first
-                                        );
-                                        c_exception_truncations.push((
-                                            first,
-                                            second,
-                                            max_except_end,
-                                        ));
-                                        continue;
-                                    }
+                            if let Some(first_info) = obj.pdata_funcs.get(&first)
+                                && !obj.pdata_funcs.contains_key(&second)
+                            {
+                                let max_except_end = first + first_info.full_size;
+                                // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
+                                // delete it, and set first's end to max end
+                                if first <= second && second < max_except_end {
+                                    assert_eq!(
+                                        first_end, max_except_end,
+                                        "Expected end {:?}, calculated end {:?}",
+                                        max_except_end, first
+                                    );
+                                    c_exception_truncations.push((first, second, max_except_end));
+                                    continue;
                                 }
                             }
                             log::warn!(

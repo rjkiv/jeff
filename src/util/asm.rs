@@ -1,10 +1,10 @@
 use std::{
-    cmp::{min, Ordering},
-    collections::{btree_map, BTreeMap},
+    cmp::{Ordering, min},
+    collections::{BTreeMap, btree_map},
     io::Write,
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use itertools::Itertools;
 use powerpc::{Argument, Extensions, Ins, InsIter, Opcode};
 
@@ -500,27 +500,27 @@ where
         } else {
             current_symbol_kind
         };
-        if let Some((&reloc_addr, r)) = reloc {
-            if current_address == reloc_addr {
-                reloc = reloc_iter.next();
-                match symbol_kind {
-                    ObjSymbolKind::Object => {
-                        current_address = write_data_reloc(
-                            w,
-                            symbols,
-                            entries,
-                            reloc_addr,
-                            r,
-                            section_entries,
-                            section,
-                        )?;
-                        continue;
-                    }
-                    ObjSymbolKind::Function => {
-                        // handled in write_code_chunk
-                    }
-                    ObjSymbolKind::Unknown | ObjSymbolKind::Section => unreachable!(),
+        if let Some((&reloc_addr, r)) = reloc
+            && current_address == reloc_addr
+        {
+            reloc = reloc_iter.next();
+            match symbol_kind {
+                ObjSymbolKind::Object => {
+                    current_address = write_data_reloc(
+                        w,
+                        symbols,
+                        entries,
+                        reloc_addr,
+                        r,
+                        section_entries,
+                        section,
+                    )?;
+                    continue;
                 }
+                ObjSymbolKind::Function => {
+                    // handled in write_code_chunk
+                }
+                ObjSymbolKind::Unknown | ObjSymbolKind::Section => unreachable!(),
             }
         }
 
@@ -738,17 +738,19 @@ where W: Write + ?Sized {
         }
         ObjDataKind::ShiftJIS => {
             if data.is_empty() || data.last() != Some(&0x00) {
-                anyhow::bail!("Non-terminated Shift-JIS string");
+                bail!("Non-terminated Shift-JIS string");
             }
             return write_string_shiftjis(w, data);
         }
         ObjDataKind::String16 => {
-            if data.len() % 2 != 0 {
+            if !data.len().is_multiple_of(2) {
                 bail!("Attempted to write wstring with length {:#X}", data.len());
             }
             let data = data
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes(c.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(c[0..2].try_into().unwrap()))
                 .collect::<Vec<u16>>();
             return write_string16(w, &data);
         }
@@ -759,12 +761,14 @@ where W: Write + ?Sized {
             return Ok(());
         }
         ObjDataKind::String16Table => {
-            if data.len() % 2 != 0 {
+            if !data.len().is_multiple_of(2) {
                 bail!("Attempted to write wstring_table with length {:#X}", data.len());
             }
             let data = data
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes(c.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(c[0..2].try_into().unwrap()))
                 .collect::<Vec<u16>>();
             for slice in data.split_inclusive(|&b| b == 0) {
                 write_string16(w, slice)?;
@@ -921,16 +925,16 @@ where
         if current_address == end {
             break;
         }
-        if let Some((sym_addr, vec)) = entry {
-            if current_address == *sym_addr {
-                for entry in vec {
-                    if entry.kind == SymbolEntryKind::End && begin {
-                        continue;
-                    }
-                    write_symbol_entry(w, symbols, entry, section)?;
+        if let Some((sym_addr, vec)) = entry
+            && current_address == *sym_addr
+        {
+            for entry in vec {
+                if entry.kind == SymbolEntryKind::End && begin {
+                    continue;
                 }
-                entry = entry_iter.next();
+                write_symbol_entry(w, symbols, entry, section)?;
             }
+            entry = entry_iter.next();
         }
         begin = false;
 

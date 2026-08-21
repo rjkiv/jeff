@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 
 use crate::util::read::{read_halfword, read_word};
 
@@ -172,7 +172,7 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                     "Resource info has unexpected length! (expected a multiple of 16)"
                 );
                 let mut info: Vec<ResourceInfo> = vec![];
-                for chunk in header.data.chunks_exact(16) {
+                for chunk in header.data.as_chunks::<16>().0 {
                     let title_id = String::from_utf8(chunk[0..8].to_vec())?;
                     let rsrc_start = u32::from_be_bytes(chunk[8..12].try_into()?);
                     let rsrc_end = rsrc_start + u32::from_be_bytes(chunk[12..16].try_into()?);

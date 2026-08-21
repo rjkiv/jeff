@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
@@ -60,7 +60,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     // C/CXX exception handler start addresses, and their sizes
     let mut known_exceptions: BTreeMap<SectionAddress, u32> = BTreeMap::new();
 
-    for chunk in pdata_section.data.chunks_exact(8) {
+    for chunk in pdata_section.data.as_chunks::<8>().0 {
         let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
         // if we encounter 0's, that's the end of usable pdata entries
         if start_addr == 0 {

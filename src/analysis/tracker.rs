@@ -3,18 +3,18 @@ use std::{
     mem::take,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use powerpc::Opcode;
 use tracing::{debug_span, info_span};
 use tracing_attributes::instrument;
 
 use crate::{
     analysis::{
+        RelocationTarget,
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
         read_u32, relocation_target_for, uniq_jump_table_entries,
         vm::{BranchTarget, GprValue, StepResult, VM},
-        RelocationTarget,
     },
     obj::{
         ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
@@ -217,25 +217,23 @@ impl Tracker {
                         // let source = ins.field_ra() as usize;
                         let target = ins.field_rd() as usize;
                         if let Some(value) = self.gpr_address(obj, ins_addr, &vm.gpr[target].value)
-                        {
-                            if let (Some(hi_addr), Some(lo_addr)) =
+                            && let (Some(hi_addr), Some(lo_addr)) =
                                 (vm.gpr[target].hi_addr, vm.gpr[target].lo_addr)
-                            {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    debug_assert_ne!(
-                                        value,
-                                        RelocationTarget::Address(SectionAddress::new(
-                                            SectionIndex::MAX,
-                                            0
-                                        ))
-                                    );
-                                    self.relocations.insert(hi_addr, Relocation::Ha(value));
-                                }
-                                let lo_reloc = self.relocations.get(&lo_addr).cloned();
-                                if lo_reloc.is_none() {
-                                    self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
+                        {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                debug_assert_ne!(
+                                    value,
+                                    RelocationTarget::Address(SectionAddress::new(
+                                        SectionIndex::MAX,
+                                        0
+                                    ))
+                                );
+                                self.relocations.insert(hi_addr, Relocation::Ha(value));
+                            }
+                            let lo_reloc = self.relocations.get(&lo_addr).cloned();
+                            if lo_reloc.is_none() {
+                                self.relocations.insert(lo_addr, Relocation::Lo(value));
                             }
                         }
                     }
@@ -243,18 +241,16 @@ impl Tracker {
                     Opcode::Ori => {
                         let target = ins.field_ra() as usize;
                         if let Some(value) = self.gpr_address(obj, ins_addr, &vm.gpr[target].value)
-                        {
-                            if let (Some(hi_addr), Some(lo_addr)) =
+                            && let (Some(hi_addr), Some(lo_addr)) =
                                 (vm.gpr[target].hi_addr, vm.gpr[target].lo_addr)
-                            {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    self.relocations.insert(hi_addr, Relocation::Ha(value));
-                                }
-                                let lo_reloc = self.relocations.get(&lo_addr).cloned();
-                                if lo_reloc.is_none() {
-                                    self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
+                        {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                self.relocations.insert(hi_addr, Relocation::Ha(value));
+                            }
+                            let lo_reloc = self.relocations.get(&lo_addr).cloned();
+                            if lo_reloc.is_none() {
+                                self.relocations.insert(lo_addr, Relocation::Lo(value));
                             }
                         }
                     }
@@ -335,10 +331,10 @@ impl Tracker {
                     if next_addr < function_end {
                         possible_missed_branches.insert(ins_addr + 4, vm.clone_all());
                     }
-                    if let RelocationTarget::Address(addr) = addr {
-                        if is_function_addr(addr) {
-                            return Ok(ExecCbResult::Jump(addr));
-                        }
+                    if let RelocationTarget::Address(addr) = addr
+                        && is_function_addr(addr)
+                    {
+                        return Ok(ExecCbResult::Jump(addr));
                     }
                     if ins.is_direct_branch() {
                         self.relocations.insert(ins_addr, Relocation::Rel24(addr));
@@ -478,8 +474,8 @@ impl Tracker {
         section: &ObjSection,
     ) -> Result<()> {
         let mut addr = SectionAddress::new(section_index, section.address);
-        for chunk in section.data.chunks_exact(4) {
-            let value = u32::from_be_bytes(chunk.try_into()?);
+        for chunk in section.data.as_chunks::<4>().0 {
+            let value = u32::from_be_bytes(chunk[0..4].try_into()?);
             if let Some(value) = self.is_valid_address(obj, addr, value) {
                 self.relocations
                     .insert(addr, Relocation::Absolute(RelocationTarget::Address(value)));
@@ -592,12 +588,11 @@ impl Tracker {
                     if symbol.data_kind == ObjDataKind::Unknown {
                         new_symbol.data_kind = data_kind;
                     }
-                    if symbol.align.is_none() {
-                        if let Some(inferred_alignment) = inferred_alignment {
-                            if symbol_address % inferred_alignment == 0 {
-                                new_symbol.align = Some(inferred_alignment);
-                            }
-                        }
+                    if symbol.align.is_none()
+                        && let Some(inferred_alignment) = inferred_alignment
+                        && symbol_address % inferred_alignment == 0
+                    {
+                        new_symbol.align = Some(inferred_alignment);
                     }
                     obj.symbols.replace(symbol_idx, new_symbol)?;
                 }

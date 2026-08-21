@@ -153,8 +153,10 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
 
             // narrow bytes didn't work, try wide bytes
             let wide_bytes = data
-                .chunks_exact(2)
-                .position(|c| c == [0, 0])
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .position(|c| *c == [0, 0])
                 .map(|pos| &data[..pos * 2])
                 .unwrap_or(data);
 
@@ -166,7 +168,11 @@ pub fn detect_strings(obj: &mut ObjInfo) -> Result<()> {
                 let mut ok = true;
                 let mut str = String::new();
                 for n in std::char::decode_utf16(
-                    wide_bytes.chunks_exact(2).map(|c| u16::from_be_bytes(c.try_into().unwrap())),
+                    wide_bytes
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| u16::from_be_bytes(c[0..2].try_into().unwrap())),
                 ) {
                     match n {
                         Ok(c) if c.is_ascii_graphic() || c.is_ascii_whitespace() => {

@@ -4,15 +4,15 @@ use std::{
     ops::{Index, RangeBounds},
 };
 
-use anyhow::{anyhow, bail, ensure, Result};
-use flagset::{flags, FlagSet};
+use anyhow::{Result, anyhow, bail, ensure};
+use flagset::{FlagSet, flags};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::{
     analysis::cfa::SectionAddress,
-    obj::{sections::SectionIndex, ObjKind, ObjRelocKind, ObjSections},
+    obj::{ObjKind, ObjRelocKind, ObjSections, sections::SectionIndex},
     util::{
         config::{is_auto_jump_table, is_auto_label, is_auto_symbol, parse_u32},
         nested::NestedVec,
@@ -271,11 +271,7 @@ impl ObjSymbols {
                         existing.size,
                         in_symbol.size
                     );
-                    if replace {
-                        in_symbol.size
-                    } else {
-                        existing.size
-                    }
+                    if replace { in_symbol.size } else { existing.size }
                 } else if in_symbol.size_known {
                     in_symbol.size
                 } else {
@@ -466,19 +462,19 @@ impl ObjSymbols {
     pub fn by_name(&self, name: &str) -> Result<Option<(SymbolIndex, &ObjSymbol)>> {
         let mut iter = self.for_name(name);
         let result = iter.next();
-        if let Some((index, symbol)) = result {
-            if let Some((other_index, other_symbol)) = iter.next() {
-                bail!(
-                    "Multiple symbols with name {}: {} {:?} {:#010X} and {} {:?} {:#010X}",
-                    name,
-                    index,
-                    symbol.kind,
-                    symbol.address,
-                    other_index,
-                    other_symbol.kind,
-                    other_symbol.address
-                );
-            }
+        if let Some((index, symbol)) = result
+            && let Some((other_index, other_symbol)) = iter.next()
+        {
+            bail!(
+                "Multiple symbols with name {}: {} {:?} {:#010X} and {} {:?} {:#010X}",
+                name,
+                index,
+                symbol.kind,
+                symbol.address,
+                other_index,
+                other_symbol.kind,
+                other_symbol.address
+            );
         }
         Ok(result)
     }

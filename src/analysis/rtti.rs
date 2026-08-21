@@ -5,7 +5,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{BTreeMap, btree_map::Entry},
     rc::{Rc, Weak},
 };
 
@@ -370,7 +370,7 @@ fn find_all_rtti_structs(obj: &mut ObjInfo, rtti: &mut RTTIMetadata) -> Result<b
             let bca_data = &rdata_section.data[bca_data_idx as usize
                 ..bca_data_idx as usize + (chd.num_base_classes * 4) as usize];
 
-            for chunk in bca_data.chunks_exact(4) {
+            for chunk in bca_data.as_chunks::<4>().0 {
                 let cur_bcd_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
                 let cur_bcd = match bcds_by_exe_addr.entry(cur_bcd_addr) {
                     Entry::Vacant(entry) => {

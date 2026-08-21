@@ -4,8 +4,8 @@ use std::{
     num::ParseIntError,
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
-use cwdemangle::{demangle, DemangleOptions};
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use cwdemangle::{DemangleOptions, demangle};
 use filetime::FileTime;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
@@ -20,7 +20,7 @@ use crate::{
         ObjSymbolFlags, ObjSymbolKind, ObjUnit, SectionIndex,
     },
     util::{
-        file::{buf_writer, FileReadInfo},
+        file::{FileReadInfo, buf_writer},
         split::default_section_align,
     },
     vfs::open_file,
@@ -206,12 +206,12 @@ where
     if let Some(cached_file) = cached_file {
         // Check file mtime
         let new_mtime = fs::metadata(path).ok().map(|m| FileTime::from_last_modification_time(&m));
-        if let (Some(new_mtime), Some(old_mtime)) = (new_mtime, cached_file.mtime) {
-            if new_mtime != old_mtime {
-                // File changed, don't write
-                warn!(path = %path, "File changed since read, not updating");
-                return Ok(());
-            }
+        if let (Some(new_mtime), Some(old_mtime)) = (new_mtime, cached_file.mtime)
+            && new_mtime != old_mtime
+        {
+            // File changed, don't write
+            warn!(path = %path, "File changed since read, not updating");
+            return Ok(());
         }
 
         // Write to buffer and compare with hash
@@ -279,10 +279,10 @@ where W: Write + ?Sized {
     if let Some(hash) = symbol.name_hash {
         write!(w, " hash:{hash:#010X}")?;
     }
-    if let Some(hash) = symbol.demangled_name_hash {
-        if symbol.name_hash != symbol.demangled_name_hash {
-            write!(w, " dhash:{hash:#010X}")?;
-        }
+    if let Some(hash) = symbol.demangled_name_hash
+        && symbol.name_hash != symbol.demangled_name_hash
+    {
+        write!(w, " dhash:{hash:#010X}")?;
     }
     if symbol.flags.is_hidden() {
         write!(w, " hidden")?;
@@ -448,10 +448,10 @@ where W: Write + ?Sized {
                 split_iter.peek().map(|&(_, _, addr, _)| addr).unwrap_or(0)
             };
             write!(w, "\t{:<11} start:{:#010X} end:{:#010X}", section.name, addr, end)?;
-            if let Some(align) = split.align {
-                if align != default_section_align(section) as u32 {
-                    write!(w, " align:{align}")?;
-                }
+            if let Some(align) = split.align
+                && align != default_section_align(section) as u32
+            {
+                write!(w, " align:{align}")?;
             }
             if split.common {
                 write!(w, " common")?;
@@ -745,11 +745,7 @@ pub fn read_splits_sections(path: &Utf8NativePath) -> Result<Option<Vec<SectionD
             _ => {}
         }
     }
-    if sections.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(sections))
-    }
+    if sections.is_empty() { Ok(None) } else { Ok(Some(sections)) }
 }
 
 pub mod signed_hex_serde {

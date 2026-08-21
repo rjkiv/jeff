@@ -1,8 +1,8 @@
 use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use memchr::memmem;
-use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
+use object::{Object, ObjectSection, SectionKind, read::pe::PeFile32};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
@@ -423,7 +423,7 @@ fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
     // if this xex has an .xidata section, mark down the funcs in there
     if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
         let mut num_xidatas = 0;
-        for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {
+        for (i, chunk) in xidata_sec.data.as_chunks::<16>().0.iter().enumerate() {
             if i == 0 {
                 continue;
             } // the first entry appears to be all 0's...but is every xidata like this?

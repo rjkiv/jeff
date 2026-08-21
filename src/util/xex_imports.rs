@@ -26,10 +26,10 @@ fn table_for(lib_name: &str) -> Option<&'static [&'static str]> {
 }
 
 pub fn replace_ordinal(lib_name: &String, ordinal: usize) -> String {
-    if let Some(table) = table_for(lib_name) {
-        if let Some(name) = from_lut(table, ordinal) {
-            return name;
-        }
+    if let Some(table) = table_for(lib_name)
+        && let Some(name) = from_lut(table, ordinal)
+    {
+        return name;
     }
 
     log::warn!("import library {} ordinal {:04X} not found!", lib_name, ordinal);
