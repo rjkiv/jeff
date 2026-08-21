@@ -435,8 +435,8 @@ impl Tracker {
         let mut possible_missed_branches = BTreeMap::new();
 
         if let Some(info) = &obj.pdata_funcs.get(&function_start) {
-            for (handler_start, _handler_size) in info.handlers.iter() {
-                possible_missed_branches.insert(*handler_start, VM::new());
+            for handler in info.handlers.keys() {
+                possible_missed_branches.insert(*handler, VM::new());
             }
         }
 
