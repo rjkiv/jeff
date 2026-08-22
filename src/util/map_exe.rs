@@ -142,9 +142,7 @@ impl ExeMapInfo {
 
     fn get_section_idx(&self, idx: u32, offset: u32) -> Result<SectionIdx> {
         for (sec_idx, sec) in self.sections.iter().enumerate() {
-            if sec.index == idx && (offset >= sec.offset && offset < (sec.offset + sec.size))
-                || (offset >= sec.offset && sec.size == 0 && sec.name == ".xedata")
-            {
+            if sec.index == idx && (offset >= sec.offset && offset < (sec.offset + sec.size)) {
                 return Ok(SectionIdx(sec_idx));
             }
         }
@@ -566,7 +564,7 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             if !contiguous_bounds.is_empty() {
                 for (first, last) in &contiguous_bounds {
                     let split_end = {
-                        let (sec_for_last_addr, _section) = obj.sections.at_address(*last)?;
+                        let (sec_for_last_addr, obj_section) = obj.sections.at_address(*last)?;
                         let (_, sym_at_addr) = obj
                             .symbols
                             .at_section_address(sec_for_last_addr, *last)
@@ -593,8 +591,8 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
                                 None => {
                                     // need the section size from the map, not from objinfo
                                     let sec = &result.sections[sec_idx.0];
-                                    let obj_section =
-                                        obj.sections.get(sec.index - 1).expect("where section");
+                                    // let obj_section =
+                                    //     obj.sections.get(sec.index - 1).expect("where section");
                                     obj_section.address + sec.offset + sec.size
                                 }
                             }
