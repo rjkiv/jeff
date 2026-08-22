@@ -491,19 +491,6 @@ impl AnalyzerState {
                 }
                 self.jump_tables
                     .append(&mut slices.jump_table_references.clone());
-                for label in slices.special_jump_table_labels.iter() {
-                    self.known_symbols
-                        .entry(*label)
-                        .or_default()
-                        .push(ObjSymbol {
-                            name: format!("$LN{:X}", label.address),
-                            address: label.address,
-                            section: Some(label.section),
-                            size_known: true,
-                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                            ..Default::default()
-                        })
-                }
                 let end = slices.end();
                 let info = self.functions.get_mut(&addr).unwrap();
                 info.analyzed = true;
@@ -552,19 +539,7 @@ impl AnalyzerState {
                 }
                 self.jump_tables
                     .append(&mut slices.jump_table_references.clone());
-                for label in slices.special_jump_table_labels.iter() {
-                    self.known_symbols
-                        .entry(*label)
-                        .or_default()
-                        .push(ObjSymbol {
-                            name: format!("$LN{:X}", label.address),
-                            address: label.address,
-                            section: Some(label.section),
-                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                            ..Default::default()
-                        })
-                }
-                for label in slices.special_catch_labels.iter() {
+                for label in slices.special_ln_labels.iter() {
                     self.known_symbols
                         .entry(*label)
                         .or_default()

@@ -13,7 +13,7 @@ use crate::{
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
         get_jump_table_entries,
-        vm::{BranchTarget, GprValue, StepResult, VM, section_address_for},
+        vm::{BranchTarget, GprValue, JumpTableType, StepResult, VM, section_address_for},
     },
     obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
 };
@@ -24,8 +24,8 @@ pub struct FunctionSlices {
     pub branches: BTreeMap<SectionAddress, Vec<SectionAddress>>,
     pub function_references: BTreeSet<SectionAddress>,
     pub jump_table_references: BTreeMap<SectionAddress, u32>,
-    pub special_jump_table_labels: Vec<SectionAddress>,
-    pub special_catch_labels: Vec<SectionAddress>,
+    // Addresses where we need to add an $LN label
+    pub special_ln_labels: Vec<SectionAddress>,
     pub prologue: Option<SectionAddress>,
     pub epilogue: Option<SectionAddress>,
     // Either a block or tail call
@@ -296,7 +296,7 @@ impl FunctionSlices {
                     .take(cxx_eh_func_info.num_tries as usize)
                 {
                     if maybe_catch_ln < catch_addr.address {
-                        self.special_catch_labels
+                        self.special_ln_labels
                             .push(SectionAddress::new(function_start.section, maybe_catch_ln));
                         break;
                     }
@@ -428,8 +428,6 @@ impl FunctionSlices {
                     let entries = BTreeSet::from_iter(entries);
                     log::debug!("-> size {}: {:?}", size, entries);
 
-                    // what if jump table is absolute? do something different here?
-
                     // if this function has a known end, check that every jump table entry is within function bounds
                     let within_func_bounds = match function_end {
                         Some(end) => !entries
@@ -441,18 +439,20 @@ impl FunctionSlices {
                     // this if statements is true if:
                     // the next_address is in our jump table entries OR next_address marks the start of one our established blocks
                     // OR we're within known func bounds
+                    // OR this is an absolute jump table type
                     // AND
                     // none of our jump table entries are known function starts
                     if (entries.contains(&next_address)
                         || self.blocks.contains_key(&next_address)
-                        || within_func_bounds)
+                        || within_func_bounds
+                        || matches!(jt, JumpTableType::Absolute))
                         && !entries.iter().any(|&addr| {
                             self.is_known_function(known_functions, addr)
                                 .is_some_and(|fn_addr| fn_addr != function_start)
                         })
                     {
                         self.jump_table_references.insert(address, size);
-                        self.special_jump_table_labels.push(ins_addr + 4);
+                        self.special_ln_labels.push(ins_addr + 4);
                         let mut branches = vec![];
                         for addr in entries {
                             branches.push(addr);
