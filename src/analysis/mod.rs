@@ -86,7 +86,7 @@ pub fn relocation_target_for(
     read_relocation_address(obj, section, addr.address, reloc_kind)
 }
 
-fn get_jump_table_entries(
+fn get_jump_table_entries_impl(
     obj: &ObjInfo,
     addr: SectionAddress, // the address the jump table is at
     jump_table_type: JumpTableType,
@@ -317,6 +317,33 @@ fn get_jump_table_entries(
     }
 }
 
+// Returns a Vec of every found jump table entry and its size, instead of unique entries like previous iterations.
+// This is because for absolute jump tables, we need to add Absolute relocs for each entry.
+// If you just need the unique entries, call BTreeSet::from_iter.
+pub fn get_jump_table_entries(
+    obj: &ObjInfo,
+    addr: SectionAddress, // the address the jump table is at
+    jump_table_type: JumpTableType,
+    size: Option<NonZeroU32>,
+    from: SectionAddress, // the address of the bctr that uses the jump table
+    function_start: SectionAddress,
+    function_end: Option<SectionAddress>,
+) -> Result<(Vec<SectionAddress>, u32)> {
+    if !is_valid_jump_table_addr(obj, addr, jump_table_type) {
+        return Ok((Vec::new(), 0));
+    }
+    get_jump_table_entries_impl(
+        obj,
+        addr,
+        jump_table_type,
+        size,
+        from,
+        function_start,
+        function_end,
+    )
+    .with_context(|| format!("While fetching jump table entries starting at {addr:#010X}"))
+}
+
 pub fn uniq_jump_table_entries(
     obj: &ObjInfo,
     addr: SectionAddress, // the address the jump table is at
@@ -329,7 +356,7 @@ pub fn uniq_jump_table_entries(
     if !is_valid_jump_table_addr(obj, addr, jump_table_type) {
         return Ok((BTreeSet::new(), 0));
     }
-    let (entries, size) = get_jump_table_entries(
+    let (entries, size) = get_jump_table_entries_impl(
         obj,
         addr,
         jump_table_type,
