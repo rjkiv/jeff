@@ -14,7 +14,7 @@ use crate::{
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
         get_jump_table_entries, read_u32, relocation_target_for,
-        vm::{BranchTarget, GprValue, StepResult, VM},
+        vm::{BranchTarget, GprValue, JumpTableType, StepResult, VM},
     },
     obj::{
         ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
@@ -381,7 +381,17 @@ impl Tracker {
                         function_start,
                         Some(function_end),
                     )?;
-                    // TODO: if this is an absolute jump table, add relocs for each entry
+                    // if this is an absolute jump table, add relocs for each entry
+                    if matches!(jt, JumpTableType::Absolute) {
+                        let mut offset = 0;
+                        for entry in &entries {
+                            self.relocations.insert(
+                                address + offset,
+                                Relocation::Absolute(RelocationTarget::Address(*entry)),
+                            );
+                            offset += 4;
+                        }
+                    }
                     for target in BTreeSet::from_iter(entries) {
                         if is_function_addr(target) {
                             executor.push(target, vm.clone_all(), true);
@@ -433,6 +443,17 @@ impl Tracker {
                                 function_start,
                                 Some(function_end),
                             )?;
+                            // if this is an absolute jump table, add relocs for each entry
+                            if matches!(jt, JumpTableType::Absolute) {
+                                let mut offset = 0;
+                                for entry in &entries {
+                                    self.relocations.insert(
+                                        address + offset,
+                                        Relocation::Absolute(RelocationTarget::Address(*entry)),
+                                    );
+                                    offset += 4;
+                                }
+                            }
                             for target in BTreeSet::from_iter(entries) {
                                 if is_function_addr(target) {
                                     executor.push(target, branch.vm.clone_all(), true);

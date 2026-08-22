@@ -428,6 +428,13 @@ impl FunctionSlices {
                     let entries = BTreeSet::from_iter(entries);
                     log::debug!("-> size {}: {:?}", size, entries);
 
+                    // Absolute jump tables need LNs for every unique entry
+                    if matches!(jt, JumpTableType::Absolute) {
+                        for entry in &entries {
+                            self.special_ln_labels.push(*entry);
+                        }
+                    }
+
                     // if this function has a known end, check that every jump table entry is within function bounds
                     let within_func_bounds = match function_end {
                         Some(end) => !entries
