@@ -375,7 +375,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     let object_path: Utf8NativePathBuf = config.base.object.with_encoding();
 
     let mut input = InputtedExecutable::new(&object_path, None)?;
-    let mut obj = input.process()?;
 
     // extract and write exe (only if .xex - if already .exe there is no need)
     if input.is_xex() {
@@ -388,6 +387,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         fs::write(exe_path, exe_bytes)?;
     }
 
+    let mut obj = input.process()?;
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
