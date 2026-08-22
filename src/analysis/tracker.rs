@@ -13,7 +13,7 @@ use crate::{
         RelocationTarget,
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
-        read_u32, relocation_target_for, uniq_jump_table_entries,
+        get_jump_table_entries, read_u32, relocation_target_for,
         vm::{BranchTarget, GprValue, StepResult, VM},
     },
     obj::{
@@ -372,7 +372,7 @@ impl Tracker {
                     jump_table_address: RelocationTarget::Address(address),
                     size,
                 } => {
-                    let (entries, _) = uniq_jump_table_entries(
+                    let (entries, _) = get_jump_table_entries(
                         obj,
                         address,
                         jt,
@@ -382,7 +382,7 @@ impl Tracker {
                         Some(function_end),
                     )?;
                     // TODO: if this is an absolute jump table, add relocs for each entry
-                    for target in entries {
+                    for target in BTreeSet::from_iter(entries) {
                         if is_function_addr(target) {
                             executor.push(target, vm.clone_all(), true);
                         }
@@ -424,7 +424,7 @@ impl Tracker {
                             jump_table_address: RelocationTarget::Address(address),
                             size,
                         } => {
-                            let (entries, _) = uniq_jump_table_entries(
+                            let (entries, _) = get_jump_table_entries(
                                 obj,
                                 address,
                                 jt,
@@ -433,7 +433,7 @@ impl Tracker {
                                 function_start,
                                 Some(function_end),
                             )?;
-                            for target in entries {
+                            for target in BTreeSet::from_iter(entries) {
                                 if is_function_addr(target) {
                                     executor.push(target, branch.vm.clone_all(), true);
                                 }

@@ -12,7 +12,7 @@ use crate::{
         cfa::{FunctionInfo, SectionAddress},
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
-        uniq_jump_table_entries,
+        get_jump_table_entries,
         vm::{BranchTarget, GprValue, StepResult, VM, section_address_for},
     },
     obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
@@ -415,7 +415,8 @@ impl FunctionSlices {
                         address,
                         size
                     );
-                    let (entries, size) = uniq_jump_table_entries(
+
+                    let (entries, size) = get_jump_table_entries(
                         obj,
                         address,
                         jt,
@@ -424,7 +425,10 @@ impl FunctionSlices {
                         function_start,
                         function_end.or_else(|| self.end()),
                     )?;
+                    let entries = BTreeSet::from_iter(entries);
                     log::debug!("-> size {}: {:?}", size, entries);
+
+                    // what if jump table is absolute? do something different here?
 
                     // if this function has a known end, check that every jump table entry is within function bounds
                     let within_func_bounds = match function_end {
