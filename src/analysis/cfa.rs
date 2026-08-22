@@ -196,7 +196,7 @@ impl AnalyzerState {
                         address: cxx_eh_func_info.addr.address,
                         section: Some(cxx_eh_func_info.addr.section),
                         // if this exception record has any try/catches, there's no extra 0 at the end
-                        size: if cxx_eh_func_info.num_tries > 0 {
+                        size: if cxx_eh_func_info.try_block_map.is_some() {
                             0x24
                         } else {
                             0x28
@@ -223,13 +223,13 @@ impl AnalyzerState {
                         false,
                     )?;
                 }
-                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                if let Some((addr, num_entries)) = cxx_eh_func_info.try_block_map {
                     obj.symbols.add(
                         ObjSymbol {
                             name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
-                            address: try_map_addr.address,
-                            section: Some(try_map_addr.section),
-                            size: cxx_eh_func_info.num_tries * 0x14,
+                            address: addr.address,
+                            section: Some(addr.section),
+                            size: num_entries * 0x14,
                             size_known: true,
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                             kind: ObjSymbolKind::Object,

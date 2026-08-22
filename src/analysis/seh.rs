@@ -29,10 +29,13 @@ pub struct CxxEhFuncInfo {
     // unwind map addr and number of entries - __unwindtable$
     pub unwind_map: Option<(SectionAddress, u32)>,
 
-    // TODO mark the catchsyms
     // try map addr, and number of entries - __tryblocktable$, which contains __catchsym$
-    pub num_tries: u32,
-    pub try_map_addr: Option<SectionAddress>,
+    // we can only have one try block table...
+    pub try_block_map: Option<(SectionAddress, u32)>,
+    // TODO mark the catchsyms
+    // but we can have multiple catchsyms
+    // pub catch_map: Vec<(SectionAddress, u32)>
+
     // iptostate map addr, and number of entries - parsing this map likely not needed for the purposes of labeling functions/eh objects
     pub ip_to_state_map: Option<(SectionAddress, u32)>,
 }
@@ -272,43 +275,63 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         None
                     }
                 };
-                let num_tries = read_u32(rdata_section, cur_func_except_record.address + 12)
-                    .expect("No try count here!");
-                let try_map_addr = {
-                    let try_map_addr = read_u32(rdata_section, cur_func_except_record.address + 16)
-                        .expect("No try count here!");
-                    if try_map_addr != 0 {
+
+                let try_block_map: Option<(SectionAddress, u32)> = {
+                    let num_try_blocks =
+                        read_u32(rdata_section, cur_func_except_record.address + 12)
+                            .expect("No try block count here!");
+                    let try_block_map_addr =
+                        read_u32(rdata_section, cur_func_except_record.address + 16)
+                            .expect("No try block map here!");
+                    if try_block_map_addr != 0 {
                         // at this point, we know a try map exists - parse its entries
-                        assert!(num_tries > 0);
-                        for i in 0..num_tries {
-                            let cur_catch_sym =
-                                read_u32(rdata_section, try_map_addr + (i * 20) + 16)
+                        assert!(num_try_blocks > 0);
+                        for i in 0..num_try_blocks {
+                            let num_catches =
+                                read_u32(rdata_section, try_block_map_addr + (i * 20) + 12)
+                                    .expect("No catch count here!");
+                            let catch_handler_array_addr =
+                                read_u32(rdata_section, try_block_map_addr + (i * 20) + 16)
                                     .expect("No catch symbol here!");
-                            if cur_catch_sym != 0 {
-                                // parse THAT to get the catch
-                                let maybe_catch_addr = read_u32(rdata_section, cur_catch_sym + 12)
-                                    .expect("No catch addr here!");
-                                if maybe_catch_addr != 0 {
-                                    let addr = SectionAddress::new(
-                                        obj.sections.at_address(maybe_catch_addr)?.0,
-                                        maybe_catch_addr,
-                                    );
-                                    obj.symbols.add(
-                                        ObjSymbol {
-                                            name: format!("__catch${:08X}", addr.address),
-                                            address: addr.address,
-                                            section: Some(addr.section),
-                                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                            ..Default::default()
-                                        },
-                                        false,
-                                    )?;
-                                    cur_exceptions.entry(addr).or_default();
-                                    known_exceptions.entry(addr).or_default();
+                            if catch_handler_array_addr != 0 {
+                                // at this point, we know catches exist - parse its entries
+                                assert!(num_catches > 0);
+                                for j in 0..num_catches {
+                                    // RTTI Type Descriptor at catch_handler_array_addr + (j * 16) + 8 - should we mark it down?
+
+                                    let catch_handler = read_u32(
+                                        rdata_section,
+                                        catch_handler_array_addr + (j * 16) + 12,
+                                    )
+                                    .expect("No catch handler here!");
+                                    if catch_handler != 0 {
+                                        // println!("Catch at {:08X}", catch_handler);
+                                        let addr = SectionAddress::new(
+                                            obj.sections.at_address(catch_handler)?.0,
+                                            catch_handler,
+                                        );
+                                        obj.symbols.add(
+                                            ObjSymbol {
+                                                name: format!("__catch${:08X}", addr.address),
+                                                address: addr.address,
+                                                section: Some(addr.section),
+                                                flags: ObjSymbolFlagSet(
+                                                    ObjSymbolFlags::Global.into(),
+                                                ),
+                                                ..Default::default()
+                                            },
+                                            false,
+                                        )?;
+                                        cur_exceptions.entry(addr).or_default();
+                                        known_exceptions.entry(addr).or_default();
+                                    }
                                 }
                             }
                         }
-                        Some(SectionAddress::new(rdata_sec_idx, try_map_addr))
+                        Some((
+                            SectionAddress::new(rdata_sec_idx, try_block_map_addr),
+                            num_try_blocks,
+                        ))
                     } else {
                         None
                     }
@@ -339,8 +362,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                         exception_info: Some(CxxEhFuncInfo {
                             addr: cur_func_except_record,
                             unwind_map,
-                            num_tries,
-                            try_map_addr,
+                            try_block_map,
                             ip_to_state_map,
                         }),
                     },

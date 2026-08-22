@@ -293,7 +293,7 @@ impl FunctionSlices {
                 for (catch_addr, _catch_size) in info
                     .handlers
                     .iter()
-                    .take(cxx_eh_func_info.num_tries as usize)
+                    .take(cxx_eh_func_info.try_block_map.map_or(0, |(_, num)| num) as usize)
                 {
                     if maybe_catch_ln < catch_addr.address {
                         self.special_ln_labels
