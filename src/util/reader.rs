@@ -48,7 +48,9 @@ pub const fn struct_size<const N: usize>(fields: [usize; N]) -> usize {
 
 #[inline]
 pub fn skip_bytes<const N: usize, R>(reader: &mut R) -> io::Result<()>
-where R: Read + Seek + ?Sized {
+where
+    R: Read + Seek + ?Sized,
+{
     reader.seek(SeekFrom::Current(N as i64))?;
     Ok(())
 }
@@ -59,7 +61,8 @@ pub trait FromReader: Sized {
     const STATIC_SIZE: usize;
 
     fn from_reader_args<R>(reader: &mut R, e: Endian, args: Self::Args) -> io::Result<Self>
-    where R: Read + Seek + ?Sized;
+    where
+        R: Read + Seek + ?Sized;
 
     fn from_reader<R>(reader: &mut R, e: Endian) -> io::Result<Self>
     where
@@ -113,7 +116,9 @@ impl<const N: usize> FromReader for [u8; N] {
 
     #[inline]
     fn from_reader_args<R>(reader: &mut R, _e: Endian, _args: Self::Args) -> io::Result<Self>
-    where R: Read + Seek + ?Sized {
+    where
+        R: Read + Seek + ?Sized,
+    {
         let mut buf = [0u8; N];
         reader.read_exact(&mut buf)?;
         Ok(buf)
@@ -127,7 +132,9 @@ impl<const N: usize> FromReader for [u32; N] {
 
     #[inline]
     fn from_reader_args<R>(reader: &mut R, e: Endian, _args: Self::Args) -> io::Result<Self>
-    where R: Read + Seek + ?Sized {
+    where
+        R: Read + Seek + ?Sized,
+    {
         let mut buf = [0u32; N];
         reader.read_exact(unsafe {
             std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, Self::STATIC_SIZE)
@@ -143,7 +150,9 @@ impl<const N: usize> FromReader for [u32; N] {
 
 #[inline]
 pub fn read_bytes<R>(reader: &mut R, count: usize) -> io::Result<Vec<u8>>
-where R: Read + Seek + ?Sized {
+where
+    R: Read + Seek + ?Sized,
+{
     let mut buf = vec![0u8; count];
     reader.read_exact(&mut buf)?;
     Ok(buf)
@@ -199,11 +208,14 @@ where
 
 pub trait ToWriter: Sized {
     fn to_writer<W>(&self, writer: &mut W, e: Endian) -> io::Result<()>
-    where W: Write + ?Sized;
+    where
+        W: Write + ?Sized;
 
     #[inline]
     fn to_writer_static<W>(&self, writer: &mut W, e: Endian) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         writer.write_all(&self.to_bytes(e)?)
     }
 
@@ -247,41 +259,57 @@ impl_to_writer!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 impl<const N: usize> ToWriter for [u8; N] {
     fn to_writer<W>(&self, writer: &mut W, _e: Endian) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         writer.write_all(self)
     }
 
-    fn write_size(&self) -> usize { N }
+    fn write_size(&self) -> usize {
+        N
+    }
 }
 
 impl ToWriter for &[u8] {
     fn to_writer<W>(&self, writer: &mut W, _e: Endian) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         writer.write_all(self)
     }
 
-    fn write_size(&self) -> usize { self.len() }
+    fn write_size(&self) -> usize {
+        self.len()
+    }
 }
 
 impl ToWriter for Vec<u8> {
     fn to_writer<W>(&self, writer: &mut W, _e: Endian) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         writer.write_all(self)
     }
 
-    fn write_size(&self) -> usize { self.len() }
+    fn write_size(&self) -> usize {
+        self.len()
+    }
 }
 
 impl<const N: usize> ToWriter for [u32; N] {
     fn to_writer<W>(&self, writer: &mut W, e: Endian) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         for &value in self {
             value.to_writer(writer, e)?;
         }
         Ok(())
     }
 
-    fn write_size(&self) -> usize { N * u32::STATIC_SIZE }
+    fn write_size(&self) -> usize {
+        N * u32::STATIC_SIZE
+    }
 }
 
 pub fn write_vec<T, W>(writer: &mut W, vec: &[T], e: Endian) -> io::Result<()>

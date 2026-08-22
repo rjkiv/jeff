@@ -1,8 +1,8 @@
 use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use memchr::memmem;
-use object::{read::pe::PeFile32, Object, ObjectSection, SectionKind};
+use object::{Object, ObjectSection, SectionKind, read::pe::PeFile32};
 use typed_path::Utf8NativePathBuf;
 
 use crate::{
@@ -22,7 +22,9 @@ use crate::{
 // the type of the executable binary initially passed in
 enum ExeType {
     Exe,
-    Xex { import_libraries: Option<Vec<ImportLibrary>> },
+    Xex {
+        import_libraries: Option<Vec<ImportLibrary>>,
+    },
 }
 
 // an executable binary passed in from a config.yml
@@ -42,7 +44,10 @@ impl InputtedExecutable {
         let mut magic_bytes = [0u8; 4];
         {
             let mut file = File::open(base_path)?;
-            ensure!(file.metadata()?.len() >= 4, "File too small to be a valid executable");
+            ensure!(
+                file.metadata()?.len() >= 4,
+                "File too small to be a valid executable"
+            );
             file.read_exact(&mut magic_bytes)?;
         }
         // if xex, call XexInfo::from_file
@@ -74,7 +79,10 @@ impl InputtedExecutable {
         // if exe, just pass in name/bytes and that's that
         else if magic_bytes.starts_with(b"MZ") {
             Ok(Self {
-                exe_name: base_path.file_name().expect("Missing executable name!").to_string(),
+                exe_name: base_path
+                    .file_name()
+                    .expect("Missing executable name!")
+                    .to_string(),
                 exe_bytes: fs::read(base_path)?,
                 exe_type: ExeType::Exe,
             })
@@ -83,9 +91,18 @@ impl InputtedExecutable {
         }
     }
 
-    pub fn is_xex(&self) -> bool { matches!(self.exe_type, ExeType::Xex { import_libraries: _ }) }
+    pub fn is_xex(&self) -> bool {
+        matches!(
+            self.exe_type,
+            ExeType::Xex {
+                import_libraries: _
+            }
+        )
+    }
 
-    pub fn extract(&self) -> (String, &Vec<u8>) { (self.exe_name.clone(), &self.exe_bytes) }
+    pub fn extract(&self) -> (String, &Vec<u8>) {
+        (self.exe_name.clone(), &self.exe_bytes)
+    }
 
     pub fn process(&mut self) -> Result<ObjInfo> {
         let obj_file = PeFile32::parse(&*self.exe_bytes).expect("Failed to parse object file");
@@ -100,6 +117,9 @@ impl InputtedExecutable {
             } else {
                 section.name()?.to_string()
             };
+
+            // NOTE: to calculate bss start within .data, do virtual address + size of raw data
+
             let section_kind = match section.kind() {
                 SectionKind::Text => ObjSectionKind::Code,
                 SectionKind::Data => ObjSectionKind::Data,
@@ -126,8 +146,12 @@ impl InputtedExecutable {
         }
 
         // Create object
-        let mut obj =
-            ObjInfo::new(ObjKind::Executable, self.exe_name.to_string(), vec![], sections);
+        let mut obj = ObjInfo::new(
+            ObjKind::Executable,
+            self.exe_name.to_string(),
+            vec![],
+            sections,
+        );
         obj.entry = NonZeroU32::new(obj_file.entry() as u32).map(|n| n.get());
 
         if let Some(entry) = obj.entry {
@@ -147,7 +171,10 @@ impl InputtedExecutable {
         }
 
         // inspect the ImportLibraries if we have them
-        if let ExeType::Xex { import_libraries: Some(imports) } = &self.exe_type {
+        if let ExeType::Xex {
+            import_libraries: Some(imports),
+        } = &self.exe_type
+        {
             let mut num_imps = 0;
             let mut num_thunks = 0;
             let mut min_imp_addr: Option<u32> = None;
@@ -226,7 +253,10 @@ impl InputtedExecutable {
                 // println!("Imports for {}:", lib.name);
                 for func in lib.functions.iter() {
                     // println!("  Func: addr 0x{:08X}, ordinal 0x{:04X}, thunk 0x{:08X}", func.address, func.ordinal, func.thunk);
-                    assert_ne!(func.address, 0, "Should not have an empty import func address!");
+                    assert_ne!(
+                        func.address, 0,
+                        "Should not have an empty import func address!"
+                    );
                     min_imp_addr = Some(min_imp_addr.unwrap_or(func.address).min(func.address));
                     max_imp_addr = Some(max_imp_addr.unwrap_or(func.address).max(func.address));
 
@@ -237,7 +267,11 @@ impl InputtedExecutable {
                     let offset_within_sec: usize = func.address as usize - sec.address as usize;
                     unstrip_imp(&mut sec.data[offset_within_sec..offset_within_sec + 4]);
                     // println!("  Adding symbol {} at 0x{:08X}", sym_name, func.address);
-                    add_imp(&mut obj, sym_name, SectionAddress::new(sec_idx, func.address))?;
+                    add_imp(
+                        &mut obj,
+                        sym_name,
+                        SectionAddress::new(sec_idx, func.address),
+                    )?;
                     captured_imps.push(func.address);
                     num_imps += 1;
 
@@ -423,7 +457,7 @@ fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
     // if this xex has an .xidata section, mark down the funcs in there
     if let Some((xidata_idx, xidata_sec)) = obj.sections.by_name(".xidata")? {
         let mut num_xidatas = 0;
-        for (i, chunk) in xidata_sec.data.chunks_exact(16).enumerate() {
+        for (i, chunk) in xidata_sec.data.as_chunks::<16>().0.iter().enumerate() {
             if i == 0 {
                 continue;
             } // the first entry appears to be all 0's...but is every xidata like this?
@@ -433,7 +467,11 @@ fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
                 break;
             }
 
-            assert_eq!(inst1 & 0xFFFF0000, 0x3D600000, "First instruction MUST be an lis to r11!");
+            assert_eq!(
+                inst1 & 0xFFFF0000,
+                0x3D600000,
+                "First instruction MUST be an lis to r11!"
+            );
             let inst2 = u32::from_be_bytes(chunk[4..8].try_into()?);
             assert_eq!(
                 inst2 & 0xFFFF0000,
@@ -453,7 +491,8 @@ fn process_xidata(obj: &mut ObjInfo) -> Result<()> {
 
             let func_addr = (xidata_sec.address as usize + (i * 16)) as u32;
             // println!("This xidata func's address: 0x{:08X}", func_addr);
-            obj.known_functions.insert(SectionAddress::new(xidata_idx, func_addr), Some(0x10));
+            obj.known_functions
+                .insert(SectionAddress::new(xidata_idx, func_addr), Some(0x10));
             num_xidatas += 1;
         }
         log::info!("Found {} known funcs from xidata!", num_xidatas);

@@ -5,15 +5,15 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use anyhow::{bail, Context, Ok, Result};
+use anyhow::{Context, Ok, Result, bail};
 use argp::FromArgs;
 use chrono::FixedOffset;
 use itertools::Itertools;
 use object::{
-    read::pe::PeFile32,
-    write::{Object, Relocation, SectionId, Symbol, SymbolId, SymbolSection},
     Architecture, BinaryFormat, Endianness, RelocationFlags, SectionKind, SymbolFlags, SymbolKind,
     SymbolScope,
+    read::pe::PeFile32,
+    write::{Object, Relocation, SectionId, Symbol, SymbolId, SymbolSection},
 };
 use tracing::{debug, info};
 use typed_path::{Utf8NativePath, Utf8NativePathBuf};
@@ -27,23 +27,23 @@ use crate::{
         tracker::Tracker,
     },
     cmd::dol::{
-        apply_add_relocations, apply_block_relocations, ModuleConfig, OutputConfig, OutputModule,
-        OutputUnit, ProjectConfig,
+        ModuleConfig, OutputConfig, OutputModule, OutputUnit, ProjectConfig, apply_add_relocations,
+        apply_block_relocations,
     },
     obj::{
-        best_match_for_reloc, ObjInfo, ObjKind, ObjRelocKind, ObjSectionKind, ObjSections,
-        ObjSymbolKind, ObjSymbolScope, ObjUnit, SectionIndex, SymbolIndex,
+        ObjInfo, ObjKind, ObjRelocKind, ObjSectionKind, ObjSections, ObjSymbolKind, ObjSymbolScope,
+        ObjUnit, SectionIndex, SymbolIndex, best_match_for_reloc,
     },
     util::{
         asm::write_asm,
         config::{apply_splits_file, apply_symbols_file, write_splits_file, write_symbols_file},
         dep::DepFile,
         exe::InputtedExecutable,
-        file::{buf_writer, FileReadInfo},
+        file::{FileReadInfo, buf_writer},
         map_exe::{apply_map_file_exe, process_map_exe},
         path::native_path,
         split::{split_obj, update_splits},
-        xex::{coff_path_for_unit, list_exe_sections, write_coff, XexInfo},
+        xex::{XexInfo, coff_path_for_unit, list_exe_sections, write_coff},
         xex_optional_headers::{XexCompression, XexOptionalHeader},
         xpdb::try_parse_pdb,
     },
@@ -188,7 +188,10 @@ fn split(args: SplitArgs) -> Result<()> {
         }
     };
     let function_count = exe.obj.symbols.by_kind(ObjSymbolKind::Function).count();
-    info!("Initial analysis completed (found {} functions)", function_count);
+    info!(
+        "Initial analysis completed (found {} functions)",
+        function_count
+    );
 
     // Create out dirs
     DirBuilder::new().recursive(true).create(&args.out_dir)?;
@@ -251,10 +254,19 @@ fn split_write_obj_exe(
 
     debug!("Writing configuration");
     if let Some(symbols_path) = &module.config.symbols {
-        write_symbols_file(&symbols_path.with_encoding(), &module.obj, module.symbols_cache)?;
+        write_symbols_file(
+            &symbols_path.with_encoding(),
+            &module.obj,
+            module.symbols_cache,
+        )?;
     }
     if let Some(splits_path) = &module.config.splits {
-        write_splits_file(&splits_path.with_encoding(), &module.obj, false, module.splits_cache)?;
+        write_splits_file(
+            &splits_path.with_encoding(),
+            &module.obj,
+            false,
+            module.splits_cache,
+        )?;
     }
 
     debug!("Splitting {} objects", module.obj.link_order.len());
@@ -270,11 +282,19 @@ fn split_write_obj_exe(
     let entry = if module.obj.kind == ObjKind::Executable {
         module.obj.entry.and_then(|e| {
             let (section_index, _) = module.obj.sections.at_address(e).ok()?;
-            let symbols = module.obj.symbols.at_section_address(section_index, e).collect_vec();
+            let symbols = module
+                .obj
+                .symbols
+                .at_section_address(section_index, e)
+                .collect_vec();
             best_match_for_reloc(symbols, ObjRelocKind::PpcRel24).map(|(_, s)| s.name.clone())
         })
     } else {
-        module.obj.symbols.by_name("_prolog")?.map(|(_, s)| s.name.clone())
+        module
+            .obj
+            .symbols
+            .by_name("_prolog")?
+            .map(|(_, s)| s.name.clone())
     };
     let mut out_config = OutputModule {
         name: module_name,
@@ -360,8 +380,10 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     // extract and write exe (only if .xex - if already .exe there is no need)
     if input.is_xex() {
         let (exe_name, exe_bytes) = input.extract();
-        let exe_path: Utf8NativePathBuf =
-            object_path.parent().expect("No parent directory to extract to!").join(&exe_name);
+        let exe_path: Utf8NativePathBuf = object_path
+            .parent()
+            .expect("No parent directory to extract to!")
+            .join(&exe_name);
         info!("Extracting exe to {exe_path}");
         fs::write(exe_path, exe_bytes)?;
     }
@@ -395,7 +417,11 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         }
         for unit in pdb.units {
             if nonempty_mods.contains(&unit) {
-                obj.link_order.push(ObjUnit { name: unit, autogenerated: false, order: None });
+                obj.link_order.push(ObjUnit {
+                    name: unit,
+                    autogenerated: false,
+                    order: None,
+                });
             } else {
                 log::debug!("Module {} is empty", unit);
             }
@@ -440,7 +466,12 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     // Apply additional relocations from config
     apply_add_relocations(&mut obj, &config.base.add_relocations)?;
 
-    Ok(ExeAnalyzeResult { obj, dep, symbols_cache, splits_cache })
+    Ok(ExeAnalyzeResult {
+        obj,
+        dep,
+        symbols_cache,
+        splits_cache,
+    })
 }
 
 // references:
@@ -451,7 +482,10 @@ fn extract(args: ExtractArgs) -> Result<()> {
     let exe = InputtedExecutable::new(&args.xex_file, None)?;
     if exe.is_xex() {
         let (exe_name, exe_bytes) = exe.extract();
-        let xex_dir = args.xex_file.parent().expect("No parent directory to extract to!");
+        let xex_dir = args
+            .xex_file
+            .parent()
+            .expect("No parent directory to extract to!");
         let out_path = xex_dir.join(exe_name);
         fs::write(out_path, exe_bytes)?;
     } else {
@@ -477,7 +511,11 @@ fn disasm(args: DisasmArgs) -> Result<()> {
     state.detect_functions(&obj)?;
     log::info!(
         "Discovered {} functions",
-        state.functions.iter().filter(|(_, i)| i.end.is_some()).count()
+        state
+            .functions
+            .iter()
+            .filter(|(_, i)| i.end.is_some())
+            .count()
     );
     // give each found function a symbol
     state.apply(&mut obj)?;
@@ -524,13 +562,16 @@ fn disasm(args: DisasmArgs) -> Result<()> {
         // insert the sections
         for (idx, sect) in coff_obj.sections.iter() {
             println!("Section: {}", sect.name);
-            let sect_id =
-                cur_coff.add_section(Vec::new(), sect.name.clone().into_bytes(), match sect.kind {
+            let sect_id = cur_coff.add_section(
+                Vec::new(),
+                sect.name.clone().into_bytes(),
+                match sect.kind {
                     ObjSectionKind::Code => SectionKind::Text,
                     ObjSectionKind::Data => SectionKind::Data,
                     ObjSectionKind::ReadOnlyData => SectionKind::ReadOnlyData,
                     ObjSectionKind::Bss => SectionKind::UninitializedData,
-                });
+                },
+            );
             cur_coff.append_section_data(sect_id, &sect.data, sect.align);
             sect_map.insert(idx, sect_id);
         }
@@ -590,12 +631,17 @@ fn disasm(args: DisasmArgs) -> Result<()> {
                     Some(id) => id,
                     None => bail!("Could not find symbol ID for index {}", reloc.target_symbol),
                 };
-                cur_coff.add_relocation(*sect_map.get(&sect_idx).unwrap(), Relocation {
-                    offset: addr as u64,
-                    symbol: *sym_id,
-                    addend: 0,
-                    flags: RelocationFlags::Coff { typ: reloc.to_coff() },
-                })?;
+                cur_coff.add_relocation(
+                    *sect_map.get(&sect_idx).unwrap(),
+                    Relocation {
+                        offset: addr as u64,
+                        symbol: *sym_id,
+                        addend: 0,
+                        flags: RelocationFlags::Coff {
+                            typ: reloc.to_coff(),
+                        },
+                    },
+                )?;
             }
         }
 
@@ -614,7 +660,11 @@ fn map(args: MapArgs) -> Result<()> {
 
 fn pdb(args: PdbArgs) -> Result<()> {
     println!("pdb: {}", args.input);
-    let data = try_parse_pdb(&args.input, &ObjSections::new(ObjKind::Executable, vec![]), true)?;
+    let data = try_parse_pdb(
+        &args.input,
+        &ObjSections::new(ObjKind::Executable, vec![]),
+        true,
+    )?;
     println!("{:#?}", data);
     Ok(())
 }
@@ -642,7 +692,14 @@ fn info(args: InfoArgs) -> Result<()> {
             "Uncompressed"
         }
     );
-    println!("  {}", if !bff.encrypted { "Unencrypted" } else { "Encrypted" });
+    println!(
+        "  {}",
+        if !bff.encrypted {
+            "Unencrypted"
+        } else {
+            "Encrypted"
+        }
+    );
     println!();
 
     println!("Basefile Info:");

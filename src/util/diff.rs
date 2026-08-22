@@ -3,7 +3,7 @@
 //! Eventually it'd be nice to share [ObjInfo] and related types between decomp-toolkit and
 //! objdiff-core to avoid this conversion.
 use std::{
-    io::{stdout, Write},
+    io::{Write, stdout},
     ops::Range,
 };
 
@@ -13,8 +13,8 @@ use itertools::Itertools;
 use objdiff_core::{
     arch::{ObjArch, ProcessCodeResult},
     diff::{
-        display::{display_diff, DiffText},
         DiffObjConfig, ObjInsDiff, ObjInsDiffKind, ObjSymbolDiff,
+        display::{DiffText, display_diff},
     },
 };
 use object::RelocationFlags;
@@ -156,7 +156,11 @@ pub fn print_diff(
                 crossterm::queue!(stdout, crossterm::style::Print(&span.text[..len]))?;
                 x += len;
             }
-            crossterm::queue!(stdout, crossterm::style::ResetColor, crossterm::style::Print("\n"))?;
+            crossterm::queue!(
+                stdout,
+                crossterm::style::ResetColor,
+                crossterm::style::Print("\n")
+            )?;
         }
     }
     if matches!(ranges.last().map(|r| r.end), Some(n) if n != left.instructions.len()) {
@@ -236,7 +240,10 @@ fn print_line(ins_diff: &ObjInsDiff, base_addr: u64) -> Vec<Span> {
                 base_color = Color::White;
             }
             DiffText::Spacing(n) => {
-                line.push(Span { text: " ".repeat(n), color: Color::Reset });
+                line.push(Span {
+                    text: " ".repeat(n),
+                    color: Color::Reset,
+                });
                 return Ok(());
             }
             DiffText::Eol => {
@@ -244,10 +251,16 @@ fn print_line(ins_diff: &ObjInsDiff, base_addr: u64) -> Vec<Span> {
             }
         }
         let len = label_text.len();
-        line.push(Span { text: label_text, color: base_color });
+        line.push(Span {
+            text: label_text,
+            color: base_color,
+        });
         if pad_to > len {
             let pad = (pad_to - len) as u16;
-            line.push(Span { text: " ".repeat(pad as usize), color: Color::Reset });
+            line.push(Span {
+                text: " ".repeat(pad as usize),
+                color: Color::Reset,
+            });
         }
         Ok(())
     })
@@ -290,7 +303,9 @@ fn to_objdiff_symbol(
     if symbol.flags.is_hidden() {
         flags.0 |= objdiff_core::obj::ObjSymbolFlags::Hidden;
     }
-    let bytes = section.and_then(|s| s.symbol_data(symbol).ok()).map_or(vec![], |d| d.to_vec());
+    let bytes = section
+        .and_then(|s| s.symbol_data(symbol).ok())
+        .map_or(vec![], |d| d.to_vec());
     objdiff_core::obj::ObjSymbol {
         name: symbol.name.clone(),
         demangled_name: symbol.demangled_name.clone(),

@@ -3,18 +3,18 @@ use std::{
     mem::take,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use powerpc::Opcode;
 use tracing::{debug_span, info_span};
 use tracing_attributes::instrument;
 
 use crate::{
     analysis::{
+        RelocationTarget,
         cfa::SectionAddress,
         executor::{ExecCbData, ExecCbResult, Executor},
         read_u32, relocation_target_for, uniq_jump_table_entries,
         vm::{BranchTarget, GprValue, StepResult, VM},
-        RelocationTarget,
     },
     obj::{
         ObjDataKind, ObjInfo, ObjKind, ObjReloc, ObjRelocKind, ObjSection, ObjSectionKind,
@@ -87,7 +87,11 @@ impl Tracker {
             for (section_index, section) in obj.sections.iter().filter(|(_, s)| {
                 matches!(s.kind, ObjSectionKind::Data | ObjSectionKind::ReadOnlyData)
             }) {
-                log::debug!("Processing section {}, address {:#X}", section_index, section.address);
+                log::debug!(
+                    "Processing section {}, address {:#X}",
+                    section_index,
+                    section.address
+                );
                 self.process_data(obj, section_index, section)?;
             }
         }
@@ -101,7 +105,10 @@ impl Tracker {
         let mut to_reject = vec![];
         for (&address, reloc) in &self.relocations {
             let section = &obj.sections[address.section];
-            if !matches!(section.kind, ObjSectionKind::Data | ObjSectionKind::ReadOnlyData) {
+            if !matches!(
+                section.kind,
+                ObjSectionKind::Data | ObjSectionKind::ReadOnlyData
+            ) {
                 continue;
             }
             let Some((_, target)) = reloc.kind_and_address() else {
@@ -123,8 +130,10 @@ impl Tracker {
         for info in &obj.exception_data_infos {
             let handler = read_u32(&obj.sections[info.section], info.address).unwrap();
             if let Some(handler_addr) = self.is_valid_address(obj, *info, handler) {
-                self.relocations
-                    .insert(*info, Relocation::Absolute(RelocationTarget::Address(handler_addr)));
+                self.relocations.insert(
+                    *info,
+                    Relocation::Absolute(RelocationTarget::Address(handler_addr)),
+                );
             } else {
                 panic!("Invalid exception data at {:08X}!", info);
             }
@@ -148,11 +157,15 @@ impl Tracker {
             self.process_function_by_address(obj, entry_addr)?;
         }
         for (section_index, _) in obj.sections.by_kind(ObjSectionKind::Code) {
-            for (_, symbol) in obj.symbols.for_section(section_index).filter(|(_, symbol)| {
-                symbol.kind == ObjSymbolKind::Function
-                    && symbol.size_known
-                    && !symbol.name.contains("__imp")
-            }) {
+            for (_, symbol) in obj
+                .symbols
+                .for_section(section_index)
+                .filter(|(_, symbol)| {
+                    symbol.kind == ObjSymbolKind::Function
+                        && symbol.size_known
+                        && !symbol.name.contains("__imp")
+                })
+            {
                 let addr = SectionAddress::new(section_index, symbol.address);
                 if !self.processed_functions.insert(addr) {
                     continue;
@@ -188,9 +201,9 @@ impl Tracker {
         value: &GprValue,
     ) -> Option<RelocationTarget> {
         match *value {
-            GprValue::Constant(value) => {
-                self.is_valid_address(obj, ins_addr, value as u32).map(RelocationTarget::Address)
-            }
+            GprValue::Constant(value) => self
+                .is_valid_address(obj, ins_addr, value as u32)
+                .map(RelocationTarget::Address),
             GprValue::Address(address) => Some(address),
             _ => None,
         }
@@ -204,7 +217,15 @@ impl Tracker {
         function_end: SectionAddress,
         possible_missed_branches: &mut BTreeMap<SectionAddress, Box<VM>>,
     ) -> Result<ExecCbResult<()>> {
-        let ExecCbData { executor, vm, result, ins_addr, section: _, ins, block_start: _ } = data;
+        let ExecCbData {
+            executor,
+            vm,
+            result,
+            ins_addr,
+            section: _,
+            ins,
+            block_start: _,
+        } = data;
         // Using > instead of >= to treat a branch to the beginning of the function as a tail call
         let is_function_addr = |addr: SectionAddress| addr > function_start && addr < function_end;
         let _span = debug_span!("ins", addr = %ins_addr, op = ?ins.op).entered();
@@ -217,25 +238,23 @@ impl Tracker {
                         // let source = ins.field_ra() as usize;
                         let target = ins.field_rd() as usize;
                         if let Some(value) = self.gpr_address(obj, ins_addr, &vm.gpr[target].value)
-                        {
-                            if let (Some(hi_addr), Some(lo_addr)) =
+                            && let (Some(hi_addr), Some(lo_addr)) =
                                 (vm.gpr[target].hi_addr, vm.gpr[target].lo_addr)
-                            {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    debug_assert_ne!(
-                                        value,
-                                        RelocationTarget::Address(SectionAddress::new(
-                                            SectionIndex::MAX,
-                                            0
-                                        ))
-                                    );
-                                    self.relocations.insert(hi_addr, Relocation::Ha(value));
-                                }
-                                let lo_reloc = self.relocations.get(&lo_addr).cloned();
-                                if lo_reloc.is_none() {
-                                    self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
+                        {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                debug_assert_ne!(
+                                    value,
+                                    RelocationTarget::Address(SectionAddress::new(
+                                        SectionIndex::MAX,
+                                        0
+                                    ))
+                                );
+                                self.relocations.insert(hi_addr, Relocation::Ha(value));
+                            }
+                            let lo_reloc = self.relocations.get(&lo_addr).cloned();
+                            if lo_reloc.is_none() {
+                                self.relocations.insert(lo_addr, Relocation::Lo(value));
                             }
                         }
                     }
@@ -243,18 +262,16 @@ impl Tracker {
                     Opcode::Ori => {
                         let target = ins.field_ra() as usize;
                         if let Some(value) = self.gpr_address(obj, ins_addr, &vm.gpr[target].value)
-                        {
-                            if let (Some(hi_addr), Some(lo_addr)) =
+                            && let (Some(hi_addr), Some(lo_addr)) =
                                 (vm.gpr[target].hi_addr, vm.gpr[target].lo_addr)
-                            {
-                                let hi_reloc = self.relocations.get(&hi_addr).cloned();
-                                if hi_reloc.is_none() {
-                                    self.relocations.insert(hi_addr, Relocation::Ha(value));
-                                }
-                                let lo_reloc = self.relocations.get(&lo_addr).cloned();
-                                if lo_reloc.is_none() {
-                                    self.relocations.insert(lo_addr, Relocation::Lo(value));
-                                }
+                        {
+                            let hi_reloc = self.relocations.get(&hi_addr).cloned();
+                            if hi_reloc.is_none() {
+                                self.relocations.insert(hi_addr, Relocation::Ha(value));
+                            }
+                            let lo_reloc = self.relocations.get(&lo_addr).cloned();
+                            if lo_reloc.is_none() {
+                                self.relocations.insert(lo_addr, Relocation::Lo(value));
                             }
                         }
                     }
@@ -262,7 +279,11 @@ impl Tracker {
                 }
                 Ok(ExecCbResult::Continue)
             }
-            StepResult::LoadStore { address, source, source_reg: _ } => {
+            StepResult::LoadStore {
+                address,
+                source,
+                source_reg: _,
+            } => {
                 if !obj.blocked_relocation_sources.contains(ins_addr) {
                     match (source.hi_addr, source.lo_addr) {
                         (Some(hi_addr), None) => {
@@ -322,7 +343,8 @@ impl Tracker {
                 BranchTarget::Return => Ok(ExecCbResult::EndBlock),
                 BranchTarget::Unknown
                 | BranchTarget::JumpTable {
-                    jump_table_address: RelocationTarget::External, ..
+                    jump_table_address: RelocationTarget::External,
+                    ..
                 } => {
                     let next_addr = ins_addr + 4;
                     if next_addr < function_end {
@@ -335,10 +357,10 @@ impl Tracker {
                     if next_addr < function_end {
                         possible_missed_branches.insert(ins_addr + 4, vm.clone_all());
                     }
-                    if let RelocationTarget::Address(addr) = addr {
-                        if is_function_addr(addr) {
-                            return Ok(ExecCbResult::Jump(addr));
-                        }
+                    if let RelocationTarget::Address(addr) = addr
+                        && is_function_addr(addr)
+                    {
+                        return Ok(ExecCbResult::Jump(addr));
                     }
                     if ins.is_direct_branch() {
                         self.relocations.insert(ins_addr, Relocation::Rel24(addr));
@@ -384,11 +406,14 @@ impl Tracker {
                                 (SectionAddress::new(SectionIndex::MAX, 0), false)
                             };
                             if branch.link || !is_fn_addr {
-                                self.relocations.insert(ins_addr, match ins.op {
-                                    Opcode::B => Relocation::Rel24(target),
-                                    Opcode::Bc => Relocation::Rel14(target),
-                                    _ => continue,
-                                });
+                                self.relocations.insert(
+                                    ins_addr,
+                                    match ins.op {
+                                        Opcode::B => Relocation::Rel24(target),
+                                        Opcode::Bc => Relocation::Rel14(target),
+                                        _ => continue,
+                                    },
+                                );
                             } else if is_fn_addr {
                                 executor.push(addr, branch.vm, true);
                             }
@@ -478,8 +503,8 @@ impl Tracker {
         section: &ObjSection,
     ) -> Result<()> {
         let mut addr = SectionAddress::new(section_index, section.address);
-        for chunk in section.data.chunks_exact(4) {
-            let value = u32::from_be_bytes(chunk.try_into()?);
+        for chunk in section.data.as_chunks::<4>().0 {
+            let value = u32::from_be_bytes(chunk[0..4].try_into()?);
             if let Some(value) = self.is_valid_address(obj, addr, value) {
                 self.relocations
                     .insert(addr, Relocation::Absolute(RelocationTarget::Address(value)));
@@ -592,12 +617,11 @@ impl Tracker {
                     if symbol.data_kind == ObjDataKind::Unknown {
                         new_symbol.data_kind = data_kind;
                     }
-                    if symbol.align.is_none() {
-                        if let Some(inferred_alignment) = inferred_alignment {
-                            if symbol_address % inferred_alignment == 0 {
-                                new_symbol.align = Some(inferred_alignment);
-                            }
-                        }
+                    if symbol.align.is_none()
+                        && let Some(inferred_alignment) = inferred_alignment
+                        && symbol_address % inferred_alignment == 0
+                    {
+                        new_symbol.align = Some(inferred_alignment);
                     }
                     obj.symbols.replace(symbol_idx, new_symbol)?;
                 }
@@ -612,7 +636,12 @@ impl Tracker {
                 })?;
                 (symbol_idx, 0)
             };
-            let reloc = ObjReloc { kind: reloc_kind, target_symbol, addend, module: None };
+            let reloc = ObjReloc {
+                kind: reloc_kind,
+                target_symbol,
+                addend,
+                module: None,
+            };
             let section = &mut obj.sections[addr.section];
             if replace {
                 section.relocations.replace(addr.address, reloc);

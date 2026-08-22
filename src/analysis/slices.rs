@@ -1,19 +1,19 @@
 use std::{
-    collections::{btree_map, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map},
     ops::Range,
 };
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use powerpc::{Ins, Opcode};
 
 use crate::{
     analysis::{
+        RelocationTarget,
         cfa::{FunctionInfo, SectionAddress},
         disassemble,
         executor::{ExecCbData, ExecCbResult, Executor},
         uniq_jump_table_entries,
-        vm::{section_address_for, BranchTarget, GprValue, StepResult, VM},
-        RelocationTarget,
+        vm::{BranchTarget, GprValue, StepResult, VM, section_address_for},
     },
     obj::{ObjInfo, ObjKind, ObjSection, ObjSymbolKind},
 };
@@ -111,16 +111,23 @@ fn check_prologue_sequence(
         ins.op == Opcode::Stw && ins.field_rs() == 0 && ins.field_ra() == 1
     }
     #[inline(always)]
-    fn is_bl(ins: Ins) -> bool { ins.op == Opcode::B && ins.field_lk() }
+    fn is_bl(ins: Ins) -> bool {
+        ins.op == Opcode::B && ins.field_lk()
+    }
     #[inline(always)]
     fn is_subi(ins: Ins) -> bool {
         ins.op == Opcode::Addi && ins.field_simm() < 0 && ins.field_simm() != -0x8000
     }
-    check_sequence(section, addr, ins, &[
-        (&is_mflr, &is_stw),
-        (&is_mflr, &is_bl),
-        (&is_subi, &is_mflr),
-    ])
+    check_sequence(
+        section,
+        addr,
+        ins,
+        &[
+            (&is_mflr, &is_stw),
+            (&is_mflr, &is_bl),
+            (&is_subi, &is_mflr),
+        ],
+    )
 }
 
 impl FunctionSlices {
@@ -134,14 +141,13 @@ impl FunctionSlices {
 
     pub fn add_block_start(&mut self, addr: SectionAddress) -> bool {
         // Slice previous block.
-        if let Some((_, end)) = self.blocks.range_mut(..addr).next_back() {
-            if let Some(last_end) = *end {
-                if last_end > addr {
-                    *end = Some(addr);
-                    self.blocks.insert(addr, Some(last_end));
-                    return false;
-                }
-            }
+        if let Some((_, end)) = self.blocks.range_mut(..addr).next_back()
+            && let Some(last_end) = *end
+            && last_end > addr
+        {
+            *end = Some(addr);
+            self.blocks.insert(addr, Some(last_end));
+            return false;
         }
         // Otherwise, insert with no end.
         match self.blocks.entry(addr) {
@@ -244,10 +250,10 @@ impl FunctionSlices {
         if self.function_references.contains(&addr) {
             return Some(addr);
         }
-        if let Some((&fn_addr, info)) = known_functions.range(..=addr).next_back() {
-            if fn_addr == addr || info.end.is_some_and(|end| addr < end) {
-                return Some(fn_addr);
-            }
+        if let Some((&fn_addr, info)) = known_functions.range(..=addr).next_back()
+            && (fn_addr == addr || info.end.is_some_and(|end| addr < end))
+        {
+            return Some(fn_addr);
         }
         None
     }
@@ -260,7 +266,15 @@ impl FunctionSlices {
         function_end: Option<SectionAddress>,
         known_functions: &BTreeMap<SectionAddress, FunctionInfo>,
     ) -> Result<ExecCbResult<bool>> {
-        let ExecCbData { executor, vm, result, ins_addr, section, ins, block_start } = data;
+        let ExecCbData {
+            executor,
+            vm,
+            result,
+            ins_addr,
+            section,
+            ins,
+            block_start,
+        } = data;
 
         // no need to check for prologues/epilogues in MSVC
         // if a func came from pdata, it not only has a prologue/epilogue, but a known confirmed ending
@@ -268,25 +282,23 @@ impl FunctionSlices {
         // if function_start belongs to a func with C++ EH that has catches,
         // and the inst we just ran was ADDI,
         // and the value inside R3 > function_start && R3 < any of the catches' start addresses, add it to our catch $LN label list
-        if ins.op == Opcode::Addi {
-            if let Some(info) = &obj.pdata_funcs.get(&function_start) {
-                if let Some(cxx_eh_func_info) = &info.exception_info {
-                    if let GprValue::Constant(c) = vm.gpr[3].value {
-                        let maybe_catch_ln = c as u32;
-                        if maybe_catch_ln > function_start.address {
-                            // catches come before unwinds, that's why we're able to do this
-                            for (catch_addr, _catch_size) in
-                                info.handlers.iter().take(cxx_eh_func_info.num_tries as usize)
-                            {
-                                if maybe_catch_ln < catch_addr.address {
-                                    self.special_catch_labels.push(SectionAddress::new(
-                                        function_start.section,
-                                        maybe_catch_ln,
-                                    ));
-                                    break;
-                                }
-                            }
-                        }
+        if ins.op == Opcode::Addi
+            && let Some(info) = &obj.pdata_funcs.get(&function_start)
+            && let Some(cxx_eh_func_info) = &info.exception_info
+            && let GprValue::Constant(c) = vm.gpr[3].value
+        {
+            let maybe_catch_ln = c as u32;
+            if maybe_catch_ln > function_start.address {
+                // catches come before unwinds, that's why we're able to do this
+                for (catch_addr, _catch_size) in info
+                    .handlers
+                    .iter()
+                    .take(cxx_eh_func_info.num_tries as usize)
+                {
+                    if maybe_catch_ln < catch_addr.address {
+                        self.special_catch_labels
+                            .push(SectionAddress::new(function_start.section, maybe_catch_ln));
+                        break;
                     }
                 }
             }
@@ -300,23 +312,23 @@ impl FunctionSlices {
         if self.possible_blocks.contains_key(&ins_addr) {
             self.possible_blocks.remove(&ins_addr);
         }
-        if let Some(fn_addr) = self.is_known_function(known_functions, ins_addr) {
-            if fn_addr != function_start {
-                log::warn!(
-                    "Control flow from {} hit known function {} (instruction: {})",
-                    function_start,
-                    fn_addr,
-                    ins_addr
-                );
-                // if we know the function end from pdata, just end the block here and continue processing
-                return match function_end {
-                    Some(_end) => {
-                        self.blocks.insert(block_start, function_end);
-                        Ok(ExecCbResult::EndBlock)
-                    }
-                    None => Ok(ExecCbResult::End(false)),
-                };
-            }
+        if let Some(fn_addr) = self.is_known_function(known_functions, ins_addr)
+            && fn_addr != function_start
+        {
+            log::warn!(
+                "Control flow from {} hit known function {} (instruction: {})",
+                function_start,
+                fn_addr,
+                ins_addr
+            );
+            // if we know the function end from pdata, just end the block here and continue processing
+            return match function_end {
+                Some(_end) => {
+                    self.blocks.insert(block_start, function_end);
+                    Ok(ExecCbResult::EndBlock)
+                }
+                None => Ok(ExecCbResult::End(false)),
+            };
         }
 
         match result {
@@ -349,7 +361,8 @@ impl FunctionSlices {
                 BranchTarget::Unknown
                 | BranchTarget::Address(RelocationTarget::External)
                 | BranchTarget::JumpTable {
-                    jump_table_address: RelocationTarget::External, ..
+                    jump_table_address: RelocationTarget::External,
+                    ..
                 } => {
                     // Likely end of function
                     let next_addr = ins_addr + 4;
@@ -397,7 +410,11 @@ impl FunctionSlices {
                     let next_address = ins_addr + 4;
                     self.blocks.insert(block_start, Some(next_address));
 
-                    log::debug!("Fetching jump table entries @ {} with size {:?}", address, size);
+                    log::debug!(
+                        "Fetching jump table entries @ {} with size {:?}",
+                        address,
+                        size
+                    );
                     let (entries, size) = uniq_jump_table_entries(
                         obj,
                         address,
@@ -411,9 +428,9 @@ impl FunctionSlices {
 
                     // if this function has a known end, check that every jump table entry is within function bounds
                     let within_func_bounds = match function_end {
-                        Some(end) => {
-                            !entries.iter().any(|&addr| addr < function_start || addr >= end)
-                        }
+                        Some(end) => !entries
+                            .iter()
+                            .any(|&addr| addr < function_start || addr >= end),
                         None => false,
                     };
 
@@ -458,11 +475,11 @@ impl FunctionSlices {
                     match branch.target {
                         BranchTarget::Address(RelocationTarget::Address(addr)) => {
                             let known = self.is_known_function(known_functions, addr);
-                            if let Some(fn_addr) = known {
-                                if fn_addr != function_start {
-                                    self.function_references.insert(fn_addr);
-                                    continue;
-                                }
+                            if let Some(fn_addr) = known
+                                && fn_addr != function_start
+                            {
+                                self.function_references.insert(fn_addr);
+                                continue;
                             }
                             if branch.link {
                                 // See if any existing functions contain this address,
@@ -636,7 +653,9 @@ impl FunctionSlices {
         Ok(true)
     }
 
-    pub fn can_finalize(&self) -> bool { self.possible_blocks.is_empty() }
+    pub fn can_finalize(&self) -> bool {
+        self.possible_blocks.is_empty()
+    }
 
     pub fn finalize(
         &mut self,
@@ -661,7 +680,10 @@ impl FunctionSlices {
         }
 
         let Some(end) = self.end() else {
-            bail!("Can't finalize function without known end: {:#010X?}", self.start())
+            bail!(
+                "Can't finalize function without known end: {:#010X?}",
+                self.start()
+            )
         };
         // TODO: rework to make compatible with relocatable objects
         if obj.kind == ObjKind::Executable {
@@ -675,23 +697,18 @@ impl FunctionSlices {
                     // FIXME this is real bad
                     if !self.has_conditional_blr {
                         let ins_addr = end - 4;
-                        if let Some(ins) = disassemble(section, ins_addr.address) {
-                            if ins.op == Opcode::B {
-                                if let Some(RelocationTarget::Address(target)) = ins
-                                    .branch_dest(ins_addr.address)
-                                    .and_then(|addr| section_address_for(obj, ins_addr, addr))
+                        if let Some(ins) = disassemble(section, ins_addr.address)
+                            && ins.op == Opcode::B
+                            && let Some(RelocationTarget::Address(target)) = ins
+                                .branch_dest(ins_addr.address)
+                                .and_then(|addr| section_address_for(obj, ins_addr, addr))
+                            && self.function_references.contains(&target)
+                        {
+                            for branches in self.branches.values() {
+                                if branches.len() > 1
+                                    && branches.contains(self.blocks.last_key_value().unwrap().0)
                                 {
-                                    if self.function_references.contains(&target) {
-                                        for branches in self.branches.values() {
-                                            if branches.len() > 1
-                                                && branches.contains(
-                                                    self.blocks.last_key_value().unwrap().0,
-                                                )
-                                            {
-                                                self.has_conditional_blr = true;
-                                            }
-                                        }
-                                    }
+                                    self.has_conditional_blr = true;
                                 }
                             }
                         }
@@ -733,10 +750,11 @@ impl FunctionSlices {
         if self.blocks.contains_key(&addr) {
             return TailCallResult::Not;
         }
-        if let Some(function_end) = function_end {
-            if addr >= function_start && addr < function_end {
-                return TailCallResult::Not;
-            }
+        if let Some(function_end) = function_end
+            && addr >= function_start
+            && addr < function_end
+        {
+            return TailCallResult::Not;
         }
         // If there's a prologue in the current function, not a tail call.
         if self.prologue.is_some() {
@@ -763,8 +781,15 @@ impl FunctionSlices {
         }
         // If jump target is known to be a function, or there's a function in between
         // this and the jump target, known tail call.
-        if self.function_references.range(function_start + 4..=addr).next().is_some()
-            || known_functions.range(function_start + 4..=addr).next().is_some()
+        if self
+            .function_references
+            .range(function_start + 4..=addr)
+            .next()
+            .is_some()
+            || known_functions
+                .range(function_start + 4..=addr)
+                .next()
+                .is_some()
         {
             return TailCallResult::Is;
         }
@@ -807,7 +832,11 @@ impl FunctionSlices {
             // If control flow jumps below the entry point, not a tail call.
             let start = slices.start().unwrap();
             if start < addr {
-                log::trace!("Tail call possibility eliminated: {:#010X} < {:#010X}", start, addr);
+                log::trace!(
+                    "Tail call possibility eliminated: {:#010X} < {:#010X}",
+                    start,
+                    addr
+                );
                 return TailCallResult::Not;
             }
             // If control flow includes another possible tail call, we know both are not tail calls.

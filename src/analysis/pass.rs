@@ -14,14 +14,70 @@ pub struct FindSaveRestSledsXbox {}
 
 #[allow(clippy::type_complexity)]
 const SLEDS_XBOX: [([u8; 8], &str, &str, u32, u32, u32); 8] = [
-    ([0xf9, 0xc1, 0xff, 0x68, 0xf9, 0xe1, 0xff, 0x70], "__savegprlr", "__savegprlr_", 14, 32, 4),
-    ([0xe9, 0xc1, 0xff, 0x68, 0xe9, 0xe1, 0xff, 0x70], "__restgprlr", "__restgprlr_", 14, 32, 4),
-    ([0xd9, 0xcc, 0xff, 0x70, 0xd9, 0xec, 0xff, 0x78], "__savefpr", "__savefpr_", 14, 32, 4),
-    ([0xc9, 0xcc, 0xff, 0x70, 0xc9, 0xec, 0xff, 0x78], "__restfpr", "__restfpr_", 14, 32, 4),
-    ([0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x61, 0xce], "__savevmx", "__savevmx_", 14, 32, 8),
-    ([0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x61, 0xcb], "__savevmx_upper", "__savevmx_", 64, 128, 8),
-    ([0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x60, 0xce], "__restvmx", "__restvmx_", 14, 32, 8),
-    ([0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x60, 0xcb], "__restvmx_upper", "__restvmx_", 64, 128, 8),
+    (
+        [0xf9, 0xc1, 0xff, 0x68, 0xf9, 0xe1, 0xff, 0x70],
+        "__savegprlr",
+        "__savegprlr_",
+        14,
+        32,
+        4,
+    ),
+    (
+        [0xe9, 0xc1, 0xff, 0x68, 0xe9, 0xe1, 0xff, 0x70],
+        "__restgprlr",
+        "__restgprlr_",
+        14,
+        32,
+        4,
+    ),
+    (
+        [0xd9, 0xcc, 0xff, 0x70, 0xd9, 0xec, 0xff, 0x78],
+        "__savefpr",
+        "__savefpr_",
+        14,
+        32,
+        4,
+    ),
+    (
+        [0xc9, 0xcc, 0xff, 0x70, 0xc9, 0xec, 0xff, 0x78],
+        "__restfpr",
+        "__restfpr_",
+        14,
+        32,
+        4,
+    ),
+    (
+        [0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x61, 0xce],
+        "__savevmx",
+        "__savevmx_",
+        14,
+        32,
+        8,
+    ),
+    (
+        [0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x61, 0xcb],
+        "__savevmx_upper",
+        "__savevmx_",
+        64,
+        128,
+        8,
+    ),
+    (
+        [0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x60, 0xce],
+        "__restvmx",
+        "__restvmx_",
+        14,
+        32,
+        8,
+    ),
+    (
+        [0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x60, 0xcb],
+        "__restvmx_upper",
+        "__restvmx_",
+        64,
+        128,
+        8,
+    ),
 ];
 
 impl AnalysisPass for FindSaveRestSledsXbox {
@@ -47,27 +103,35 @@ impl AnalysisPass for FindSaveRestSledsXbox {
                 }
                 // add known symbols for them
                 if let Some(Some(known_func_size)) = obj.known_functions.get(&start) {
-                    state.known_symbols.entry(start).or_default().push(ObjSymbol {
-                        name: func.to_string(),
-                        address: start.address,
-                        section: Some(start.section),
-                        size: *known_func_size,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Function,
-                        ..Default::default()
-                    });
+                    state
+                        .known_symbols
+                        .entry(start)
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: func.to_string(),
+                            address: start.address,
+                            section: Some(start.section),
+                            size: *known_func_size,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Function,
+                            ..Default::default()
+                        });
                 }
                 for i in reg_start..reg_end {
                     let addr = start + (i - reg_start) * step_size;
-                    state.known_symbols.entry(addr).or_default().push(ObjSymbol {
-                        name: format!("{label}{i}"),
-                        address: addr.address,
-                        section: Some(start.section),
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        ..Default::default()
-                    });
+                    state
+                        .known_symbols
+                        .entry(addr)
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: format!("{label}{i}"),
+                            address: addr.address,
+                            section: Some(start.section),
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        });
                 }
             }
         }

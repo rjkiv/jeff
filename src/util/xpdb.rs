@@ -4,7 +4,7 @@ use std::{
     vec::Vec,
 };
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use itertools::Itertools;
 use pdb2::{self, FallibleIterator, Indirection, PrimitiveKind, TypeFinder, TypeIndex};
 use typed_path::Utf8NativePathBuf;
@@ -48,8 +48,14 @@ fn to_section_addr(
     // Subtracting 1 because jeff sections are 0-indexed
     // TODO: Do optimized binaries have a different mapping?
     let jeff_sect = (sect_offs.section - 1) as u32;
-    let sect_base = section_addrs.get(jeff_sect).unwrap_or(&ObjSection::default()).address;
-    SectionAddress { section: jeff_sect, address: sect_base + sect_offs.offset }
+    let sect_base = section_addrs
+        .get(jeff_sect)
+        .unwrap_or(&ObjSection::default())
+        .address;
+    SectionAddress {
+        section: jeff_sect,
+        address: sect_base + sect_offs.offset,
+    }
 }
 
 /// Attempt to deduce the size of the type referenced by index using the
@@ -125,7 +131,10 @@ fn lookup_type_size(ty_finder: &TypeFinder, index: TypeIndex) -> Result<u64> {
                 ))),
             }
         }
-        _ => Err(anyhow::anyhow!(format!("Unrecognized type record for index 0x{:X}", index.0))),
+        _ => Err(anyhow::anyhow!(format!(
+            "Unrecognized type record for index 0x{:X}",
+            index.0
+        ))),
     }
 }
 
@@ -148,7 +157,11 @@ fn set_obj_size_by_name(obj_sym: &mut ObjSymbol, name: &str) {
     let is_wstring = name.starts_with("??_C@_1");
     if is_string || is_wstring {
         // In either case, the size is encoded into the symbol name itself
-        obj_sym.data_kind = if is_string { ObjDataKind::String } else { ObjDataKind::String16 };
+        obj_sym.data_kind = if is_string {
+            ObjDataKind::String
+        } else {
+            ObjDataKind::String16
+        };
         let ptr = &mut name["??_C@_0".len()..].chars();
         let mut str_size = 0;
         for ch in ptr.by_ref() {
@@ -311,8 +324,11 @@ pub fn try_parse_pdb(
                 obj_sym.address = symaddr.address;
                 obj_sym.section = Some(symaddr.section);
                 obj_sym.flags = ObjSymbolFlagSet(ObjSymbolFlags::Global.into());
-                obj_sym.kind =
-                    if data.function { ObjSymbolKind::Function } else { ObjSymbolKind::Object };
+                obj_sym.kind = if data.function {
+                    ObjSymbolKind::Function
+                } else {
+                    ObjSymbolKind::Object
+                };
                 obj_sym.data_kind = ObjDataKind::Unknown;
 
                 let name: String = data.name.to_string().into();
@@ -415,7 +431,9 @@ pub fn try_parse_pdb(
                 known_labels.push(symaddr);
             }
             Ok(pdb2::SymbolData::CoffGroup(data)) => groups.push(CoffGroup {
-                address: to_section_addr(&pdbmap, section_addrs, &data.offset).address.into(),
+                address: to_section_addr(&pdbmap, section_addrs, &data.offset)
+                    .address
+                    .into(),
                 size: data.cb,
                 name: data.name.to_string().into(),
                 section: to_section_addr(&pdbmap, section_addrs, &data.offset).section,
@@ -449,7 +467,12 @@ pub fn try_parse_pdb(
     });
     log::debug!("COFF Sections");
     for sec in section_addrs.iter() {
-        log::debug!("#{}: name = {}, addr = 0x{:X}", sec.0, sec.1.name, sec.1.address);
+        log::debug!(
+            "#{}: name = {}, addr = 0x{:X}",
+            sec.0,
+            sec.1.name,
+            sec.1.address
+        );
     }
     log::debug!("COFF Groups:");
     for grp in groups.iter() {
@@ -483,17 +506,17 @@ pub fn try_parse_pdb(
                     if let Some(file) = path.rsplit("\\").next() {
                         // Replace forbidden filename chars. This is mainly
                         // to handle unusual OBJNAMEs that are not really paths
-                        let mut base: String =
-                            file.to_string()
-                                .chars()
-                                .map(|c| {
-                                    if c.is_alphanumeric() || c == '.' || c == '-' {
-                                        c
-                                    } else {
-                                        '_'
-                                    }
-                                })
-                                .collect();
+                        let mut base: String = file
+                            .to_string()
+                            .chars()
+                            .map(|c| {
+                                if c.is_alphanumeric() || c == '.' || c == '-' {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
                         base = base.trim_end_matches(".obj").to_string() + ".cpp";
                         if seen_names.insert(base.clone()) {
                             module_names[i] = base;
@@ -556,15 +579,18 @@ pub fn try_parse_pdb(
 
             // Get a mutable reference to the ObjSplit we just pushed, so
             // subsequent contributions to it can update its size
-            curr_split = splits_by_section[sec_idx].push(start as u32, ObjSplit {
-                unit: mod_name.clone(),
-                end: end as u32,
-                align: None,
-                autogenerated: false,
-                common: false,
-                skip: false,
-                rename: rename.clone(),
-            });
+            curr_split = splits_by_section[sec_idx].push(
+                start as u32,
+                ObjSplit {
+                    unit: mod_name.clone(),
+                    end: end as u32,
+                    align: None,
+                    autogenerated: false,
+                    common: false,
+                    skip: false,
+                    rename: rename.clone(),
+                },
+            );
         }
         curr_split.end = end as u32;
     }

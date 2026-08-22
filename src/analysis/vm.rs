@@ -1,9 +1,9 @@
 use std::num::NonZeroU32;
 
-use powerpc::{Argument, Ins, Opcode, GPR};
+use powerpc::{Argument, GPR, Ins, Opcode};
 
 use crate::{
-    analysis::{cfa::SectionAddress, relocation_target_for, RelocationTarget},
+    analysis::{RelocationTarget, cfa::SectionAddress, relocation_target_for},
     obj::{ObjInfo, ObjKind},
 };
 
@@ -16,13 +16,19 @@ pub enum JumpTableType {
     // otherwise, the multiple is 1 - no offset math needed
     // target: the address immediately after the bctr
     // multiplier: 1 or 4, depending on above
-    RelativeBytes { target: Option<RelocationTarget>, multiplier: usize },
+    RelativeBytes {
+        target: Option<RelocationTarget>,
+        multiplier: usize,
+    },
     // the table came from an lhzx, contains relative byte offsets
     // if there is a rlwinm before the bctr, you must multiply the jump table entries by 4
     // otherwise, the multiple is 1 - no offset math needed
     // target: the address immediately after the bctr
     // multiplier: 1 or 2, depending on above
-    RelativeShorts { target: Option<RelocationTarget>, multiplier: usize },
+    RelativeShorts {
+        target: Option<RelocationTarget>,
+        multiplier: usize,
+    },
 }
 
 #[derive(Default, Debug, Copy, Clone, Eq, PartialEq)]
@@ -107,7 +113,9 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn gpr_value(&self, reg: u8) -> GprValue { self.gpr[reg as usize].value }
+    pub fn gpr_value(&self, reg: u8) -> GprValue {
+        self.gpr[reg as usize].value
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -141,7 +149,11 @@ pub enum StepResult {
     /// Continue normally
     Continue,
     /// Load from / store to
-    LoadStore { address: RelocationTarget, source: Gpr, source_reg: u8 },
+    LoadStore {
+        address: RelocationTarget,
+        source: Gpr,
+        source_reg: u8,
+    },
     /// Hit illegal instruction
     Illegal,
     /// Jump without affecting VM state
@@ -160,10 +172,16 @@ pub fn section_address_for(
     }
     if obj.kind == ObjKind::Executable {
         let (section_index, _) = obj.sections.at_address(target_addr).ok()?;
-        return Some(RelocationTarget::Address(SectionAddress::new(section_index, target_addr)));
+        return Some(RelocationTarget::Address(SectionAddress::new(
+            section_index,
+            target_addr,
+        )));
     }
     if obj.sections[ins_addr.section].contains(target_addr) {
-        Some(RelocationTarget::Address(SectionAddress::new(ins_addr.section, target_addr)))
+        Some(RelocationTarget::Address(SectionAddress::new(
+            ins_addr.section,
+            target_addr,
+        )))
     } else {
         None
     }
@@ -171,7 +189,9 @@ pub fn section_address_for(
 
 impl VM {
     #[inline]
-    pub fn new() -> Box<Self> { Box::default() }
+    pub fn new() -> Box<Self> {
+        Box::default()
+    }
 
     /// When calling a function, only preserve SDA bases
     #[inline]
@@ -199,7 +219,9 @@ impl VM {
     }
 
     #[inline]
-    pub fn clone_all(&self) -> Box<Self> { Box::new(self.clone()) }
+    pub fn clone_all(&self) -> Box<Self> {
+        Box::new(self.clone())
+    }
 
     pub fn step(&mut self, obj: &ObjInfo, ins_addr: SectionAddress, ins: Ins) -> StepResult {
         match ins.op {
@@ -237,7 +259,10 @@ impl VM {
                                 max_offset: max,
                             },
                         ) => match jt {
-                            JumpTableType::RelativeShorts { target: addr, multiplier: mult } => {
+                            JumpTableType::RelativeShorts {
+                                target: addr,
+                                multiplier: mult,
+                            } => {
                                 assert!(
                                     addr.is_none(),
                                     "Relative addr should not be known at this point!"
@@ -253,7 +278,10 @@ impl VM {
                                     max_offset: max,
                                 }
                             }
-                            JumpTableType::RelativeBytes { target: addr, multiplier: mult } => {
+                            JumpTableType::RelativeBytes {
+                                target: addr,
+                                multiplier: mult,
+                            } => {
                                 assert!(
                                     addr.is_none(),
                                     "Relative addr should not be known at this point!"
@@ -277,8 +305,9 @@ impl VM {
             }
             // addis rD, rA, SIMM
             Opcode::Addis => {
-                if let Some(target) =
-                    relocation_target_for(obj, ins_addr, None /* TODO */).ok().flatten()
+                if let Some(target) = relocation_target_for(obj, ins_addr, None /* TODO */)
+                    .ok()
+                    .flatten()
                 {
                     debug_assert_eq!(ins.field_ra(), 0);
                     self.gpr[ins.field_rd() as usize].set_hi(GprValue::Address(target), ins_addr);
@@ -306,8 +335,9 @@ impl VM {
             // addic rD, rA, SIMM
             // addic. rD, rA, SIMM
             Opcode::Addi | Opcode::Addic | Opcode::Addic_ => {
-                if let Some(target) =
-                    relocation_target_for(obj, ins_addr, None /* TODO */).ok().flatten()
+                if let Some(target) = relocation_target_for(obj, ins_addr, None /* TODO */)
+                    .ok()
+                    .flatten()
                 {
                     self.gpr[ins.field_rd() as usize].set_lo(
                         GprValue::Address(target),
@@ -362,7 +392,9 @@ impl VM {
                 self.gpr[ins.field_rd() as usize].set_direct(
                     match self.gpr[ins.field_ra() as usize].value {
                         GprValue::Constant(value) => GprValue::Constant(
-                            (!value).wrapping_add(ins.field_simm() as u64).wrapping_add(1),
+                            (!value)
+                                .wrapping_add(ins.field_simm() as u64)
+                                .wrapping_add(1),
                         ),
                         _ => GprValue::Unknown,
                     },
@@ -374,7 +406,9 @@ impl VM {
                 if ins.field_uimm() == 0 && ins.field_ra() == ins.field_rs() {
                     // don't do anything
                 } else if let Some(target) =
-                    relocation_target_for(obj, ins_addr, None /* TODO */).ok().flatten()
+                    relocation_target_for(obj, ins_addr, None /* TODO */)
+                        .ok()
+                        .flatten()
                 {
                     self.gpr[ins.field_ra() as usize].set_lo(
                         GprValue::Address(target),
@@ -428,7 +462,11 @@ impl VM {
                         _ => unreachable!(),
                     };
                     let crf = ins.field_crfd();
-                    self.cr[crf as usize] = Cr { signed, left, right };
+                    self.cr[crf as usize] = Cr {
+                        signed,
+                        left,
+                        right,
+                    };
                     self.gpr[left_reg].value = GprValue::ComparisonResult(crf);
                 }
             }
@@ -456,11 +494,18 @@ impl VM {
                         // if we come across a RelativeBytes jump table here (because rlwinm can come after lbzx),
                         // it's still a RelativeBytes jump table, we just need the multiplier to be 4 now.
                         GprValue::LoadIndexed {
-                            jump_table_type: JumpTableType::RelativeBytes { target, multiplier: _ },
+                            jump_table_type:
+                                JumpTableType::RelativeBytes {
+                                    target,
+                                    multiplier: _,
+                                },
                             jump_table_address: addr,
                             max_offset: max,
                         } => GprValue::LoadIndexed {
-                            jump_table_type: JumpTableType::RelativeBytes { target, multiplier: 4 },
+                            jump_table_type: JumpTableType::RelativeBytes {
+                                target,
+                                multiplier: 4,
+                            },
                             jump_table_address: addr,
                             max_offset: max,
                         },
@@ -529,7 +574,11 @@ impl VM {
                             link: false,
                             vm: self.clone_for_return(),
                         },
-                        Branch { target: branch_target, link: true, vm: self.clone_for_link() },
+                        Branch {
+                            target: branch_target,
+                            link: true,
+                            vm: self.clone_for_link(),
+                        },
                     ]);
                 }
 
@@ -547,7 +596,11 @@ impl VM {
                         vm: self.clone_all(),
                     },
                     // Branch taken
-                    Branch { target: branch_target, link: ins.field_lk(), vm: self.clone_all() },
+                    Branch {
+                        target: branch_target,
+                        link: ins.field_lk(),
+                        vm: self.clone_all(),
+                    },
                 ];
 
                 // Use tracked CR to calculate new register values for branches
@@ -720,9 +773,17 @@ fn split_values_by_crb(crb: u8, left: GprValue, right: GprValue) -> (GprValue, G
             ),
             (_, GprValue::Constant(value)) => (
                 // left >= right
-                GprValue::Range { min: value, max: u64::MAX, step: 1 },
+                GprValue::Range {
+                    min: value,
+                    max: u64::MAX,
+                    step: 1,
+                },
                 // left < right
-                GprValue::Range { min: 0, max: value.wrapping_sub(1), step: 1 },
+                GprValue::Range {
+                    min: 0,
+                    max: value.wrapping_sub(1),
+                    step: 1,
+                },
             ),
             _ => (left, left),
         },
@@ -744,9 +805,17 @@ fn split_values_by_crb(crb: u8, left: GprValue, right: GprValue) -> (GprValue, G
             ),
             (_, GprValue::Constant(value)) => (
                 // left <= right
-                GprValue::Range { min: 0, max: value, step: 1 },
+                GprValue::Range {
+                    min: 0,
+                    max: value,
+                    step: 1,
+                },
                 // left > right
-                GprValue::Range { min: value.wrapping_add(1), max: u64::MAX, step: 1 },
+                GprValue::Range {
+                    min: value.wrapping_add(1),
+                    max: u64::MAX,
+                    step: 1,
+                },
             ),
             _ => (left, left),
         },
@@ -828,7 +897,10 @@ pub fn is_store_op(op: Opcode) -> bool {
 
 #[inline]
 pub fn is_storef_op(op: Opcode) -> bool {
-    matches!(op, Opcode::Stfd | Opcode::Stfdu | Opcode::Stfs | Opcode::Stfsu)
+    matches!(
+        op,
+        Opcode::Stfd | Opcode::Stfdu | Opcode::Stfs | Opcode::Stfsu
+    )
 }
 
 #[inline]

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cwdemangle::demangle;
 use serde::{Deserialize, Serialize};
 use typed_path::Utf8UnixPathBuf;
@@ -6,18 +6,24 @@ use typed_path::Utf8UnixPathBuf;
 use crate::{
     analysis::cfa::SectionAddress,
     obj::{ObjInfo, ObjReloc, ObjRelocKind, ObjSymbol},
-    util::config::{signed_hex_serde, SectionAddressRef},
+    util::config::{SectionAddressRef, signed_hex_serde},
 };
 
 #[inline]
-fn bool_true() -> bool { true }
+fn bool_true() -> bool {
+    true
+}
 
 #[inline]
-fn is_true(b: &bool) -> bool { *b }
+fn is_true(b: &bool) -> bool {
+    *b
+}
 
 #[inline]
 fn is_default<T>(t: &T) -> bool
-where T: Default + PartialEq {
+where
+    T: Default + PartialEq,
+{
     t == &T::default()
 }
 
@@ -26,12 +32,16 @@ mod unix_path_serde {
     use typed_path::Utf8UnixPathBuf;
 
     pub fn serialize<S>(path: &Utf8UnixPathBuf, s: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         s.serialize_str(path.as_str())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Utf8UnixPathBuf, D::Error>
-    where D: Deserializer<'de> {
+    where
+        D: Deserializer<'de>,
+    {
         String::deserialize(deserializer).map(Utf8UnixPathBuf::from)
     }
 }
@@ -41,7 +51,9 @@ mod unix_path_serde_option {
     use typed_path::Utf8UnixPathBuf;
 
     pub fn serialize<S>(path: &Option<Utf8UnixPathBuf>, s: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         if let Some(path) = path {
             s.serialize_str(path.as_str())
         } else {
@@ -50,7 +62,9 @@ mod unix_path_serde_option {
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Utf8UnixPathBuf>, D::Error>
-    where D: Deserializer<'de> {
+    where
+        D: Deserializer<'de>,
+    {
         Ok(Option::<String>::deserialize(deserializer)?.map(Utf8UnixPathBuf::from))
     }
 }
@@ -59,7 +73,11 @@ mod unix_path_serde_option {
 pub struct ProjectConfig {
     #[serde(flatten)]
     pub base: ModuleConfig,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub selfile: Option<Utf8UnixPathBuf>,
     #[serde(skip_serializing_if = "is_default")]
     pub selfile_hash: Option<String>,
@@ -96,7 +114,11 @@ pub struct ProjectConfig {
     #[serde(default = "bool_true", skip_serializing_if = "is_true")]
     pub export_all: bool,
     /// Optional base path for all object files.
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub object_base: Option<Utf8UnixPathBuf>,
     /// Whether to extract objects from a disc image into object base. If false, the files
     /// will be used from the disc image directly without extraction.
@@ -134,22 +156,46 @@ pub struct ModuleConfig {
     pub name: Option<String>,
     #[serde(with = "unix_path_serde")]
     pub object: Utf8UnixPathBuf,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub title_update: Option<Utf8UnixPathBuf>,
     #[serde(skip_serializing_if = "is_default")]
     pub hash: Option<String>,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub splits: Option<Utf8UnixPathBuf>,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub symbols: Option<Utf8UnixPathBuf>,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub map: Option<Utf8UnixPathBuf>,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub pdb: Option<Utf8UnixPathBuf>,
     /// Forces the given symbols to be active (exported) in the linker script.
     #[serde(default, skip_serializing_if = "is_default")]
     pub force_active: Vec<String>,
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "is_default")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "is_default"
+    )]
     pub ldscript_template: Option<Utf8UnixPathBuf>,
     /// Overrides links to other modules.
     #[serde(skip_serializing_if = "is_default")]
@@ -170,11 +216,19 @@ pub struct ExtractConfig {
     pub rename: Option<String>,
     /// If specified, the symbol's data will be extracted to the given file.
     /// Path is relative to `out_dir/bin`.
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub binary: Option<Utf8UnixPathBuf>,
     /// If specified, the symbol's data will be extracted to the given file as a C array.
     /// Path is relative to `out_dir/include`.
-    #[serde(with = "unix_path_serde_option", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        with = "unix_path_serde_option",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub header: Option<Utf8UnixPathBuf>,
     /// The type for the extracted symbol in the header file. By default, the header will emit
     /// a full symbol declaration (a.k.a. `symbol`), but this can be set to `raw` to emit the raw
@@ -223,14 +277,21 @@ pub struct AddRelocationConfig {
 }
 
 impl ModuleConfig {
-    pub fn file_name(&self) -> &str { self.object.file_name().unwrap_or(self.object.as_str()) }
+    pub fn file_name(&self) -> &str {
+        self.object.file_name().unwrap_or(self.object.as_str())
+    }
 
     pub fn file_prefix(&self) -> &str {
         let file_name = self.file_name();
-        file_name.split_once('.').map(|(prefix, _)| prefix).unwrap_or(file_name)
+        file_name
+            .split_once('.')
+            .map(|(prefix, _)| prefix)
+            .unwrap_or(file_name)
     }
 
-    pub fn name(&self) -> &str { self.name.as_deref().unwrap_or_else(|| self.file_prefix()) }
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or_else(|| self.file_prefix())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -294,11 +355,13 @@ pub(crate) fn apply_block_relocations(
             }
             (Some(source), None) => {
                 let start = source.resolve(obj)?;
-                obj.blocked_relocation_sources.insert(start, end.unwrap_or(start + 1));
+                obj.blocked_relocation_sources
+                    .insert(start, end.unwrap_or(start + 1));
             }
             (None, Some(target)) => {
                 let start = target.resolve(obj)?;
-                obj.blocked_relocation_targets.insert(start, end.unwrap_or(start + 1));
+                obj.blocked_relocation_targets
+                    .insert(start, end.unwrap_or(start + 1));
             }
             (None, None) => {
                 bail!("Blocked relocation must specify either source or target");
@@ -327,12 +390,15 @@ pub(crate) fn apply_add_relocations(
                 (symbol_index, &obj.symbols[symbol_index])
             }
         };
-        obj.sections[section].relocations.replace(address, ObjReloc {
-            kind: reloc.kind,
-            target_symbol,
-            addend: reloc.addend,
-            module: None,
-        });
+        obj.sections[section].relocations.replace(
+            address,
+            ObjReloc {
+                kind: reloc.kind,
+                target_symbol,
+                addend: reloc.addend,
+                module: None,
+            },
+        );
     }
     Ok(())
 }

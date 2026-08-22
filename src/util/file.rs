@@ -5,15 +5,15 @@ use std::{
     io::{BufRead, BufWriter, Read, Seek, SeekFrom, Write},
 };
 
-use anyhow::{anyhow, Context, Result};
-use filetime::{set_file_mtime, FileTime};
+use anyhow::{Context, Result, anyhow};
+use filetime::{FileTime, set_file_mtime};
 use sha1::{Digest, Sha1};
 use typed_path::{Utf8NativePath, Utf8NativePathBuf, Utf8UnixPathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{
     util::path::check_path_buf,
-    vfs::{open_file, VfsFile},
+    vfs::{VfsFile, open_file},
 };
 
 /// Creates a buffered writer around a file (not memory mapped).
@@ -27,7 +27,9 @@ pub fn buf_writer(path: &Utf8NativePath) -> Result<BufWriter<File>> {
 
 /// Reads a string with known size at the specified offset.
 pub fn read_string<R>(reader: &mut R, off: u64, size: usize) -> io::Result<String>
-where R: Read + Seek + ?Sized {
+where
+    R: Read + Seek + ?Sized,
+{
     let mut data = vec![0u8; size];
     let pos = reader.stream_position()?;
     reader.seek(SeekFrom::Start(off))?;
@@ -38,7 +40,9 @@ where R: Read + Seek + ?Sized {
 
 /// Reads a zero-terminated string at the specified offset.
 pub fn read_c_string<R>(reader: &mut R, off: u64) -> io::Result<String>
-where R: Read + Seek + ?Sized {
+where
+    R: Read + Seek + ?Sized,
+{
     let pos = reader.stream_position()?;
     reader.seek(SeekFrom::Start(off))?;
     let mut s = String::new();
@@ -91,7 +95,10 @@ impl FileReadInfo {
     pub fn new(entry: &mut dyn VfsFile) -> Result<Self> {
         let hash = xxh3_64(entry.map()?);
         let metadata = entry.metadata()?;
-        Ok(Self { mtime: metadata.mtime, hash })
+        Ok(Self {
+            mtime: metadata.mtime,
+            hash,
+        })
     }
 }
 
@@ -105,7 +112,10 @@ pub struct FileIterator {
 
 impl FileIterator {
     pub fn new(paths: &[Utf8NativePathBuf]) -> Result<Self> {
-        Ok(Self { paths: process_rsp(paths)?, index: 0 })
+        Ok(Self {
+            paths: process_rsp(paths)?,
+            index: 0,
+        })
     }
 
     fn next_path(&mut self) -> Option<Result<(Utf8NativePathBuf, Box<dyn VfsFile>)>> {
@@ -125,14 +135,21 @@ impl FileIterator {
 impl Iterator for FileIterator {
     type Item = Result<(Utf8NativePathBuf, Box<dyn VfsFile>)>;
 
-    fn next(&mut self) -> Option<Self::Item> { self.next_path() }
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_path()
+    }
 }
 
 pub fn touch(path: &Utf8NativePath) -> io::Result<()> {
     if fs::exists(path)? {
         set_file_mtime(path, FileTime::now())
     } else {
-        match OpenOptions::new().create(true).truncate(true).write(true).open(path) {
+        match OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
         }

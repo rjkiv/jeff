@@ -31,5 +31,10 @@ pub fn read_halfword(data: &[u8], index: usize) -> u16 {
 }
 
 pub fn read_word(data: &[u8], index: usize) -> u32 {
-    u32::from_be_bytes([data[index], data[index + 1], data[index + 2], data[index + 3]])
+    u32::from_be_bytes([
+        data[index],
+        data[index + 1],
+        data[index + 2],
+        data[index + 3],
+    ])
 }

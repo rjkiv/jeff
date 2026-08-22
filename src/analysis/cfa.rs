@@ -5,7 +5,7 @@ use std::{
     ops::{Add, AddAssign, BitAnd, Sub},
 };
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use itertools::Itertools;
 
 use crate::{
@@ -38,24 +38,40 @@ impl Display for SectionAddress {
 }
 
 impl SectionAddress {
-    pub fn new(section: SectionIndex, address: u32) -> Self { Self { section, address } }
+    pub fn new(section: SectionIndex, address: u32) -> Self {
+        Self { section, address }
+    }
 
     pub fn offset(self, offset: i32) -> Self {
-        Self { section: self.section, address: self.address.wrapping_add_signed(offset) }
+        Self {
+            section: self.section,
+            address: self.address.wrapping_add_signed(offset),
+        }
     }
 
     pub fn align_up(self, align: u32) -> Self {
-        Self { section: self.section, address: (self.address + align - 1) & !(align - 1) }
+        Self {
+            section: self.section,
+            address: (self.address + align - 1) & !(align - 1),
+        }
     }
 
     pub fn align_down(self, align: u32) -> Self {
-        Self { section: self.section, address: self.address & !(align - 1) }
+        Self {
+            section: self.section,
+            address: self.address & !(align - 1),
+        }
     }
 
-    pub fn is_aligned(self, align: u32) -> bool { self.address & (align - 1) == 0 }
+    pub fn is_aligned(self, align: u32) -> bool {
+        self.address & (align - 1) == 0
+    }
 
     pub fn wrapping_add(self, rhs: u32) -> Self {
-        Self { section: self.section, address: self.address.wrapping_add(rhs) }
+        Self {
+            section: self.section,
+            address: self.address.wrapping_add(rhs),
+        }
     }
 }
 
@@ -63,7 +79,10 @@ impl Add<u32> for SectionAddress {
     type Output = Self;
 
     fn add(self, rhs: u32) -> Self::Output {
-        Self { section: self.section, address: self.address + rhs }
+        Self {
+            section: self.section,
+            address: self.address + rhs,
+        }
     }
 }
 
@@ -71,12 +90,17 @@ impl Sub<u32> for SectionAddress {
     type Output = Self;
 
     fn sub(self, rhs: u32) -> Self::Output {
-        Self { section: self.section, address: self.address - rhs }
+        Self {
+            section: self.section,
+            address: self.address - rhs,
+        }
     }
 }
 
 impl AddAssign<u32> for SectionAddress {
-    fn add_assign(&mut self, rhs: u32) { self.address += rhs; }
+    fn add_assign(&mut self, rhs: u32) {
+        self.address += rhs;
+    }
 }
 
 impl UpperHex for SectionAddress {
@@ -88,7 +112,9 @@ impl UpperHex for SectionAddress {
 impl BitAnd<u32> for SectionAddress {
     type Output = u32;
 
-    fn bitand(self, rhs: u32) -> Self::Output { self.address & rhs }
+    fn bitand(self, rhs: u32) -> Self::Output {
+        self.address & rhs
+    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -99,7 +125,9 @@ pub struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    pub fn is_analyzed(&self) -> bool { self.analyzed }
+    pub fn is_analyzed(&self) -> bool {
+        self.analyzed
+    }
 
     pub fn is_function(&self) -> bool {
         self.analyzed && self.end.is_some() && self.slices.is_some()
@@ -159,15 +187,34 @@ impl AnalyzerState {
             // obj.symbols[sym_idx].name gives the actual name of the function at start.address
             // use it to replace the names of symbols of corresponding __ehfuncinfo, except_data, __scopetable, etc
             // if this func has a C++ exception, add/replace ehfuncinfo symbols
-            if let Some(info) = &obj.pdata_funcs.get(&sym_addr) {
-                if let Some(cxx_eh_func_info) = &info.exception_info {
+            if let Some(info) = &obj.pdata_funcs.get(&sym_addr)
+                && let Some(cxx_eh_func_info) = &info.exception_info
+            {
+                obj.symbols.add(
+                    ObjSymbol {
+                        name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
+                        address: cxx_eh_func_info.addr.address,
+                        section: Some(cxx_eh_func_info.addr.section),
+                        // if this exception record has any try/catches, there's no extra 0 at the end
+                        size: if cxx_eh_func_info.num_tries > 0 {
+                            0x24
+                        } else {
+                            0x28
+                        },
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Object,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+                if let Some((unwind_addr, num_unwinds)) = cxx_eh_func_info.unwind_map {
                     obj.symbols.add(
                         ObjSymbol {
-                            name: format!("__ehfuncinfo${}", obj.symbols[sym_idx].name),
-                            address: cxx_eh_func_info.addr.address,
-                            section: Some(cxx_eh_func_info.addr.section),
-                            // if this exception record has any try/catches, there's no extra 0 at the end
-                            size: if cxx_eh_func_info.num_tries > 0 { 0x24 } else { 0x28 },
+                            name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
+                            address: unwind_addr.address,
+                            section: Some(unwind_addr.section),
+                            size: num_unwinds * 8,
                             size_known: true,
                             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                             kind: ObjSymbolKind::Object,
@@ -175,61 +222,46 @@ impl AnalyzerState {
                         },
                         false,
                     )?;
-                    if let Some((unwind_addr, num_unwinds)) = cxx_eh_func_info.unwind_map {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__unwindtable${}", obj.symbols[sym_idx].name),
-                                address: unwind_addr.address,
-                                section: Some(unwind_addr.section),
-                                size: num_unwinds * 8,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
-                    if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
-                                address: try_map_addr.address,
-                                section: Some(try_map_addr.section),
-                                size: cxx_eh_func_info.num_tries * 0x14,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
-                    if let Some((addr, num_entries)) = cxx_eh_func_info.ip_to_state_map {
-                        obj.symbols.add(
-                            ObjSymbol {
-                                name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
-                                address: addr.address,
-                                section: Some(addr.section),
-                                size: num_entries * 8,
-                                size_known: true,
-                                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                                kind: ObjSymbolKind::Object,
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
-                    }
+                }
+                if let Some(try_map_addr) = cxx_eh_func_info.try_map_addr {
+                    obj.symbols.add(
+                        ObjSymbol {
+                            name: format!("__tryblocktable${}", obj.symbols[sym_idx].name),
+                            address: try_map_addr.address,
+                            section: Some(try_map_addr.section),
+                            size: cxx_eh_func_info.num_tries * 0x14,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Object,
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
+                }
+                if let Some((addr, num_entries)) = cxx_eh_func_info.ip_to_state_map {
+                    obj.symbols.add(
+                        ObjSymbol {
+                            name: format!("__iptostatemap${}", obj.symbols[sym_idx].name),
+                            address: addr.address,
+                            section: Some(addr.section),
+                            size: num_entries * 8,
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            kind: ObjSymbolKind::Object,
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
                 }
             }
         }
         let mut iter = self.jump_tables.iter().peekable();
         while let Some((&addr, &(mut size))) = iter.next() {
             // Truncate overlapping jump tables
-            if let Some((&next_addr, _)) = iter.peek() {
-                if next_addr.section == addr.section {
-                    size = min(size, next_addr.address - addr.address);
-                }
+            if let Some(&(&next_addr, _)) = iter.peek()
+                && next_addr.section == addr.section
+            {
+                size = min(size, next_addr.address - addr.address);
             }
             let section = &obj.sections[addr.section];
             ensure!(
@@ -296,22 +328,34 @@ impl AnalyzerState {
     pub fn detect_functions(&mut self, obj: &ObjInfo) -> Result<()> {
         // Apply known functions from pdata/import data
         for (&addr, &size) in &obj.known_functions {
-            self.functions.insert(addr, FunctionInfo {
-                analyzed: false,
-                end: size.map(|size| addr + size),
-                slices: None,
-            });
+            self.functions.insert(
+                addr,
+                FunctionInfo {
+                    analyzed: false,
+                    end: size.map(|size| addr + size),
+                    slices: None,
+                },
+            );
         }
 
         // Apply known functions from symbols
         for (_, symbol) in obj.symbols.by_kind(ObjSymbolKind::Function) {
-            let Some(section_index) = symbol.section else { continue };
+            let Some(section_index) = symbol.section else {
+                continue;
+            };
             let addr_ref = SectionAddress::new(section_index, symbol.address);
-            self.functions.insert(addr_ref, FunctionInfo {
-                analyzed: false,
-                end: if symbol.size_known { Some(addr_ref + symbol.size) } else { None },
-                slices: None,
-            });
+            self.functions.insert(
+                addr_ref,
+                FunctionInfo {
+                    analyzed: false,
+                    end: if symbol.size_known {
+                        Some(addr_ref + symbol.size)
+                    } else {
+                        None
+                    },
+                    slices: None,
+                },
+            );
         }
 
         // Also check the beginning of every code section
@@ -445,16 +489,20 @@ impl AnalyzerState {
                         self.functions.entry(address).or_default();
                     }
                 }
-                self.jump_tables.append(&mut slices.jump_table_references.clone());
+                self.jump_tables
+                    .append(&mut slices.jump_table_references.clone());
                 for label in slices.special_jump_table_labels.iter() {
-                    self.known_symbols.entry(*label).or_default().push(ObjSymbol {
-                        name: format!("$LN{:X}", label.address),
-                        address: label.address,
-                        section: Some(label.section),
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        ..Default::default()
-                    })
+                    self.known_symbols
+                        .entry(*label)
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: format!("$LN{:X}", label.address),
+                            address: label.address,
+                            section: Some(label.section),
+                            size_known: true,
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        })
                 }
                 let end = slices.end();
                 let info = self.functions.get_mut(&addr).unwrap();
@@ -468,7 +516,10 @@ impl AnalyzerState {
     }
 
     fn first_unbounded_function(&self) -> Option<SectionAddress> {
-        self.functions.iter().find(|(_, info)| !info.is_analyzed()).map(|(&addr, _)| addr)
+        self.functions
+            .iter()
+            .find(|(_, info)| !info.is_analyzed())
+            .map(|(&addr, _)| addr)
     }
 
     fn process_functions(&mut self, obj: &ObjInfo) -> Result<()> {
@@ -489,54 +540,63 @@ impl AnalyzerState {
     }
 
     pub fn process_function_at(&mut self, obj: &ObjInfo, addr: SectionAddress) -> Result<bool> {
-        Ok(if let Some(mut slices) = self.process_function(obj, addr)? {
-            for address in slices.function_references.iter().cloned() {
-                // Only create functions for code sections
-                // Some games use branches to data sections to prevent dead stripping (Mario Party)
-                if matches!(obj.sections.get(address.section), Some(section) if section.kind == ObjSectionKind::Code)
-                {
-                    self.functions.entry(address).or_default();
+        Ok(
+            if let Some(mut slices) = self.process_function(obj, addr)? {
+                for address in slices.function_references.iter().cloned() {
+                    // Only create functions for code sections
+                    // Some games use branches to data sections to prevent dead stripping (Mario Party)
+                    if matches!(obj.sections.get(address.section), Some(section) if section.kind == ObjSectionKind::Code)
+                    {
+                        self.functions.entry(address).or_default();
+                    }
                 }
-            }
-            self.jump_tables.append(&mut slices.jump_table_references.clone());
-            for label in slices.special_jump_table_labels.iter() {
-                self.known_symbols.entry(*label).or_default().push(ObjSymbol {
-                    name: format!("$LN{:X}", label.address),
-                    address: label.address,
-                    section: Some(label.section),
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    ..Default::default()
-                })
-            }
-            for label in slices.special_catch_labels.iter() {
-                self.known_symbols.entry(*label).or_default().push(ObjSymbol {
-                    name: format!("$LN{:X}", label.address),
-                    address: label.address,
-                    section: Some(label.section),
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    ..Default::default()
-                })
-            }
-            if slices.can_finalize() {
-                slices.finalize(obj, &self.functions)?;
-                let info = self.functions.entry(addr).or_default();
-                info.analyzed = true;
-                info.end = slices.end();
-                info.slices = Some(slices);
+                self.jump_tables
+                    .append(&mut slices.jump_table_references.clone());
+                for label in slices.special_jump_table_labels.iter() {
+                    self.known_symbols
+                        .entry(*label)
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: format!("$LN{:X}", label.address),
+                            address: label.address,
+                            section: Some(label.section),
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        })
+                }
+                for label in slices.special_catch_labels.iter() {
+                    self.known_symbols
+                        .entry(*label)
+                        .or_default()
+                        .push(ObjSymbol {
+                            name: format!("$LN{:X}", label.address),
+                            address: label.address,
+                            section: Some(label.section),
+                            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                            ..Default::default()
+                        })
+                }
+                if slices.can_finalize() {
+                    slices.finalize(obj, &self.functions)?;
+                    let info = self.functions.entry(addr).or_default();
+                    info.analyzed = true;
+                    info.end = slices.end();
+                    info.slices = Some(slices);
+                } else {
+                    let info = self.functions.entry(addr).or_default();
+                    info.analyzed = true;
+                    info.end = None;
+                    info.slices = Some(slices);
+                }
+                true
             } else {
+                log::info!("Not a function @ {:#010X}", addr);
                 let info = self.functions.entry(addr).or_default();
                 info.analyzed = true;
                 info.end = None;
-                info.slices = Some(slices);
-            }
-            true
-        } else {
-            log::info!("Not a function @ {:#010X}", addr);
-            let info = self.functions.entry(addr).or_default();
-            info.analyzed = true;
-            info.end = None;
-            false
-        })
+                false
+            },
+        )
     }
 
     fn process_function(
@@ -588,27 +648,25 @@ impl AnalyzerState {
             loop {
                 match (iter.next(), iter.peek()) {
                     (Some((&first, first_info)), Some(&(&second, second_info))) => {
-                        let Some(first_end) = first_info.end else { continue };
+                        let Some(first_end) = first_info.end else {
+                            continue;
+                        };
                         if first_end > second {
                             // if first is a C func with excepts, and the second is not
-                            if let Some(first_info) = obj.pdata_funcs.get(&first) {
-                                if !obj.pdata_funcs.contains_key(&second) {
-                                    let max_except_end = first + first_info.full_size;
-                                    // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
-                                    // delete it, and set first's end to max end
-                                    if first <= second && second < max_except_end {
-                                        assert_eq!(
-                                            first_end, max_except_end,
-                                            "Expected end {:?}, calculated end {:?}",
-                                            max_except_end, first
-                                        );
-                                        c_exception_truncations.push((
-                                            first,
-                                            second,
-                                            max_except_end,
-                                        ));
-                                        continue;
-                                    }
+                            if let Some(first_info) = obj.pdata_funcs.get(&first)
+                                && !obj.pdata_funcs.contains_key(&second)
+                            {
+                                let max_except_end = first + first_info.full_size;
+                                // if second is within the bounds of first (a C func with exception handling) and max_except_end (the known max end of said C func),
+                                // delete it, and set first's end to max end
+                                if first <= second && second < max_except_end {
+                                    assert_eq!(
+                                        first_end, max_except_end,
+                                        "Expected end {:?}, calculated end {:?}",
+                                        max_except_end, first
+                                    );
+                                    c_exception_truncations.push((first, second, max_except_end));
+                                    continue;
                                 }
                             }
                             log::warn!(
@@ -642,7 +700,9 @@ impl AnalyzerState {
                         }
                     }
                     (Some((last, last_info)), None) => {
-                        let Some(last_end) = last_info.end else { continue };
+                        let Some(last_end) = last_info.end else {
+                            continue;
+                        };
                         if last_end < section_end {
                             let addr = match skip_alignment(section, last_end, section_end) {
                                 Some(addr) => addr,
@@ -681,7 +741,11 @@ impl AnalyzerState {
         }
         for addr in new_functions {
             let opt = self.functions.insert(addr, FunctionInfo::default());
-            ensure!(opt.is_none(), "Attempted to detect duplicate function @ {:#010X}", addr);
+            ensure!(
+                opt.is_none(),
+                "Attempted to detect duplicate function @ {:#010X}",
+                addr
+            );
         }
         Ok(found_new)
     }

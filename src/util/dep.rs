@@ -18,7 +18,10 @@ fn normalize_path(path: Utf8NativePathBuf) -> Utf8UnixPathBuf {
 
 impl DepFile {
     pub fn new(name: Utf8NativePathBuf) -> Self {
-        Self { name: name.with_unix_encoding(), dependencies: vec![] }
+        Self {
+            name: name.with_unix_encoding(),
+            dependencies: vec![],
+        }
     }
 
     pub fn push(&mut self, dependency: Utf8NativePathBuf) {
@@ -26,11 +29,14 @@ impl DepFile {
     }
 
     pub fn extend(&mut self, dependencies: Vec<Utf8NativePathBuf>) {
-        self.dependencies.extend(dependencies.into_iter().map(normalize_path));
+        self.dependencies
+            .extend(dependencies.into_iter().map(normalize_path));
     }
 
     pub fn write<W>(&self, w: &mut W) -> std::io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         write!(w, "{}:", self.name)?;
         for dep in self.dependencies.iter().unique() {
             write!(w, " \\\n  {}", dep.as_str().replace(' ', "\\ "))?;

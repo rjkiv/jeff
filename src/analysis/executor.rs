@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use fixedbitset::FixedBitSet;
 use powerpc::Ins;
 
@@ -77,11 +77,16 @@ pub enum ExecCbResult<T = ()> {
 
 impl Executor {
     pub fn new(obj: &ObjInfo) -> Self {
-        Self { vm_stack: vec![], visited: VisitedAddresses::new(obj) }
+        Self {
+            vm_stack: vec![],
+            visited: VisitedAddresses::new(obj),
+        }
     }
 
     pub fn run<Cb, R>(&mut self, obj: &ObjInfo, mut cb: Cb) -> Result<Option<R>>
-    where Cb: FnMut(ExecCbData) -> Result<ExecCbResult<R>> {
+    where
+        Cb: FnMut(ExecCbData) -> Result<ExecCbResult<R>>,
+    {
         while let Some(mut state) = self.vm_stack.pop() {
             let section = &obj.sections[state.address.section];
             ensure!(
@@ -93,7 +98,10 @@ impl Executor {
                 section.address + section.size
             );
             if section.kind != ObjSectionKind::Code {
-                log::warn!("Attempted to visit non-code address {:#010X}", state.address);
+                log::warn!(
+                    "Attempted to visit non-code address {:#010X}",
+                    state.address
+                );
                 continue;
             }
 

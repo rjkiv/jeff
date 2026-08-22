@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::{
     analysis::{cfa::SectionAddress, read_u32},
@@ -52,7 +52,9 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             .by_name("__C_specific_handler")?
             .expect("No C exception handling in this raw exe?");
         SectionAddress::new(
-            c_sym.section.expect("C handler should have a section specified!"),
+            c_sym
+                .section
+                .expect("C handler should have a section specified!"),
             c_sym.address,
         )
     };
@@ -60,7 +62,7 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     // C/CXX exception handler start addresses, and their sizes
     let mut known_exceptions: BTreeMap<SectionAddress, u32> = BTreeMap::new();
 
-    for chunk in pdata_section.data.chunks_exact(8) {
+    for chunk in pdata_section.data.as_chunks::<8>().0 {
         let start_addr = u32::from_be_bytes(chunk[0..4].try_into()?);
         // if we encounter 0's, that's the end of usable pdata entries
         if start_addr == 0 {
@@ -99,7 +101,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                 cur_func_except_handler =
                     SectionAddress::new(obj.sections.at_address(except_func)?.0, except_func);
             } else {
-                bail!("Invalid exception handler address listed at {}!", start_addr - 8)
+                bail!(
+                    "Invalid exception handler address listed at {}!",
+                    start_addr - 8
+                )
             }
             // word 2: the address of the function's exception handler data record
             if let Some(except_record) =
@@ -143,7 +148,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     continue;
                 }
             } else {
-                bail!("Invalid exception record address listed at {}!", start_addr - 4)
+                bail!(
+                    "Invalid exception record address listed at {}!",
+                    start_addr - 4
+                )
             }
 
             // C handler
@@ -190,12 +198,15 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     },
                     false,
                 )?;
-                obj.pdata_funcs.insert(func_start_addr, PdataFuncInfo {
-                    main_size: num_insts_in_func * 4,
-                    full_size: num_insts_in_func * 4,
-                    handlers,
-                    exception_info: None,
-                });
+                obj.pdata_funcs.insert(
+                    func_start_addr,
+                    PdataFuncInfo {
+                        main_size: num_insts_in_func * 4,
+                        full_size: num_insts_in_func * 4,
+                        handlers,
+                        exception_info: None,
+                    },
+                );
             }
             // C++
             else {
@@ -253,7 +264,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                                 cur_exceptions.entry(addr).or_default();
                             }
                         }
-                        Some((SectionAddress::new(rdata_sec_idx, unwind_map_addr), num_unwinds))
+                        Some((
+                            SectionAddress::new(rdata_sec_idx, unwind_map_addr),
+                            num_unwinds,
+                        ))
                     } else {
                         None
                     }
@@ -316,26 +330,32 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
                     }
                 };
 
-                obj.pdata_funcs.insert(func_start_addr, PdataFuncInfo {
-                    main_size: num_insts_in_func * 4,
-                    full_size: num_insts_in_func * 4,
-                    handlers: cur_exceptions,
-                    exception_info: Some(CxxEhFuncInfo {
-                        addr: cur_func_except_record,
-                        unwind_map,
-                        num_tries,
-                        try_map_addr,
-                        ip_to_state_map,
-                    }),
-                });
+                obj.pdata_funcs.insert(
+                    func_start_addr,
+                    PdataFuncInfo {
+                        main_size: num_insts_in_func * 4,
+                        full_size: num_insts_in_func * 4,
+                        handlers: cur_exceptions,
+                        exception_info: Some(CxxEhFuncInfo {
+                            addr: cur_func_except_record,
+                            unwind_map,
+                            num_tries,
+                            try_map_addr,
+                            ip_to_state_map,
+                        }),
+                    },
+                );
             }
         } else {
-            obj.pdata_funcs.insert(func_start_addr, PdataFuncInfo {
-                main_size: num_insts_in_func * 4,
-                full_size: num_insts_in_func * 4,
-                handlers: BTreeMap::default(),
-                exception_info: None,
-            });
+            obj.pdata_funcs.insert(
+                func_start_addr,
+                PdataFuncInfo {
+                    main_size: num_insts_in_func * 4,
+                    full_size: num_insts_in_func * 4,
+                    handlers: BTreeMap::default(),
+                    exception_info: None,
+                },
+            );
         }
     }
 
@@ -360,7 +380,10 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
     );
     log::info!(
         "\tFuncs with CXX exceptions: {}",
-        obj.pdata_funcs.values().filter(|info| info.is_cxx()).count()
+        obj.pdata_funcs
+            .values()
+            .filter(|info| info.is_cxx())
+            .count()
     );
 
     // add Cxx handler symbol here

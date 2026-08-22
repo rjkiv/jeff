@@ -43,17 +43,23 @@ pub struct TakeSeek<T> {
 
 impl<T> TakeSeek<T> {
     /// Gets a reference to the underlying reader.
-    pub fn get_ref(&self) -> &T { &self.inner }
+    pub fn get_ref(&self) -> &T {
+        &self.inner
+    }
 
     /// Gets a mutable reference to the underlying reader.
     ///
     /// Care should be taken to avoid modifying the internal I/O state of the
     /// underlying reader as doing so may corrupt the internal limit of this
     /// `TakeSeek`.
-    pub fn get_mut(&mut self) -> &mut T { &mut self.inner }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
 
     /// Consumes this wrapper, returning the wrapped value.
-    pub fn into_inner(self) -> T { self.inner }
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
 
     /// Returns the number of bytes that can be read before this instance will
     /// return EOF.
@@ -62,7 +68,9 @@ impl<T> TakeSeek<T> {
     ///
     /// This instance may reach EOF after reading fewer bytes than indicated by
     /// this method if the underlying [`Read`] instance reaches EOF.
-    pub fn limit(&self) -> u64 { self.end.saturating_sub(self.pos) }
+    pub fn limit(&self) -> u64 {
+        self.end.saturating_sub(self.pos)
+    }
 }
 
 impl<T: Seek> TakeSeek<T> {
@@ -75,7 +83,10 @@ impl<T: Seek> TakeSeek<T> {
     ///
     /// Panics if the inner stream returns an error from `stream_position`.
     pub fn set_limit(&mut self, limit: u64) {
-        let pos = self.inner.stream_position().expect("cannot get position for `set_limit`");
+        let pos = self
+            .inner
+            .stream_position()
+            .expect("cannot get position for `set_limit`");
         self.pos = pos;
         self.end = pos + limit;
     }
@@ -107,7 +118,9 @@ impl<T: Seek> Seek for TakeSeek<T> {
         Ok(self.pos)
     }
 
-    fn stream_position(&mut self) -> Result<u64> { Ok(self.pos) }
+    fn stream_position(&mut self) -> Result<u64> {
+        Ok(self.pos)
+    }
 }
 
 /// An extension trait that implements `take_seek()` for compatible streams.
@@ -115,14 +128,23 @@ pub trait TakeSeekExt {
     /// Creates an adapter which will read at most `limit` bytes from the
     /// wrapped stream.
     fn take_seek(self, limit: u64) -> TakeSeek<Self>
-    where Self: Sized;
+    where
+        Self: Sized;
 }
 
 impl<T: Read + Seek> TakeSeekExt for T {
     fn take_seek(mut self, limit: u64) -> TakeSeek<Self>
-    where Self: Sized {
-        let pos = self.stream_position().expect("cannot get position for `take_seek`");
+    where
+        Self: Sized,
+    {
+        let pos = self
+            .stream_position()
+            .expect("cannot get position for `take_seek`");
 
-        TakeSeek { inner: self, pos, end: pos + limit }
+        TakeSeek {
+            inner: self,
+            pos,
+            end: pos + limit,
+        }
     }
 }

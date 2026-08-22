@@ -29,7 +29,7 @@
 
 use std::io::{Cursor, Read, Write};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /// Decompresses an LZ10/LZ11 compressed file. It returns an error when:
@@ -44,7 +44,9 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 /// let mut decompressed = nintendo_lz::decompress(&mut f).unwrap();
 /// ```
 pub fn decompress<R>(inp: &mut R) -> Result<Vec<u8>>
-where R: Read + ?Sized {
+where
+    R: Read + ?Sized,
+{
     let mut length = inp.read_u32::<LittleEndian>()? as usize;
     let ver = match length & 0xFF {
         0x10 => 0,
@@ -165,7 +167,9 @@ fn find_longest_match(data: &[u8], off: usize, max: usize) -> Option<(usize, usi
 /// nintendo_lz::compress(&data, &mut f, nintendo_lz::CompressionLevel::LZ11(65809)).unwrap();
 /// ```
 pub fn compress<W>(inp: &[u8], out: &mut W, level: CompressionLevel) -> Result<()>
-where W: Write + ?Sized {
+where
+    W: Write + ?Sized,
+{
     let ver = match level {
         CompressionLevel::LZ10 => 0,
         CompressionLevel::LZ11(_) => 1,
@@ -180,7 +184,10 @@ where W: Write + ?Sized {
         CompressionLevel::LZ10 => 18,
         CompressionLevel::LZ11(max) => max,
     };
-    ensure!(repeat_size < 65810, "Maximum repeat size out of range. (0..65810)");
+    ensure!(
+        repeat_size < 65810,
+        "Maximum repeat size out of range. (0..65810)"
+    );
 
     let size: usize = inp.len();
 
@@ -218,8 +225,11 @@ where W: Write + ?Sized {
                     cmpbuf.extend_from_slice(&cmp);
                 } else if len < 0x111 {
                     let l = len - 0x11;
-                    let cmp: [u8; 3] =
-                        [(l >> 4) as u8, ((lz_off >> 8) as u8) + ((l << 4) as u8), lz_off as u8];
+                    let cmp: [u8; 3] = [
+                        (l >> 4) as u8,
+                        ((lz_off >> 8) as u8) + ((l << 4) as u8),
+                        lz_off as u8,
+                    ];
                     cmpbuf.extend_from_slice(&cmp);
                 } else {
                     let l = len - 0x111;

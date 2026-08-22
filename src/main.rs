@@ -89,7 +89,6 @@ struct TopLevel {
 #[argp(subcommand)]
 enum SubCommand {
     Demangle(cmd::demangle::Args),
-    Map(cmd::map::Args),
     Xex(cmd::xex::Args),
 }
 
@@ -109,7 +108,8 @@ fn main() {
         // Try to enable ANSI support on Windows.
         let _ = enable_ansi_support();
         // Disable isatty check for supports-color. (e.g. when used with ninja)
-        env::set_var("IGNORE_IS_TERMINAL", "1");
+        // SAFETY: Called early in main before any other threads are spawned.
+        unsafe { env::set_var("IGNORE_IS_TERMINAL", "1") };
         supports_color::on(Stream::Stdout).is_some_and(|c| c.has_basic)
     };
     // owo-colors uses an old version of supports-color, so we need to override manually.
@@ -117,8 +117,10 @@ fn main() {
     // in owo-colors removes set_override and if_supports_color entirely.
     owo_colors::set_override(use_colors);
 
-    let format =
-        tracing_subscriber::fmt::format().with_ansi(use_colors).with_target(false).without_time();
+    let format = tracing_subscriber::fmt::format()
+        .with_ansi(use_colors)
+        .with_target(false)
+        .without_time();
     let builder = tracing_subscriber::fmt().event_format(format);
     if let Some(level) = args.log_level {
         builder
@@ -143,13 +145,14 @@ fn main() {
     let mut result = Ok(());
     if let Some(dir) = &args.chdir {
         result = env::set_current_dir(dir).map_err(|e| {
-            Error::new(e)
-                .context(format!("Failed to change working directory to '{}'", dir.display()))
+            Error::new(e).context(format!(
+                "Failed to change working directory to '{}'",
+                dir.display()
+            ))
         });
     }
     result = result.and_then(|_| match args.command {
         SubCommand::Demangle(c_args) => cmd::demangle::run(c_args),
-        SubCommand::Map(c_args) => cmd::map::run(c_args),
         SubCommand::Xex(c_args) => cmd::xex::run(c_args),
     });
     if let Err(e) = result {

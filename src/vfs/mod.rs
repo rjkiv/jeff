@@ -10,9 +10,9 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use common::StaticFile;
-use disc::{nod_to_io_error, DiscFs};
+use disc::{DiscFs, nod_to_io_error};
 use dyn_clone::DynClone;
 use filetime::FileTime;
 use nodtool::{nod, nod::DiscStream};
@@ -54,9 +54,13 @@ pub struct VfsMetadata {
 }
 
 impl VfsMetadata {
-    pub fn is_file(&self) -> bool { self.file_type == VfsFileType::File }
+    pub fn is_file(&self) -> bool {
+        self.file_type == VfsFileType::File
+    }
 
-    pub fn is_dir(&self) -> bool { self.file_type == VfsFileType::Directory }
+    pub fn is_dir(&self) -> bool {
+        self.file_type == VfsFileType::Directory
+    }
 }
 
 dyn_clone::clone_trait_object!(VfsFile);
@@ -85,11 +89,15 @@ impl From<io::Error> for VfsError {
 }
 
 impl From<String> for VfsError {
-    fn from(e: String) -> Self { VfsError::Other(e) }
+    fn from(e: String) -> Self {
+        VfsError::Other(e)
+    }
 }
 
 impl From<&str> for VfsError {
-    fn from(e: &str) -> Self { VfsError::Other(e.to_string()) }
+    fn from(e: &str) -> Self {
+        VfsError::Other(e.to_string())
+    }
 }
 
 impl Display for VfsError {
@@ -150,7 +158,9 @@ impl Display for ArchiveKind {
 }
 
 pub fn detect<R>(file: &mut R) -> io::Result<FileFormat>
-where R: Read + Seek + ?Sized {
+where
+    R: Read + Seek + ?Sized,
+{
     file.seek(SeekFrom::Start(0))?;
     let mut magic = [0u8; 8];
     match file.read_exact(&mut magic) {
@@ -211,7 +221,7 @@ pub fn open_path_with_fs(
                         Err(anyhow!("{} is not a file", current_path))
                     } else {
                         Ok(OpenResult::Directory(fs, segment.to_path_buf()))
-                    }
+                    };
                 }
             }
         }
@@ -231,7 +241,7 @@ pub fn open_path_with_fs(
                 }
                 _ => match format {
                     FileFormat::Regular => {
-                        return Err(anyhow!("{} is not an archive", current_path))
+                        return Err(anyhow!("{} is not an archive", current_path));
                     }
                     FileFormat::Compressed(kind) => {
                         file = Some(
@@ -282,8 +292,9 @@ pub fn open_fs(mut file: Box<dyn VfsFile>, kind: ArchiveKind) -> io::Result<Box<
         ArchiveKind::Disc(_) => {
             let disc =
                 Arc::new(nod::Disc::new_stream(file.into_disc_stream()).map_err(nod_to_io_error)?);
-            let partition =
-                disc.open_partition_kind(nod::PartitionKind::Data).map_err(nod_to_io_error)?;
+            let partition = disc
+                .open_partition_kind(nod::PartitionKind::Data)
+                .map_err(nod_to_io_error)?;
             Ok(Box::new(DiscFs::new(disc, partition, metadata.mtime)?))
         }
     }
@@ -298,7 +309,10 @@ pub fn decompress_file(
         CompressionKind::Nlzss => {
             let result = nlzss::decompress(file)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-            Ok(Box::new(StaticFile::new(Arc::from(result.as_slice()), metadata.mtime)))
+            Ok(Box::new(StaticFile::new(
+                Arc::from(result.as_slice()),
+                metadata.mtime,
+            )))
         }
     }
 }

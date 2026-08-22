@@ -9,12 +9,16 @@ pub struct AddressRanges {
 }
 
 impl Default for AddressRanges {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AddressRanges {
     #[inline]
-    pub fn new() -> Self { Self { inner: vec![] } }
+    pub fn new() -> Self {
+        Self { inner: vec![] }
+    }
 
     pub fn insert(&mut self, start: SectionAddress, end: SectionAddress) {
         debug_assert_eq!(
@@ -32,7 +36,10 @@ impl AddressRanges {
     }
 
     pub fn contains(&self, address: SectionAddress) -> bool {
-        let pos = match self.inner.binary_search_by_key(&address, |&(start, _)| start) {
+        let pos = match self
+            .inner
+            .binary_search_by_key(&address, |&(start, _)| start)
+        {
             Ok(_) => return true,
             Err(pos) => pos,
         };
@@ -53,48 +60,147 @@ mod tests {
     #[test]
     fn test_contains() {
         let mut intervals = AddressRanges::new();
-        intervals.insert(SectionAddress { section: 0, address: 0x80000000 }, SectionAddress {
-            section: 0,
-            address: 0x80000004,
-        });
-        intervals.insert(SectionAddress { section: 0, address: 0x80000008 }, SectionAddress {
-            section: 0,
-            address: 0x8000000C,
-        });
-        intervals.insert(SectionAddress { section: 12, address: 0x80004000 }, SectionAddress {
-            section: 12,
-            address: 0x80004004,
-        });
-        intervals.insert(SectionAddress { section: 12, address: 0x80004008 }, SectionAddress {
-            section: 12,
-            address: 0x8000400C,
-        });
+        intervals.insert(
+            SectionAddress {
+                section: 0,
+                address: 0x80000000,
+            },
+            SectionAddress {
+                section: 0,
+                address: 0x80000004,
+            },
+        );
+        intervals.insert(
+            SectionAddress {
+                section: 0,
+                address: 0x80000008,
+            },
+            SectionAddress {
+                section: 0,
+                address: 0x8000000C,
+            },
+        );
+        intervals.insert(
+            SectionAddress {
+                section: 12,
+                address: 0x80004000,
+            },
+            SectionAddress {
+                section: 12,
+                address: 0x80004004,
+            },
+        );
+        intervals.insert(
+            SectionAddress {
+                section: 12,
+                address: 0x80004008,
+            },
+            SectionAddress {
+                section: 12,
+                address: 0x8000400C,
+            },
+        );
 
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000000 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000001 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000002 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000003 }));
-        assert!(!intervals.contains(SectionAddress { section: 0, address: 0x80000004 }));
-        assert!(!intervals.contains(SectionAddress { section: 0, address: 0x80000005 }));
-        assert!(!intervals.contains(SectionAddress { section: 0, address: 0x80000006 }));
-        assert!(!intervals.contains(SectionAddress { section: 0, address: 0x80000007 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000008 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x80000009 }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x8000000A }));
-        assert!(intervals.contains(SectionAddress { section: 0, address: 0x8000000B }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000000
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000001
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000002
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000003
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000004
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000005
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000006
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000007
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000008
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x80000009
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x8000000A
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 0,
+            address: 0x8000000B
+        }));
 
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004000 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004001 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004002 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004003 }));
-        assert!(!intervals.contains(SectionAddress { section: 12, address: 0x80004004 }));
-        assert!(!intervals.contains(SectionAddress { section: 12, address: 0x80004005 }));
-        assert!(!intervals.contains(SectionAddress { section: 12, address: 0x80004006 }));
-        assert!(!intervals.contains(SectionAddress { section: 12, address: 0x80004007 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004008 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x80004009 }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x8000400A }));
-        assert!(intervals.contains(SectionAddress { section: 12, address: 0x8000400B }));
-        assert!(!intervals.contains(SectionAddress { section: 12, address: 0x8000400C }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004000
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004001
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004002
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004003
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004004
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004005
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004006
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004007
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004008
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x80004009
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x8000400A
+        }));
+        assert!(intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x8000400B
+        }));
+        assert!(!intervals.contains(SectionAddress {
+            section: 12,
+            address: 0x8000400C
+        }));
     }
 }

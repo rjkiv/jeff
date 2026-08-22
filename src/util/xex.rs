@@ -1,13 +1,12 @@
 use std::{borrow::Cow, cmp::min, collections::BTreeMap, fs};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use lzxd::Lzxd;
 use object::{
-    endian,
+    Architecture, BinaryFormat, Endianness, Object, ObjectSection, RelocationFlags, SectionKind,
+    SymbolFlags, SymbolKind, SymbolScope, endian,
     read::pe::PeFile32,
     write::{SectionId, SymbolId},
-    Architecture, BinaryFormat, Endianness, Object, ObjectSection, RelocationFlags, SectionKind,
-    SymbolFlags, SymbolKind, SymbolScope,
 };
 use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 
@@ -20,8 +19,8 @@ use crate::{
         crypto::decrypt_aes128_cbc_no_padding,
         read::read_word,
         xex_optional_headers::{
-            parse_xex_optional_headers, BaseFileFormat, ImportFunction, ImportLibrary,
-            XexCompression, XexOptionalHeader,
+            BaseFileFormat, ImportFunction, ImportLibrary, XexCompression, XexOptionalHeader,
+            parse_xex_optional_headers,
         },
     },
 };
@@ -46,7 +45,11 @@ impl XexHeader {
         let pe_offset = read_word(data, 8);
         // reserved is at data index 12, but it's unused so who cares
         let security_info_offset = read_word(data, 16);
-        Ok(Self { module_flags, pe_offset, security_info_offset })
+        Ok(Self {
+            module_flags,
+            pe_offset,
+            security_info_offset,
+        })
     }
 }
 
@@ -295,8 +298,9 @@ impl XexInfo {
                         if expected == 0 {
                             break;
                         }
-                        let decompressed =
-                            lzxd_state.decompress_next(chunk_data, expected).map_err(|e| {
+                        let decompressed = lzxd_state
+                            .decompress_next(chunk_data, expected)
+                            .map_err(|e| {
                                 anyhow::anyhow!(
                                     "LZX: decompress failed at pos_out=0x{:X} \
                             (chunk_len={}, expected={}, block_off={}): {:?}",
@@ -450,13 +454,16 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
     // insert the sections
     for (idx, sect) in obj.sections.iter() {
         // println!("Section: {}", sect.name);
-        let sect_id =
-            cur_coff.add_section(Vec::new(), sect.name.clone().into_bytes(), match sect.kind {
+        let sect_id = cur_coff.add_section(
+            Vec::new(),
+            sect.name.clone().into_bytes(),
+            match sect.kind {
                 ObjSectionKind::Code => SectionKind::Text,
                 ObjSectionKind::Data => SectionKind::Data,
                 ObjSectionKind::ReadOnlyData => SectionKind::ReadOnlyData,
                 ObjSectionKind::Bss => SectionKind::UninitializedData,
-            });
+            },
+        );
         if sect.kind != ObjSectionKind::Bss {
             cur_coff.append_section_data(sect_id, &sect.data, sect.align);
         }
@@ -514,7 +521,9 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
                     offset: addr as u64,
                     symbol: *sym_id,
                     addend: 0,
-                    flags: RelocationFlags::Coff { typ: reloc.to_coff() },
+                    flags: RelocationFlags::Coff {
+                        typ: reloc.to_coff(),
+                    },
                 },
             )?;
             // MSVC requires an extra relocation to pair up high and low ones
@@ -526,7 +535,9 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
                             offset: addr as u64,
                             symbol: *sym_id,
                             addend: 0,
-                            flags: RelocationFlags::Coff { typ: object::pe::IMAGE_REL_PPC_PAIR },
+                            flags: RelocationFlags::Coff {
+                                typ: object::pe::IMAGE_REL_PPC_PAIR,
+                            },
                         },
                     )?;
                 }
@@ -541,19 +552,35 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
 }
 
 pub fn coff_path_for_unit(unit: &str) -> Utf8NativePathBuf {
-    Utf8UnixPath::new(unit).with_encoding().with_extension("obj")
+    Utf8UnixPath::new(unit)
+        .with_encoding()
+        .with_extension("obj")
 }
 
 // debug only, lists section bounds
 pub fn list_exe_sections(exe: &PeFile32) {
     println!("Sections:");
     for sec in exe.section_table().iter() {
-        let name = std::str::from_utf8(&sec.name).unwrap_or("").trim_end_matches('\0');
+        let name = std::str::from_utf8(&sec.name)
+            .unwrap_or("")
+            .trim_end_matches('\0');
         println!("Name: {}", name);
-        println!("  VirtualSize: 0x{:08X}", sec.virtual_size.get(endian::LittleEndian));
-        println!("  VirtualAddress: 0x{:08X}", sec.virtual_address.get(endian::LittleEndian));
-        println!("  SizeOfRawData: 0x{:08X}", sec.size_of_raw_data.get(endian::LittleEndian));
-        println!("  PointerToRawData: 0x{:08X}", sec.pointer_to_raw_data.get(endian::LittleEndian));
+        println!(
+            "  VirtualSize: 0x{:08X}",
+            sec.virtual_size.get(endian::LittleEndian)
+        );
+        println!(
+            "  VirtualAddress: 0x{:08X}",
+            sec.virtual_address.get(endian::LittleEndian)
+        );
+        println!(
+            "  SizeOfRawData: 0x{:08X}",
+            sec.size_of_raw_data.get(endian::LittleEndian)
+        );
+        println!(
+            "  PointerToRawData: 0x{:08X}",
+            sec.pointer_to_raw_data.get(endian::LittleEndian)
+        );
         println!(
             "  Has uninitialized data? {}",
             sec.characteristics.get(endian::LittleEndian) & 0x80 != 0

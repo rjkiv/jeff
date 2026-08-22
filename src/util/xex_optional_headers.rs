@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 
 use crate::util::read::{read_halfword, read_word};
 
@@ -172,11 +172,15 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                     "Resource info has unexpected length! (expected a multiple of 16)"
                 );
                 let mut info: Vec<ResourceInfo> = vec![];
-                for chunk in header.data.chunks_exact(16) {
+                for chunk in header.data.as_chunks::<16>().0 {
                     let title_id = String::from_utf8(chunk[0..8].to_vec())?;
                     let rsrc_start = u32::from_be_bytes(chunk[8..12].try_into()?);
                     let rsrc_end = rsrc_start + u32::from_be_bytes(chunk[12..16].try_into()?);
-                    info.push(ResourceInfo { title_id, rsrc_start, rsrc_end });
+                    info.push(ResourceInfo {
+                        title_id,
+                        rsrc_start,
+                        rsrc_end,
+                    });
                 }
                 xex_optional_headers.push(XexOptionalHeader::ResourceInfo { info });
             }
@@ -216,7 +220,10 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                     _ => unreachable!(),
                 };
                 xex_optional_headers.push(XexOptionalHeader::BaseFileFormat {
-                    format: BaseFileFormat { encrypted, compression },
+                    format: BaseFileFormat {
+                        encrypted,
+                        compression,
+                    },
                 });
             }
             0x405 => {
@@ -246,8 +253,9 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                 log::debug!("TODO: implement OriginalBaseAddress")
             }
             0x10100 => {
-                xex_optional_headers
-                    .push(XexOptionalHeader::EntryPoint { entry: read_word(&header.data, 0) });
+                xex_optional_headers.push(XexOptionalHeader::EntryPoint {
+                    entry: read_word(&header.data, 0),
+                });
             }
             0x10201 => {
                 xex_optional_headers.push(XexOptionalHeader::ImageBaseAddress {
@@ -318,8 +326,9 @@ pub fn parse_xex_optional_headers(xex_data: &[u8]) -> Result<Vec<XexOptionalHead
                     let new_len = i + 1;
                     name.truncate(new_len);
                 }
-                xex_optional_headers
-                    .push(XexOptionalHeader::OriginalPEName { name: String::from_utf8(name)? });
+                xex_optional_headers.push(XexOptionalHeader::OriginalPEName {
+                    name: String::from_utf8(name)?,
+                });
             }
             0x200FF => {
                 let num_libs = header.data.len() / 16;
