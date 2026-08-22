@@ -93,7 +93,7 @@ fn get_jump_table_entries(
     size: Option<NonZeroU32>,
     from: SectionAddress, // the address of the bctr that uses the jump table
     function_start: SectionAddress,
-    function_end: Option<SectionAddress>,
+    _function_end: Option<SectionAddress>,
 ) -> Result<(Vec<SectionAddress>, u32)> {
     let section = &obj.sections[addr.section];
     match jump_table_type {
@@ -105,20 +105,17 @@ fn get_jump_table_entries(
                 "Absolute jump table did not start immediately after the bctr at {}!",
                 from
             );
-            assert!(
-                function_end.is_some(),
-                "Must know function end for absolute jump table, because pdata"
-            );
             let mut entries: Vec<SectionAddress> = Vec::new();
-            // now, step through, line by line, until you find not-an-address
+            let mut min_entry_addr: Option<u32> = None;
             let mut data = section.data_range(addr.address, section.address + section.size)?;
             let mut cur_addr = addr;
             loop {
                 let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
-                // entry_addr must be within known function bounds
-                // if you have an absolute jump table, your func is in pdata - ergo, known bounds
+
+                // entry_addr must be >= the function's start,
+                // AND we must also not have hit the earliest address in our parsed entries so far
                 if entry_addr >= function_start.address
-                    && entry_addr < function_end.unwrap().address
+                    && min_entry_addr.is_none_or(|a| cur_addr.address < a)
                 {
                     let (section_index, _) =
                         obj.sections.at_address(entry_addr).with_context(|| {
@@ -127,6 +124,7 @@ fn get_jump_table_entries(
                             )
                         })?;
                     entries.push(SectionAddress::new(section_index, entry_addr));
+                    min_entry_addr = Some(min_entry_addr.unwrap_or(entry_addr).min(entry_addr));
                 } else {
                     break;
                 }

@@ -381,6 +381,7 @@ impl Tracker {
                         function_start,
                         Some(function_end),
                     )?;
+                    // TODO: if this is an absolute jump table, add relocs for each entry
                     for target in entries {
                         if is_function_addr(target) {
                             executor.push(target, vm.clone_all(), true);
