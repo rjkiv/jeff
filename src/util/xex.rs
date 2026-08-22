@@ -1,5 +1,3 @@
-use std::{borrow::Cow, cmp::min, collections::BTreeMap, fs};
-
 use anyhow::{Result, bail, ensure};
 use lzxd::Lzxd;
 use object::{
@@ -8,9 +6,12 @@ use object::{
     read::pe::PeFile32,
     write::{SectionId, SymbolId},
 };
+use std::{borrow::Cow, cmp::min, collections::BTreeMap, fs};
 use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 
+use crate::obj::ObjSection;
 use crate::{
+    array_ref,
     obj::{
         ObjInfo, ObjRelocKind, ObjSectionKind, ObjSymbolKind, ObjSymbolScope, SectionIndex,
         SymbolIndex,
@@ -441,6 +442,37 @@ impl XexInfo {
     }
 }
 
+fn adjusted_data_for_relocs(section: &ObjSection) -> Result<Vec<u8>> {
+    let mut new_data: Vec<u8> = vec![];
+    let mut current_address = 0;
+    for (addr, reloc) in section.relocations.iter() {
+        new_data.extend_from_slice(&section.data[current_address..addr as usize]);
+        let mut ins = u32::from_be_bytes(*array_ref!(section.data, addr as usize, 4));
+        match reloc.kind {
+            ObjRelocKind::Absolute => {
+                ins = 0;
+            }
+            ObjRelocKind::PpcAddr16Hi | ObjRelocKind::PpcAddr16Ha | ObjRelocKind::PpcAddr16Lo => {
+                ins &= !0xFFFF;
+            }
+            ObjRelocKind::PpcRel24 => {
+                ins &= !0x3FFFFFC;
+            }
+            ObjRelocKind::PpcRel14 => {
+                ins &= !0xFFFC;
+            }
+            ObjRelocKind::PpcEmbSda21 => {
+                ins &= !0x1FFFFF;
+            }
+        }
+        new_data.extend(ins.to_be_bytes());
+        current_address = addr as usize + 4;
+    }
+    // Write remaining data
+    new_data.extend(&section.data[current_address..]);
+    Ok(new_data)
+}
+
 pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
     // let root_name = obj.name.split('.').next().unwrap();
     // println!("Writing {}.obj", root_name);
@@ -465,7 +497,8 @@ pub fn write_coff(obj: &ObjInfo) -> Result<Vec<u8>> {
             },
         );
         if sect.kind != ObjSectionKind::Bss {
-            cur_coff.append_section_data(sect_id, &sect.data, sect.align);
+            let data_to_write = adjusted_data_for_relocs(sect)?;
+            cur_coff.append_section_data(sect_id, &data_to_write, sect.align);
         }
         sect_map.insert(idx, sect_id);
     }
