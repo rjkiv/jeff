@@ -22,8 +22,8 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::{
     analysis::{
         cfa::AnalyzerState,
+        libcmt::parse_libcmt,
         objects::{detect_objects, detect_strings},
-        pass::{AnalysisPass, FindSaveRestSledsXbox},
         tracker::Tracker,
     },
     cmd::dol::{
@@ -388,6 +388,12 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     }
 
     let mut obj = input.process()?;
+
+    if !config.symbols_known {
+        // add signatures/auto-deduce splits here
+        parse_libcmt(&mut obj)?;
+    }
+
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
