@@ -423,7 +423,7 @@ impl FunctionSlices {
                         size,
                         ins_addr,
                         function_start,
-                        function_end.or_else(|| self.end()),
+                        function_end,
                     )?;
                     let entries = BTreeSet::from_iter(entries);
                     log::debug!("-> size {}: {:?}", size, entries);

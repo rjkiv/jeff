@@ -93,7 +93,7 @@ fn get_jump_table_entries_impl(
     size: Option<NonZeroU32>,
     from: SectionAddress, // the address of the bctr that uses the jump table
     function_start: SectionAddress,
-    _function_end: Option<SectionAddress>,
+    function_end: Option<SectionAddress>,
 ) -> Result<(Vec<SectionAddress>, u32)> {
     let section = &obj.sections[addr.section];
     match jump_table_type {
@@ -111,12 +111,20 @@ fn get_jump_table_entries_impl(
             let mut cur_addr = addr;
             loop {
                 let entry_addr = u32::from_be_bytes(*array_ref!(data, 0, 4));
-
+                // if function end is some:
+                // entry_addr must be within known function bounds
+                // else (function end is none):
                 // entry_addr must be >= the function's start,
                 // AND we must also not have hit the earliest address in our parsed entries so far
-                if entry_addr >= function_start.address
-                    && min_entry_addr.is_none_or(|a| cur_addr.address < a)
-                {
+                if match function_end {
+                    Some(function_end) => {
+                        entry_addr >= function_start.address && entry_addr < function_end.address
+                    }
+                    None => {
+                        entry_addr >= function_start.address
+                            && min_entry_addr.is_none_or(|a| cur_addr.address < a)
+                    }
+                } {
                     let (section_index, _) =
                         obj.sections.at_address(entry_addr).with_context(|| {
                             format!(
