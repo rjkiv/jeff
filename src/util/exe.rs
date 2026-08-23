@@ -1,6 +1,7 @@
 use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
 use anyhow::{Result, bail, ensure};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use memchr::memmem;
 use object::{Object, ObjectSection, SectionKind, read::pe::PeFile32};
 use typed_path::Utf8NativePathBuf;
@@ -187,10 +188,8 @@ impl InputtedExecutable {
             // swap the endianness of the last two bytes (so 00 01 01 90 becomes 90 01 00 00, we only care about the last two bytes)
             // then slap an 80 at the end (90 01 00 80) - the 80 tells the system that we're importing by ordinal
             fn unstrip_imp(imp: &mut [u8]) {
-                imp[0] = imp[3];
-                imp[1] = imp[2];
-                imp[2] = 0;
-                imp[3] = 0x80;
+                let (b2, b3) = (imp[2], imp[3]);
+                imp[0..4].copy_from_slice(&[b3, b2, 0, 0x80]);
             }
             fn add_imp(
                 obj: &mut ObjInfo,
@@ -218,14 +217,8 @@ impl InputtedExecutable {
             // (change the first two words to lis/addi r11 to 0x827103c4: 3D 60 82 71 81 6B 03 C4)
             // (then it becomes: 3D 60 82 71 81 6B 03 C4 7D 69 03 A6 4E 80 04 20)
             fn unstrip_thunk(thunk: &mut [u8], imp_addr: u32) {
-                thunk[0] = 0x3D;
-                thunk[1] = 0x60;
-                thunk[2] = ((imp_addr & 0xFF000000) >> 24) as u8;
-                thunk[3] = ((imp_addr & 0xFF0000) >> 16) as u8;
-                thunk[4] = 0x81;
-                thunk[5] = 0x6B;
-                thunk[6] = ((imp_addr & 0xFF00) >> 8) as u8;
-                thunk[7] = (imp_addr & 0xFF) as u8;
+                let [b0, b1, b2, b3] = imp_addr.to_be_bytes();
+                thunk[0..8].copy_from_slice(&[0x3D, 0x60, b0, b1, 0x81, 0x6B, b2, b3]);
             }
             fn add_thunk(
                 obj: &mut ObjInfo,
@@ -398,49 +391,33 @@ impl InputtedExecutable {
         }
 
         // you would be amazed just how much we can infer from an Xbox 360 exe before CFA can even begin
+        process_xidata(&mut obj)?; // needs to be done before SEH, because of the possibility of having a thunk to the C handler
         process_seh(&mut obj)?;
-        process_xidata(&mut obj)?;
         process_rtti(&mut obj)?;
 
-        const RTL_CHECK_STACK: [u8; 40] = [
-            // _RtlCheckStack
-            0x7d, 0x83, 0x00, 0xd0, // _RtlCheckStack12
-            0x7d, 0x6c, 0x00, 0xd0, 0x38, 0x0b, 0x0f, 0xff, 0x7c, 0x00, 0x66, 0x71, 0x4c, 0x81,
-            0x00, 0x20, 0x7c, 0x2b, 0x0b, 0x78, 0x7c, 0x09, 0x03, 0xa6, 0x84, 0x0b, 0xf0, 0x00,
-            0x42, 0x00, 0xff, 0xfc, 0x4e, 0x80, 0x00, 0x20,
-        ];
-
-        let mut api_syms: Vec<ObjSymbol> = vec![];
-        for (section_index, section) in obj.sections.by_kind(ObjSectionKind::Code) {
-            let Some(pos) = memmem::find(&section.data, &RTL_CHECK_STACK) else {
-                continue;
-            };
-            let start = SectionAddress::new(section_index, section.address + pos as u32);
-            obj.known_functions.insert(start, Some(4));
-            obj.known_functions.insert(start + 4, Some(36));
-            api_syms.push(ObjSymbol {
-                name: String::from("_RtlCheckStack"),
-                address: start.address,
-                section: Some(start.section),
-                size: 4,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Function,
-                ..Default::default()
-            });
-            api_syms.push(ObjSymbol {
-                name: String::from("_RtlCheckStack12"),
-                address: (start.address + 4),
-                section: Some(start.section),
-                size: 36,
-                size_known: true,
-                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: ObjSymbolKind::Function,
-                ..Default::default()
-            });
-        }
-        for sym in api_syms {
-            obj.add_symbol(sym, false)?;
+        const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
+        let rtl_bytes = STANDARD.decode(RTL_CHECK_STACK)?;
+        let (text_idx, text_section) = obj.sections.by_name(".text")?.expect("no text?");
+        if let Some(pos) = memmem::find(&text_section.data, &rtl_bytes) {
+            let start = SectionAddress::new(text_idx, text_section.address + pos as u32);
+            const RTL_CHECK_STACK_SYMBOL_DATA: [(&str, u32, u32); 2] = [("", 0, 4), ("12", 4, 36)];
+            for (end_str, addr_offset, size) in RTL_CHECK_STACK_SYMBOL_DATA {
+                obj.symbols.add(
+                    ObjSymbol {
+                        name: format!("_RtlCheckStack{}", end_str),
+                        address: start.address + addr_offset,
+                        section: Some(start.section),
+                        size,
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        kind: ObjSymbolKind::Function,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
+        } else {
+            panic!("_RtlCheckStack/12 not found in .text!");
         }
 
         // NOTE: if the exe has a physical .xidata section:

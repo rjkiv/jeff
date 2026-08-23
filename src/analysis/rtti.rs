@@ -559,7 +559,7 @@ pub fn process_rtti(obj: &mut ObjInfo) -> Result<()> {
     }
 
     log::info!(
-        "Found {} classes from RTTI!\n",
+        "Found {} classes from RTTI!",
         rtti_metadata.discovered_classes.len()
     );
 
