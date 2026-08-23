@@ -91,7 +91,13 @@ impl Default for ExeMapInfo {
     }
 }
 
-const SKIP_OBJS: [&str; 4] = ["chkstk.obj", "crtgpr.obj", "crtfpr.obj", "crtvmx.obj"];
+const SKIP_OBJS: [&str; 5] = [
+    "chkstk.obj",
+    "crtgpr.obj",
+    "crtfpr.obj",
+    "crtvmx.obj",
+    "fpctrl.obj",
+];
 
 impl ExeMapInfo {
     pub fn new() -> Self {
