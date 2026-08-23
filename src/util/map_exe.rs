@@ -91,12 +91,13 @@ impl Default for ExeMapInfo {
     }
 }
 
-const SKIP_OBJS: [&str; 5] = [
+const SKIP_OBJS: [&str; 6] = [
     "chkstk.obj",
     "crtgpr.obj",
     "crtfpr.obj",
     "crtvmx.obj",
     "fpctrl.obj",
+    "u64tod.obj",
 ];
 
 impl ExeMapInfo {

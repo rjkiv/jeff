@@ -13,6 +13,7 @@ pub fn parse_libcmt(obj: &mut ObjInfo) -> Result<()> {
     process_reg_intrinsics(obj)?;
     process_chkstk(obj)?;
     process_fpctrl(obj)?;
+    process_u64tod(obj)?;
     Ok(())
 }
 
@@ -124,7 +125,7 @@ fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
 
 fn process_chkstk(obj: &mut ObjInfo) -> Result<()> {
     const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
-    let rtl_check_stack_addr = find_func_addr(&obj, RTL_CHECK_STACK)?;
+    let rtl_check_stack_addr = find_func_addr(obj, RTL_CHECK_STACK)?;
     obj.symbols.add(
         ObjSymbol {
             name: String::from("_RtlCheckStack"),
@@ -196,6 +197,31 @@ fn process_fpctrl(obj: &mut ObjInfo) -> Result<()> {
         "xdk/LIBCMT/fpctrl.cpp",
         *found_funcs.first_key_value().unwrap().0,
         found_funcs.last_key_value().map(|(k, v)| *k + *v).unwrap(),
+    )?;
+    Ok(())
+}
+
+fn process_u64tod(obj: &mut ObjInfo) -> Result<()> {
+    const U64TOD: &str = "fGUAdHxjKDYsIwAAQYIAECClBD54Y6sCeKOgTvhh//jIIf/4ToAAIA==";
+    let u64tod_addr = find_func_addr(obj, U64TOD)?;
+    obj.symbols.add(
+        ObjSymbol {
+            name: String::from("__u64tod"),
+            address: u64tod_addr.address,
+            section: Some(u64tod_addr.section),
+            size: 0x28,
+            size_known: true,
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Function,
+            ..Default::default()
+        },
+        false,
+    )?;
+    add_tu(
+        obj,
+        "xdk/LIBCMT/u64tod.cpp",
+        u64tod_addr,
+        u64tod_addr + 0x28,
     )?;
     Ok(())
 }
