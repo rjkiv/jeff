@@ -91,7 +91,7 @@ impl Default for ExeMapInfo {
     }
 }
 
-const SKIP_OBJS: [&str; 1] = ["chkstk.obj"];
+const SKIP_OBJS: [&str; 4] = ["chkstk.obj", "crtgpr.obj", "crtfpr.obj", "crtvmx.obj"];
 
 impl ExeMapInfo {
     pub fn new() -> Self {
@@ -160,21 +160,6 @@ impl ExeMapInfo {
         if sym_name.starts_with("__unwind$") || sym_name.starts_with("__catch$") {
             return Ok(());
         }
-        if sym_name.starts_with("__savegprlr_") || sym_name.starts_with("__restgprlr_") {
-            return Ok(());
-        }
-        if sym_name.starts_with("__savefpr_") || sym_name.starts_with("__restfpr_") {
-            return Ok(());
-        }
-        if sym_name.starts_with("__savevmx_") || sym_name.starts_with("__restvmx_") {
-            return Ok(());
-        }
-
-        let unit = String::from(*symbol_parts.last().unwrap());
-        if SKIP_OBJS.iter().any(|obj| unit.contains(obj)) {
-            return Ok(());
-        }
-
         let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
         let sym_section = {
             let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
@@ -183,6 +168,7 @@ impl ExeMapInfo {
             self.get_section_idx(sec_idx, sec_offset)?
         };
         let flags_slice = &symbol_parts[3..symbol_parts.len() - 1];
+        let unit = String::from(*symbol_parts.last().unwrap());
         let unit_idx = match self.unit_indices.get(&unit) {
             Some(idx) => *idx,
             None => {
@@ -293,6 +279,17 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
             {
                 continue;
             }
+
+            // if this symbol is part of an obj in SKIP_OBJS (like reg intrinsic or CheckStack), don't add its symbol, we've already got it
+            if symbols.iter().any(|sym_idx| {
+                let unit_idx = result.symbols[sym_idx.0].unit;
+                let unit = &result.units[unit_idx.0];
+                SKIP_OBJS.iter().any(|obj| unit.name.contains(obj))
+            }) {
+                log::debug!("Symbol at {:08X} is part of skipped obj, skipping...", addr);
+                continue;
+            }
+
             // else, add to our ObjInfo
             let sym = {
                 let mut sym = result.symbols[symbols[0].0].clone();
@@ -433,6 +430,12 @@ pub fn apply_map_exe(result: ExeMapInfo, obj: &mut ObjInfo) -> Result<()> {
     for (unit_idx, symbols_by_section) in &result.unit_symbols {
         let unit_name = &result.units[unit_idx.0].name;
         // log::debug!("Symbols at unit {}", unit_name);
+
+        if SKIP_OBJS.iter().any(|obj| unit_name.contains(obj)) {
+            log::debug!("Not adding split for {}", unit_name);
+            continue;
+        }
+
         for (sec_idx, symbol_idxs) in symbols_by_section {
             let section_name = &result.sections[sec_idx.0].name;
             let mut addrs_for_this_section: BTreeSet<u32> = BTreeSet::new();

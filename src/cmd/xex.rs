@@ -458,7 +458,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     if !config.symbols_known && !config.quick_analysis {
         let mut state = AnalyzerState::default();
         debug!("Detecting function boundaries");
-        FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+        // FindSaveRestSledsXbox::execute(&mut state, &obj)?;
         state.detect_functions(&obj)?; // perform CFA
         state.apply(&mut obj)?; // give each found function a symbol
     }
@@ -506,7 +506,7 @@ fn disasm(args: DisasmArgs) -> Result<()> {
 
     // step 2. find common functions (save/restore reg funcs, XAPI calls)
     // rename the save/restore gpr/fpr funcs that were previously found in pdata
-    FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+    // FindSaveRestSledsXbox::execute(&mut state, &obj)?;
 
     state.detect_functions(&obj)?;
     log::info!(
