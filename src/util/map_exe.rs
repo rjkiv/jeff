@@ -91,6 +91,8 @@ impl Default for ExeMapInfo {
     }
 }
 
+const SKIP_OBJS: [&str; 1] = ["chkstk.obj"];
+
 impl ExeMapInfo {
     pub fn new() -> Self {
         ExeMapInfo {
@@ -168,6 +170,11 @@ impl ExeMapInfo {
             return Ok(());
         }
 
+        let unit = String::from(*symbol_parts.last().unwrap());
+        if SKIP_OBJS.iter().any(|obj| unit.contains(obj)) {
+            return Ok(());
+        }
+
         let sym_addr = u32::from_str_radix(symbol_parts[2], 16)?;
         let sym_section = {
             let idx_and_offset = symbol_parts[0].split(":").collect::<Vec<&str>>();
@@ -176,7 +183,6 @@ impl ExeMapInfo {
             self.get_section_idx(sec_idx, sec_offset)?
         };
         let flags_slice = &symbol_parts[3..symbol_parts.len() - 1];
-        let unit = String::from(*symbol_parts.last().unwrap());
         let unit_idx = match self.unit_indices.get(&unit) {
             Some(idx) => *idx,
             None => {
