@@ -443,6 +443,11 @@ impl InputtedExecutable {
             obj.add_symbol(sym, false)?;
         }
 
+        // NOTE: if the exe has a physical .xidata section:
+        // imps will be in .idata, and thunks will be in the lower part of .xidata
+        // otherwise, imps will be at the start of .rdata (.idata$5 subsection),
+        // and thunks will be in .text, after all the functions (.text, then .xidata subsection)
+
         // .XBMOVIE: matches up with ground truth...but it's mostly a sea of 0's
         // .idata: partially zero'ed out and offsetted from ground truth in debug, completely gone from release
         //      xidata/its relevant info seems to be covered, making idata a non-issue...i guess?
