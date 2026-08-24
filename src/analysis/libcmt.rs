@@ -188,28 +188,29 @@ fn process_chkstk(obj: &mut ObjInfo) -> Result<()> {
 }
 
 fn process_fpctrl(obj: &mut ObjInfo) -> Result<()> {
+    struct FPCtrlFuncInfo {
+        name: &'static str,
+        offset: u32,
+        size: u32,
+    }
     #[rustfmt::skip]
-    const FPCTRL_FUNCS: &[(&str, &[(&str, u32, u32)])] = &[
-        ("/AAEjtgB//hoZQD4gGH//HylIDh8ZiB4fKYzeJDB//zIAf/4aGMA+P3+BY5OgAAg", &[("_ctrlfp", 0, 0x30)],),
-        ("/AAEjtgB//iAYf/8ToAAIPwABI44YAAE2AH/+ICh//x8ZSg4kKH//Mgh//j9/g2OToAAIA==", &[("_statfp", 0, 0x10), ("_FPreset", 0x10, 0x24)],),
-        ("/AAEjtgB//iAof/8fGUreJCh//zIIf/4/f4Njk6AACCQYf/8yCH/+P3+DY5OgAAg/AAEjtgB//iAYf/8ToAAIA==", &[("_set_statfp", 0, 0x20), ("_set_fsr", 0x20, 0x10), ("_get_fsr", 0x30, 0x10),],),
+    const FPCTRL_FUNCS: &[(&str, &[FPCtrlFuncInfo])] = &[
+        ("/AAEjtgB//hoZQD4gGH//HylIDh8ZiB4fKYzeJDB//zIAf/4aGMA+P3+BY5OgAAg", &[FPCtrlFuncInfo { name: "_ctrlfp", offset: 0, size: 0x30, }],),
+        ("/AAEjtgB//iAYf/8ToAAIPwABI44YAAE2AH/+ICh//x8ZSg4kKH//Mgh//j9/g2OToAAIA==",
+            &[FPCtrlFuncInfo { name: "_statfp", offset: 0, size: 0x10, }, FPCtrlFuncInfo { name: "_FPreset", offset: 0x10, size: 0x24, } ],),
+        ("/AAEjtgB//iAof/8fGUreJCh//zIIf/4/f4Njk6AACCQYf/8yCH/+P3+DY5OgAAg/AAEjtgB//iAYf/8ToAAIA==",
+            &[FPCtrlFuncInfo { name: "_set_statfp", offset: 0, size: 0x20, }, FPCtrlFuncInfo { name: "_set_fsr", offset: 0x20, size: 0x10, }, FPCtrlFuncInfo { name: "_get_fsr", offset: 0x30, size: 0x10, } ],),
     ];
     let mut found_funcs: BTreeMap<SectionAddress, u32> = BTreeMap::new();
     for &(func_bytes, func_infos) in FPCTRL_FUNCS {
         let addr = find_func_addr(obj, func_bytes)?;
-        for &(func_name, func_offset, func_size) in func_infos {
-            println!(
-                "Found {} at {:08X}, size {:X}",
-                func_name,
-                addr + func_offset,
-                func_size
-            );
+        for info in func_infos {
             obj.add_symbol(
                 ObjSymbol {
-                    name: String::from(func_name),
-                    address: addr.address + func_offset,
+                    name: String::from(info.name),
+                    address: addr.address + info.offset,
                     section: Some(addr.section),
-                    size: func_size,
+                    size: info.size,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Function,
@@ -217,7 +218,7 @@ fn process_fpctrl(obj: &mut ObjInfo) -> Result<()> {
                 },
                 false,
             )?;
-            found_funcs.insert(addr + func_offset, func_size);
+            found_funcs.insert(addr + info.offset, info.size);
         }
     }
     add_tu(
