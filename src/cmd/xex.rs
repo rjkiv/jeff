@@ -389,11 +389,6 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
 
     let mut obj = input.process()?;
 
-    if !config.symbols_known {
-        // add signatures/auto-deduce splits here
-        parse_libcmt(&mut obj)?;
-    }
-
     let mut dep: Vec<Utf8NativePathBuf> = vec![object_path];
 
     if let Some(map_path) = &config.base.map {
@@ -461,12 +456,21 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     // Apply block relocations from config
     apply_block_relocations(&mut obj, &config.base.block_relocations)?;
 
-    if !config.symbols_known && !config.quick_analysis {
-        let mut state = AnalyzerState::default();
-        debug!("Detecting function boundaries");
-        // FindSaveRestSledsXbox::execute(&mut state, &obj)?;
-        state.detect_functions(&obj)?; // perform CFA
-        state.apply(&mut obj)?; // give each found function a symbol
+    if !config.symbols_known {
+        // add signatures/auto-deduce splits here
+        // we do this here because then we can take into account split cache
+        parse_libcmt(&mut obj)?;
+        // apply signatures here
+
+        if !config.quick_analysis {
+            let mut state = AnalyzerState::default();
+            debug!("Detecting function boundaries");
+            // FindSaveRestSledsXbox::execute(&mut state, &obj)?;
+            state.detect_functions(&obj)?; // perform CFA
+            state.apply(&mut obj)?; // give each found function a symbol
+        }
+
+        // apply signatures post would go here
     }
 
     // Apply additional relocations from config
