@@ -1,8 +1,6 @@
 use std::{fs, fs::File, io::Read, num::NonZeroU32};
 
 use anyhow::{Result, bail, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use memchr::memmem;
 use object::{Object, ObjectSection, SectionKind, read::pe::PeFile32};
 use typed_path::Utf8NativePathBuf;
 
@@ -394,31 +392,6 @@ impl InputtedExecutable {
         process_xidata(&mut obj)?; // needs to be done before SEH, because of the possibility of having a thunk to the C handler
         process_seh(&mut obj)?;
         process_rtti(&mut obj)?;
-
-        const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
-        let rtl_bytes = STANDARD.decode(RTL_CHECK_STACK)?;
-        let (text_idx, text_section) = obj.sections.by_name(".text")?.expect("no text?");
-        if let Some(pos) = memmem::find(&text_section.data, &rtl_bytes) {
-            let start = SectionAddress::new(text_idx, text_section.address + pos as u32);
-            const RTL_CHECK_STACK_SYMBOL_DATA: [(&str, u32, u32); 2] = [("", 0, 4), ("12", 4, 36)];
-            for (end_str, addr_offset, size) in RTL_CHECK_STACK_SYMBOL_DATA {
-                obj.symbols.add(
-                    ObjSymbol {
-                        name: format!("_RtlCheckStack{}", end_str),
-                        address: start.address + addr_offset,
-                        section: Some(start.section),
-                        size,
-                        size_known: true,
-                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                        kind: ObjSymbolKind::Function,
-                        ..Default::default()
-                    },
-                    false,
-                )?;
-            }
-        } else {
-            panic!("_RtlCheckStack/12 not found in .text!");
-        }
 
         // NOTE: if the exe has a physical .xidata section:
         // imps will be in .idata, and thunks will be in the lower part of .xidata
