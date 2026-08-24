@@ -56,37 +56,66 @@ fn add_tu(
 }
 
 fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
-    // first 8 bytes, full func name, full func size, label name start, label start, label end, step size, and an optional split name/size
+    struct RegFuncInfo {
+        name: &'static str,
+        offset: u32,
+        size: u32,
+    }
+    struct RegSledInfo {
+        name_start: &'static str,
+        offset: u32,
+        start: u32,
+        end: u32,
+        step: u32,
+    }
+
+    struct RegSplitInfo {
+        split_name: &'static str,
+        split_size: u32,
+        signature: &'static str,
+        funcs: &'static [RegFuncInfo],
+        sleds: &'static [RegSledInfo],
+    }
+
     #[rustfmt::skip]
-    const SLEDS_XBOX: [([u8; 8], &str, Option<u32>, &str, u32, u32, u32, Option<(&str, u32)>); 8] = [
-        ([0xf9, 0xc1, 0xff, 0x68, 0xf9, 0xe1, 0xff, 0x70], "__savegprlr", Some(0x50), "__savegprlr_", 14, 32, 4, Some(("xdk/LIBCMT/crtgpr.cpp", 0xB0))),
-        ([0xe9, 0xc1, 0xff, 0x68, 0xe9, 0xe1, 0xff, 0x70], "__restgprlr", Some(0x54), "__restgprlr_", 14, 32, 4, None),
-        ([0xd9, 0xcc, 0xff, 0x70, 0xd9, 0xec, 0xff, 0x78], "__savefpr", Some(0x4C), "__savefpr_", 14, 32, 4, Some(("xdk/LIBCMT/crtfpr.cpp", 0x98))),
-        ([0xc9, 0xcc, 0xff, 0x70, 0xc9, 0xec, 0xff, 0x78], "__restfpr",  Some(0x4C),"__restfpr_", 14, 32, 4, None),
-        ([0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x61, 0xce], "__savevmx", Some(0x298), "__savevmx_", 14, 32, 8, Some(("xdk/LIBCMT/crtvmx.cpp", 0x530))),
-        ([0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x61, 0xcb], "__savevmx_upper", None, "__savevmx_", 64, 128, 8, None),
-        ([0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x60, 0xce], "__restvmx", Some(0x298), "__restvmx_", 14, 32, 8, None),
-        ([0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x60, 0xcb], "__restvmx_upper", None, "__restvmx_", 64, 128, 8, None),
+    const SLEDS_XBOX2: [RegSplitInfo; 3] = [
+        RegSplitInfo {
+            split_name: "xdk/LIBCMT/crtgpr.cpp", split_size: 0xB0, signature: "+cH/aPnh/3D6Af94+iH/gA==",
+            funcs: &[ RegFuncInfo { name: "__savegprlr", offset: 0, size: 0x50, }, RegFuncInfo { name: "__restgprlr", offset: 0x50, size: 0x54, }, ],
+            sleds: &[
+                RegSledInfo { name_start: "__savegprlr_", offset: 0, start: 14, end: 32, step: 4, },
+                RegSledInfo { name_start: "__restgprlr_", offset: 0x50, start: 14, end: 32, step: 4, },
+            ],
+        },
+        RegSplitInfo {
+            split_name: "xdk/LIBCMT/crtfpr.cpp", split_size: 0x98, signature: "2cz/cNns/3jaDP+A2iz/iA==",
+            funcs: &[ RegFuncInfo { name: "__savefpr", offset: 0, size: 0x4C, }, RegFuncInfo { name: "__restfpr", offset: 0x4C, size: 0x4C, }, ],
+            sleds: &[
+                RegSledInfo { name_start: "__savefpr_", offset: 0, start: 14, end: 32, step: 4, },
+                RegSledInfo { name_start: "__restfpr_", offset: 0x4C, start: 14, end: 32, step: 4, },
+            ],
+        },
+        RegSplitInfo {
+            split_name: "xdk/LIBCMT/crtvmx.cpp", split_size: 0x530, signature: "OWD+4H3LYc45YP7wfethzjlg/wB+C2HOOWD/EH4rYc4=",
+            funcs: &[ RegFuncInfo { name: "__savevmx", offset: 0, size: 0x298, }, RegFuncInfo { name: "__restvmx", offset: 0x298, size: 0x298, }, ],
+            sleds: &[
+                RegSledInfo { name_start: "__savevmx_", offset: 0, start: 14, end: 32, step: 8, },
+                RegSledInfo { name_start: "__savevmx_", offset: 0x94, start: 64, end: 128, step: 8, },
+                RegSledInfo { name_start: "__restvmx_", offset: 0x298, start: 14, end: 32, step: 8, },
+                RegSledInfo { name_start: "__restvmx_", offset: 0x32C, start: 64, end: 128, step: 8, },
+            ],
+        },
     ];
 
-    let mut splits: Vec<(&str, SectionAddress, u32)> = Vec::new();
-
-    let (text_idx, text_section) = obj.sections.by_name(".text")?.expect("no text?");
-    for (needle, func, func_size, label, reg_start, reg_end, step_size, split_info) in SLEDS_XBOX {
-        let Some(pos) = memmem::find(&text_section.data, &needle) else {
-            panic!("No reg intrinsic?");
-        };
-        let start = SectionAddress::new(text_idx, text_section.address + pos as u32);
-        log::debug!("Found {} @ {:#010X}", func, start);
-
-        // add function for main reg intrinsic if applicable
-        if let Some(func_size) = func_size {
-            obj.symbols.add(
+    for split in SLEDS_XBOX2 {
+        let start_addr = find_func_addr(obj, split.signature)?;
+        for func in split.funcs {
+            obj.add_symbol(
                 ObjSymbol {
-                    name: String::from(func),
-                    address: start.address,
-                    section: Some(start.section),
-                    size: func_size,
+                    name: func.name.to_string(),
+                    address: start_addr.address + func.offset,
+                    section: Some(start_addr.section),
+                    size: func.size,
                     size_known: true,
                     flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
                     kind: ObjSymbolKind::Function,
@@ -95,29 +124,28 @@ fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
                 false,
             )?;
         }
-        // add number labels
-        for i in reg_start..reg_end {
-            let addr = start + (i - reg_start) * step_size;
-            obj.symbols.add(
-                ObjSymbol {
-                    name: format!("{label}{i}"),
-                    address: addr.address,
-                    section: Some(addr.section),
-                    size_known: true,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    ..Default::default()
-                },
-                false,
-            )?;
+        for sled in split.sleds {
+            for i in sled.start..sled.end {
+                let addr = start_addr + sled.offset + (i - sled.start) * sled.step;
+                obj.add_symbol(
+                    ObjSymbol {
+                        name: format!("{}{}", sled.name_start, i),
+                        address: addr.address,
+                        section: Some(addr.section),
+                        size_known: true,
+                        flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
         }
-        // if split, add it
-        if let Some((split_name, split_size)) = split_info {
-            splits.push((split_name, start, split_size));
-        }
-    }
-
-    for (split_name, start, split_size) in splits {
-        add_tu(obj, split_name, start, start + split_size)?;
+        add_tu(
+            obj,
+            split.split_name,
+            start_addr,
+            start_addr + split.split_size,
+        )?;
     }
 
     Ok(())
