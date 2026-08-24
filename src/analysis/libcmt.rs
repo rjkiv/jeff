@@ -14,20 +14,21 @@ pub fn parse_libcmt(obj: &mut ObjInfo) -> Result<()> {
     process_chkstk(obj)?;
     process_fpctrl(obj)?;
     process_u64tod(obj)?;
+    process_mem_funcs(obj)?;
     Ok(())
 }
 
 // LIBCMT funcs should be in .text
-fn find_func_addr(obj: &ObjInfo, func_bytes: &str) -> Result<SectionAddress> {
+fn find_func_addr(obj: &ObjInfo, func_bytes: &str) -> Result<Option<SectionAddress>> {
     let func_bytes_decoded = STANDARD.decode(func_bytes)?;
     let (text_idx, text_section) = obj.sections.by_name(".text")?.expect("no text?");
     if let Some(pos) = memmem::find(&text_section.data, &func_bytes_decoded) {
-        Ok(SectionAddress::new(
+        Ok(Some(SectionAddress::new(
             text_idx,
             text_section.address + pos as u32,
-        ))
+        )))
     } else {
-        panic!("Function not found in .text!");
+        Ok(None)
     }
 }
 
@@ -84,10 +85,16 @@ fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
     }
 
     #[rustfmt::skip]
-    const SLEDS_XBOX2: [RegSplitInfo; 3] = [
+    const SLEDS_XBOX: [RegSplitInfo; 3] = [
         RegSplitInfo {
             split_name: "xdk/LIBCMT/crtgpr.cpp", split_size: 0xB0, signature: "+cH/aPnh/3D6Af94+iH/gA==",
-            funcs: &[ RegFuncInfo { name: "__savegprlr", offset: 0, size: 0x50, }, RegFuncInfo { name: "__restgprlr", offset: 0x50, size: 0x54, }, ],
+            funcs: &[
+                RegFuncInfo { name: "__savegprlr", offset: 0, size: 0x50, },
+                RegFuncInfo { name: "__restgprlr", offset: 0x50, size: 0x54, },
+                // technically this is supposed to be a label, and there's no actual function at this spot
+                // but if i don't mark it, CFA is gonna come across it, soooo whatever /shrug
+                RegFuncInfo { name: "__C_ExecuteExceptionFilter", offset: 0xA4, size: 0xC, },
+            ],
             sleds: &[
                 RegSledInfo { name_start: "__savegprlr_", offset: 0, start: 14, end: 32, step: 4, },
                 RegSledInfo { name_start: "__restgprlr_", offset: 0x50, start: 14, end: 32, step: 4, },
@@ -113,8 +120,8 @@ fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
         },
     ];
 
-    for split in SLEDS_XBOX2 {
-        let start_addr = find_func_addr(obj, split.signature)?;
+    for split in SLEDS_XBOX {
+        let start_addr = find_func_addr(obj, split.signature)?.expect("no reg intrinsics?");
         for func in split.funcs {
             obj.add_symbol(
                 ObjSymbol {
@@ -159,8 +166,8 @@ fn process_reg_intrinsics(obj: &mut ObjInfo) -> Result<()> {
 
 fn process_chkstk(obj: &mut ObjInfo) -> Result<()> {
     const RTL_CHECK_STACK: &str = "fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==";
-    let rtl_check_stack_addr = find_func_addr(obj, RTL_CHECK_STACK)?;
-    obj.symbols.add(
+    let rtl_check_stack_addr = find_func_addr(obj, RTL_CHECK_STACK)?.expect("no _RtlCheckStack?");
+    obj.add_symbol(
         ObjSymbol {
             name: String::from("_RtlCheckStack"),
             address: rtl_check_stack_addr.address,
@@ -173,7 +180,7 @@ fn process_chkstk(obj: &mut ObjInfo) -> Result<()> {
         },
         false,
     )?;
-    obj.symbols.add(
+    obj.add_symbol(
         ObjSymbol {
             name: String::from("_RtlCheckStack12"),
             address: rtl_check_stack_addr.address + 4,
@@ -209,7 +216,7 @@ fn process_fpctrl(obj: &mut ObjInfo) -> Result<()> {
     ];
     let mut found_funcs: BTreeMap<SectionAddress, u32> = BTreeMap::new();
     for &(func_bytes, func_infos) in FPCTRL_FUNCS {
-        let addr = find_func_addr(obj, func_bytes)?;
+        let addr = find_func_addr(obj, func_bytes)?.expect("No FPCtrl functions?");
         for info in func_infos {
             obj.add_symbol(
                 ObjSymbol {
@@ -238,13 +245,110 @@ fn process_fpctrl(obj: &mut ObjInfo) -> Result<()> {
 
 fn process_u64tod(obj: &mut ObjInfo) -> Result<()> {
     const U64TOD: &str = "fGUAdHxjKDYsIwAAQYIAECClBD54Y6sCeKOgTvhh//jIIf/4ToAAIA==";
-    let u64tod_addr = find_func_addr(obj, U64TOD)?;
-    obj.symbols.add(
+    if let Some(u64tod_addr) = find_func_addr(obj, U64TOD)? {
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("__u64tod"),
+                address: u64tod_addr.address,
+                section: Some(u64tod_addr.section),
+                size: 0x28,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Function,
+                ..Default::default()
+            },
+            false,
+        )?;
+        add_tu(
+            obj,
+            "xdk/LIBCMT/u64tod.cpp",
+            u64tod_addr,
+            u64tod_addr + 0x28,
+        )?;
+    }
+    Ok(())
+}
+
+fn process_mem_funcs(obj: &mut ObjInfo) -> Result<()> {
+    const MEMSET: &str = "OAUAAXwJA6ZgZgAASAAAEDil//+YhgAAOMYAAXDAAANAAv/wUIRELlSg4T9QhIAeQeIAIHwJA6aQhgAAkIYABJCGAAiQhgAMOMYAEEMg/+xUoPe/QcIAKHwJA6aQhgAAOMYABENAABiQhgAAOMYABENAAAyQhgAAOMYABHCgAAN8CQOmTeIAIJiGAABPQAAgmIYAAU9AACCYhgACToAAIA==";
+    if let Some(memset_addr) = find_func_addr(obj, MEMSET)? {
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("memset"),
+                address: memset_addr.address,
+                section: Some(memset_addr.section),
+                size: 0xA0,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Function,
+                ..Default::default()
+            },
+            false,
+        )?;
+        add_tu(
+            obj,
+            "xdk/LIBCMT/memsetp.cpp",
+            memset_addr,
+            memset_addr + 0xA0,
+        )?;
+    }
+
+    const MEMCMP: &str = "KAUACEGAAFQ4AAAHVKfo/nygADh86QOm6MQAAOijAABIAAAM6MQACeijAAl8JTAAQQL/9EGCABg4YP//fCUwQE2AACA4YAABToAAIHwFA3g4YwAIOIQACCwFAAB8qQOmQYIAKIjEAACIowAASAAADIzEAAGMowABfAUwAEEC//R8ZihQToAAIDhgAABOgAAg";
+    if let Some(memcmp_addr) = find_func_addr(obj, MEMCMP)? {
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("memcmp"),
+                address: memcmp_addr.address,
+                section: Some(memcmp_addr.section),
+                size: 0x90,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Function,
+                ..Default::default()
+            },
+            false,
+        )?;
+        add_tu(
+            obj,
+            "xdk/LIBCMT/memcmpp.cpp",
+            memcmp_addr,
+            memcmp_addr + 0x90,
+        )?;
+    }
+
+    const MEMCHR: &str =
+        "L4UAACyFAAFBngAsiMMAAH8GIAA4pf//QZoAIEGGABh8qQOmjMMAAXwGIABAAv/4QYIACDhgAABOgAAg";
+    if let Some(memchr_addr) = find_func_addr(obj, MEMCHR)? {
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("memchr"),
+                address: memchr_addr.address,
+                section: Some(memchr_addr.section),
+                size: 0x3C,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Function,
+                ..Default::default()
+            },
+            false,
+        )?;
+        add_tu(
+            obj,
+            "xdk/LIBCMT/memchrp.cpp",
+            memchr_addr,
+            memchr_addr + 0x3C,
+        )?;
+    }
+
+    // memmove and memcpy should be here thanks to the calls from entrypoint
+    const MEMMOVE_MODIFIED: &str = "OAUAAXxjKhR8hCoUfAkDpkgAABg4pf//iAT//ziE//+YA///OGP//3BgAANAAv/oVKDwv0HCACR8CQOmcIAAA0DCADyA5P/8OIT//JDj//w4Y//8QyD/8HCgAAN8CQOmTeIAIIgE//84hP//mAP//zhj//9DIP/wToAAIIjk//84Y//8iQT//lEHRC6JJP/9USeCHolE//xRR8AOOIT//JDjAABCAP/YS///sA==";
+    let memmove_addr = find_func_addr(obj, MEMMOVE_MODIFIED)?.expect("no memmove?") - 16;
+    obj.add_symbol(
         ObjSymbol {
-            name: String::from("__u64tod"),
-            address: u64tod_addr.address,
-            section: Some(u64tod_addr.section),
-            size: 0x28,
+            name: String::from("memmove"),
+            address: memmove_addr.address,
+            section: Some(memmove_addr.section),
+            size: 0xBC,
             size_known: true,
             flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
             kind: ObjSymbolKind::Function,
@@ -254,9 +358,50 @@ fn process_u64tod(obj: &mut ObjInfo) -> Result<()> {
     )?;
     add_tu(
         obj,
-        "xdk/LIBCMT/u64tod.cpp",
-        u64tod_addr,
-        u64tod_addr + 0x28,
+        "xdk/LIBCMT/memmovep.cpp",
+        memmove_addr,
+        memmove_addr + 0xBC,
     )?;
+
+    const MEMCPY_START: &str = "+GH/+FRmB358ACIsKAYAACDGAAg=";
+    let memcpy_addr = find_func_addr(obj, MEMCPY_START)?.expect("no memcpy?");
+    obj.add_symbol(
+        ObjSymbol {
+            name: String::from("memcpy"),
+            address: memcpy_addr.address,
+            section: Some(memcpy_addr.section),
+            // the size can actually vary across xexes, so we can't definitively know it
+            flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+            kind: ObjSymbolKind::Function,
+            ..Default::default()
+        },
+        false,
+    )?;
+    const BLKMOV: &str = "OAUAAWBmAAB8CQOmSAAAGDil//+IBAAAOIQAAZgGAAA4xgABcMAAA0AC/+hUoPC/QcIAJHwJA6ZwgAADQMIAPIDkAAA4hAAEkOYAADjGAARDIP/wcKAAA3wJA6ZN4gAgiAQAADiEAAGYBgAAOMYAAUMg//BOgAAgiOQAA4kEAAJRB0QuiSQAAVEngh6JRAAAUUfADjiEAASQ5gAAOMYABEIA/9hL//+w";
+    if let Some(blkmov_addr) = find_func_addr(obj, BLKMOV)? {
+        obj.add_symbol(
+            ObjSymbol {
+                name: String::from("_blkmov"),
+                address: blkmov_addr.address,
+                section: Some(blkmov_addr.section),
+                size: 0xA8,
+                size_known: true,
+                flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                kind: ObjSymbolKind::Function,
+                ..Default::default()
+            },
+            false,
+        )?;
+        if blkmov_addr > memcpy_addr {
+            // memcpy and blkmov are the only two funcs in memcpyp.obj.
+            // so, if blkmov is after memcpy, we know the start and end of the split
+            add_tu(
+                obj,
+                "xdk/LIBCMT/memcpyp.cpp",
+                memcpy_addr,
+                blkmov_addr + 0xA8,
+            )?;
+        }
+    }
     Ok(())
 }

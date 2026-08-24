@@ -91,13 +91,18 @@ impl Default for ExeMapInfo {
     }
 }
 
-const SKIP_OBJS: [&str; 6] = [
+const SKIP_OBJS: [&str; 11] = [
     "chkstk.obj",
     "crtgpr.obj",
     "crtfpr.obj",
     "crtvmx.obj",
     "fpctrl.obj",
     "u64tod.obj",
+    "memsetp.obj",
+    "memmovep.obj",
+    "memcpyp.obj",
+    "memcmpp.obj",
+    "memchrp.obj",
 ];
 
 impl ExeMapInfo {
