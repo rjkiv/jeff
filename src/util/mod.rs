@@ -14,6 +14,7 @@ pub mod nlzss;
 pub mod path;
 pub mod read;
 pub mod reader;
+pub mod signatures;
 pub mod split;
 pub mod take_seek;
 pub mod toposort;

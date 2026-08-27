@@ -1,0 +1,50 @@
+- name: mainCRTStartup
+  num_handlers: 1
+  # no size, no signature, we don't need those to know we're at the entrypoint
+  references:
+    - name: __savegprlr_28
+      size: 0x4
+      skip: true
+    - name: __onexitend
+      kind: Object
+      size: 0x4
+    - name: __onexitbegin
+      kind: Object
+      size: 0x4
+    - name: XapiInitProcess
+      kind: Function
+    - name: XapiCallThreadNotifyRoutines
+      kind: Function
+    - name: XapiPAL50Incompatible
+      kind: Function
+    - name: XamTerminateTitle
+      kind: Function
+      skip: true
+    - name: _mtinit
+      kind: Function
+    - name: _rtinit
+      kind: Function
+    - name: _cinit
+      kind: Function
+    - name: _CRTCommandLineArgs
+      kind: Object
+      size: 0x4
+    - name: GetCommandLineA
+      kind: Function
+    - name: main
+      kind: Function
+    - name: _cexit
+      kind: Function
+      size: 0xC
+    - name: ??_C@_0BI@IDEPEPLM@?$FLXAPI?5RETURN?5VALUE?$FN?5?$CFd?6?$AA@
+      kind: Object
+      size: 0x18
+    - name: DbgPrint
+      kind: Function
+      skip: true
+    - name: XamTerminateTitle
+      kind: Function
+      skip: true
+    - name: UnhandledExceptionFilter
+      kind: Function
+  required: true

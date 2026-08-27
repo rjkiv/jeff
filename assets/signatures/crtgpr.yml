@@ -1,0 +1,86 @@
+- name: __savegprlr
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x50
+      signature: +cH/aP/////54f9w//////oB/3j/////+iH/gP/////6Qf+I//////ph/5D/////+oH/mP/////6of+g//////rB/6j/////+uH/sP/////7Af+4//////sh/8D/////+0H/yP/////7Yf/Q//////uB/9j/////+6H/4P/////7wf/o//////vh//D/////kYH/+P////9OgAAg/////w==
+  labels:
+    - name: __savegprlr_14
+      offset: 0x0
+    - name: __savegprlr_15
+      offset: 0x4
+    - name: __savegprlr_16
+      offset: 0x8
+    - name: __savegprlr_17
+      offset: 0xC
+    - name: __savegprlr_18
+      offset: 0x10
+    - name: __savegprlr_19
+      offset: 0x14
+    - name: __savegprlr_20
+      offset: 0x18
+    - name: __savegprlr_21
+      offset: 0x1C
+    - name: __savegprlr_22
+      offset: 0x20
+    - name: __savegprlr_23
+      offset: 0x24
+    - name: __savegprlr_24
+      offset: 0x28
+    - name: __savegprlr_25
+      offset: 0x2C
+    - name: __savegprlr_26
+      offset: 0x30
+    - name: __savegprlr_27
+      offset: 0x34
+    - name: __savegprlr_28
+      offset: 0x38
+    - name: __savegprlr_29
+      offset: 0x3C
+    - name: __savegprlr_30
+      offset: 0x40
+    - name: __savegprlr_31
+      offset: 0x44
+  required: true
+- name: __restgprlr
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x54
+      signature: 6cH/aOnh/3DqAf946iH/gOpB/4jqYf+Q6oH/mOqh/6Dqwf+o6uH/sOsB/7jrIf/A60H/yOth/9Drgf/Y66H/4OvB/+jr4f/wgYH/+H2IA6ZOgAAgfIkDpnysK3hOgAQg
+  labels:
+    - name: __restgprlr_14
+      offset: 0x0
+    - name: __restgprlr_15
+      offset: 0x4
+    - name: __restgprlr_16
+      offset: 0x8
+    - name: __restgprlr_17
+      offset: 0xC
+    - name: __restgprlr_18
+      offset: 0x10
+    - name: __restgprlr_19
+      offset: 0x14
+    - name: __restgprlr_20
+      offset: 0x18
+    - name: __restgprlr_21
+      offset: 0x1C
+    - name: __restgprlr_22
+      offset: 0x20
+    - name: __restgprlr_23
+      offset: 0x24
+    - name: __restgprlr_24
+      offset: 0x28
+    - name: __restgprlr_25
+      offset: 0x2C
+    - name: __restgprlr_26
+      offset: 0x30
+    - name: __restgprlr_27
+      offset: 0x34
+    - name: __restgprlr_28
+      offset: 0x38
+    - name: __restgprlr_29
+      offset: 0x3C
+    - name: __restgprlr_30
+      offset: 0x40
+    - name: __restgprlr_31
+      offset: 0x44
+  required: true

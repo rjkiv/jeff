@@ -9,12 +9,11 @@ use object::{
 use std::{borrow::Cow, cmp::min, collections::BTreeMap, fs};
 use typed_path::{Utf8NativePathBuf, Utf8UnixPath};
 
-use crate::obj::ObjSection;
 use crate::{
     array_ref,
     obj::{
-        ObjInfo, ObjRelocKind, ObjSectionKind, ObjSymbolKind, ObjSymbolScope, SectionIndex,
-        SymbolIndex,
+        ObjInfo, ObjRelocKind, ObjSection, ObjSectionKind, ObjSymbolKind, ObjSymbolScope,
+        SectionIndex, SymbolIndex,
     },
     util::{
         crypto::decrypt_aes128_cbc_no_padding,
