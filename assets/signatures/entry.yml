@@ -48,3 +48,104 @@
     - name: UnhandledExceptionFilter
       kind: Function
   required: true
+- name: XapiInitProcess
+  # will be in pdata, and at this point we should have an address from the entrypoint's references
+  references:
+    - name: XapiInitHeap
+      kind: Function
+    - name: __imp_KeDebugMonitorData
+      kind: Object
+      size: 0x4
+      skip: true
+    - name: HalReturnToFirmware
+      kind: Function
+      skip: true
+  required: true
+- name: XapiInitHeap
+  references:
+    - name: __imp_XexExecutableModuleHandle
+      skip: true
+    - name: RtlImageXexHeaderField
+      kind: Function
+      skip: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: RtlCreateHeap
+      kind: Function
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+    - name: XapiInitDebugHeap
+      kind: Function
+      optional: true
+    - name: XapiProcessHeap
+      kind: Object
+      size: 0x4
+      optional: true
+  required: true
+- name: RtlCreateHeap
+  references:
+    - name: __savegprlr_20
+      skip: true
+    - name: memmove
+      kind: Function
+      size: 0xBC
+    - name: NtGlobalFlag
+      kind: Object
+      size: 0x4
+    - name: MmHeapSegmentReserve
+      kind: Object
+      size: 0x4
+    - name: MmHeapSegmentCommit
+      kind: Object
+      size: 0x4
+    - name: MmHeapDeCommitFreeBlockThreshold
+      kind: Object
+      size: 0x4
+    - name: MmHeapDeCommitTotalFreeThreshold
+      kind: Object
+      size: 0x4
+    - name: KeGetCurrentProcessType
+      kind: Function
+      optional: true
+      skip: true
+    - name: memset
+      kind: Function
+      size: 0xA0
+    - name: NtQueryVirtualMemory
+      kind: Function
+      skip: true
+    - name: memset
+      kind: Function
+      skip: true
+    - name: NtQueryVirtualMemory
+      kind: Function
+      skip: true
+    - name: NtAllocateVirtualMemory
+      kind: Function
+      skip: true
+    - name: NtAllocateVirtualMemory
+      kind: Function
+      skip: true
+    - name: NtFreeVirtualMemory
+      kind: Function
+      skip: true
+    - name: NtGlobalFlag
+      kind: Object
+      size: 0x4
+    - name: KeGetCurrentProcessType
+      kind: Function
+      skip: true
+    - name: RtlInitializeCriticalSection
+      kind: Function
+      skip: true
+    - name: RtlpInitializeHeapSegment
+      kind: Function
+    - name: __restgprlr_20
+      skip: true
+  required: true
+- name: memmove
+  references:
+    - name: memcpy
+      kind: Function

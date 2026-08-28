@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 pub fn parse_libcmt(obj: &mut ObjInfo) -> Result<()> {
     // crtgpr/fpr/vmx
     // process_reg_intrinsics(obj)?;
-    process_chkstk(obj)?;
-    process_fpctrl(obj)?;
-    process_u64tod(obj)?;
+    // process_chkstk(obj)?;
+    // process_fpctrl(obj)?;
+    // process_u64tod(obj)?;
     process_mem_funcs(obj)?;
     Ok(())
 }
