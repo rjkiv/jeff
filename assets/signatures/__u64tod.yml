@@ -1,7 +1,0 @@
-- name: __u64tod
-  possible_signatures:
-    - size: 0x28
-      signature: fGUAdP////98Yyg2/////ywjAAD/////QYIAEP////8gpQQ+/////3hjqwL/////eKOgTv/////4Yf/4/////8gh//j/////ToAAIP////8=
-      subsignature:
-        exact_bytes: fGUAdHxjKDYsIwAAQYIAECClBD54Y6sCeKOgTvhh//jIIf/4ToAAIA==
-        offset: 0x0
