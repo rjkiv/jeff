@@ -62,3 +62,35 @@
       subsignature:
         exact_bytes: OAUAAWBmAAB8CQOmSAAAGDil//+IBAAAOIQAAZgGAAA4xgABcMAAA0AC/+hUoPC/QcIAJHwJA6ZwgAADQMIAPIDkAAA4hAAEkOYAADjGAARDIP/wcKAAA3wJA6ZN4gAgiAQAADiEAAGYBgAAOMYAAUMg//BOgAAgiOQAA4kEAAJRB0QuiSQAAVEngh6JRAAAUUfADjiEAASQ5gAAOMYABEIA/9hL//+w
         offset: 0x0
+- name: _CxxThrowException
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x84
+      signature: fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////
+  references:
+    - name: ExceptionTemplate
+      kind: Object
+      size: 0x20
+    - name: memcpy
+      kind: Function
+    - name: RaiseException
+      kind: Function
+- name: _purecall
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x4C
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////PWAAAP//AACBawAA//8AACgLAAD/////QYIADP////99aQOm/////06ABCH/////OGAAGf////9IAAAB/AAAAziAAAH/////OGAAAP////9IAAAB/AAAA0gAAAH8AAADOCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+  references:
+    - name: __pPurecall
+      kind: Object
+      size: 4
+      optional: false
+    - name: _NMSG_WRITE
+      kind: Function
+      optional: false
+    - name: _set_abort_behavior
+      kind: Function
+      optional: false
+    - name: abort
+      kind: Function
+      optional: false
