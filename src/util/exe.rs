@@ -153,22 +153,6 @@ impl InputtedExecutable {
         );
         obj.entry = NonZeroU32::new(obj_file.entry() as u32).map(|n| n.get());
 
-        if let Some(entry) = obj.entry {
-            // label entry as mainCRTStartup
-            obj.add_symbol(
-                ObjSymbol {
-                    name: String::from("mainCRTStartup"),
-                    address: entry,
-                    section: Some(obj.sections.at_address(entry)?.0),
-                    size_known: false,
-                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                    kind: ObjSymbolKind::Function,
-                    ..Default::default()
-                },
-                false,
-            )?;
-        }
-
         // inspect the ImportLibraries if we have them
         if let ExeType::Xex {
             import_libraries: Some(imports),
@@ -392,6 +376,28 @@ impl InputtedExecutable {
         process_xidata(&mut obj)?; // needs to be done before SEH, because of the possibility of having a thunk to the C handler
         process_seh(&mut obj)?;
         process_rtti(&mut obj)?;
+
+        if let Some(entry) = obj.entry {
+            let entry_sec_addr = SectionAddress::new(obj.sections.at_address(entry)?.0, entry);
+            // label entry as mainCRTStartup
+            obj.add_symbol(
+                ObjSymbol {
+                    name: String::from("mainCRTStartup"),
+                    address: entry_sec_addr.address,
+                    section: Some(entry_sec_addr.section),
+                    size: obj
+                        .pdata_funcs
+                        .get(&entry_sec_addr)
+                        .expect("entrypoint must be in pdata!")
+                        .full_size,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Function,
+                    ..Default::default()
+                },
+                false,
+            )?;
+        }
 
         // NOTE: if the exe has a physical .xidata section:
         // imps will be in .idata, and thunks will be in the lower part of .xidata

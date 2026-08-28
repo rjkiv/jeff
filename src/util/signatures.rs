@@ -24,11 +24,8 @@ pub struct FunctionLabel {
     // the offset in the signature bytes to mark this function/label
     pub offset: u32,
     #[serde(default)]
-    // if function, the function's size
+    // if function, the function's size. if this is None, this is a label
     pub size: Option<u32>,
-    #[serde(default)]
-    // the kind to give to the eventual ObjSymbol
-    pub kind: ObjSymbolKind,
 }
 
 // A function or data reference that our FunctionSignature may call.
