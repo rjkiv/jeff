@@ -332,25 +332,3 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
     }
     Ok(())
 }
-
-// pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
-//     if let Some(entry) = obj.entry.map(|n| n as u32) {
-//         let (entry_section_index, entry_section) = obj.sections.at_address(entry)?;
-//         if let Some(signature) = check_signatures_str(
-//             entry_section,
-//             entry,
-//             include_str!("../../assets/signatures/__start.yml"),
-//         )? {
-//             apply_signature(obj, SectionAddress::new(entry_section_index, entry), &signature)?;
-//         }
-//     }
-//
-//     for &(name, sig_str) in SIGNATURES {
-//         apply_signature_for_symbol(obj, name, sig_str)?
-//     }
-//
-//     apply_init_user_signatures(obj)?;
-//     apply_ctors_signatures(obj)?;
-//     apply_dtors_signatures(obj)?;
-//     Ok(())
-// }
