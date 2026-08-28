@@ -60,7 +60,6 @@
     - name: HalReturnToFirmware
       kind: Function
       skip: true
-  required: true
 - name: XapiInitHeap
   references:
     - name: __imp_XexExecutableModuleHandle
@@ -83,7 +82,6 @@
       kind: Object
       size: 0x4
       optional: true
-  required: true
 - name: RtlCreateHeap
   references:
     - name: __savegprlr_20
@@ -144,7 +142,6 @@
       kind: Function
     - name: __restgprlr_20
       skip: true
-  required: true
 - name: memmove
   references:
     - name: memcpy
