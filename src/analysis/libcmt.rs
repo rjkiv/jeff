@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 // Try and find any common LIBCMT TU splits/symbols here
 pub fn parse_libcmt(obj: &mut ObjInfo) -> Result<()> {
     // crtgpr/fpr/vmx
-    process_reg_intrinsics(obj)?;
+    // process_reg_intrinsics(obj)?;
     process_chkstk(obj)?;
     process_fpctrl(obj)?;
     process_u64tod(obj)?;

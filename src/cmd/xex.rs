@@ -461,7 +461,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         // add signatures/auto-deduce splits here
         apply_signatures(&mut obj)?;
         // we do this here because then we can take into account split cache
-        // parse_libcmt(&mut obj)?;
+        parse_libcmt(&mut obj)?;
         // apply signatures here
 
         if !config.quick_analysis {

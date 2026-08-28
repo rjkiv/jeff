@@ -44,3 +44,36 @@
       end: 32
       step: 4
   required: true
+- name: __savevmx
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x298
+      # if it turns out i need to include the full 0x298 byte signature here, do that
+      # but for now up to __savevmx_31 should do
+      signature: OWD+4P////99y2HO/////zlg/vD/////fethzv////85YP8A/////34LYc7/////OWD/EP////9+K2HO/////zlg/yD/////fkthzv////85YP8w/////35rYc7/////OWD/QP////9+i2HO/////zlg/1D/////fqthzv////85YP9g/////37LYc7/////OWD/cP////9+62HO/////zlg/4D/////fwthzv////85YP+Q/////38rYc7/////OWD/oP////9/S2HO/////zlg/7D/////f2thzv////85YP/A/////3+LYc7/////OWD/0P////9/q2HO/////zlg/+D/////f8thzv////85YP/w/////3/rYc7/////ToAAIP////8=
+  labels:
+    - name: __restvmx
+      offset: 0x298
+      size: 0x298
+  sleds:
+    - name_start: __savevmx_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 8
+    - name_start: __savevmx_
+      offset: 0x94
+      start: 64
+      end: 128
+      step: 8
+    - name_start: __restvmx_
+      offset: 0x298
+      start: 14
+      end: 32
+      step: 8
+    - name_start: __restvmx_
+      offset: 0x32C
+      start: 64
+      end: 128
+      step: 8
+  required: true
