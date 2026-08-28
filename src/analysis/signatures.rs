@@ -112,6 +112,29 @@ fn add_to_obj(
             false,
         )?);
     }
+    // add any sleds
+    for sled in sig.sleds.iter() {
+        let start_addr = symbol_addr + sled.offset;
+        for i in sled.start..sled.end {
+            let addr = start_addr + (i - sled.start) * sled.step;
+            log::debug!(
+                "\tAdding additional symbol {}{} at {:08X}",
+                sled.name_start,
+                i,
+                addr
+            );
+            applied_symbols.insert(obj.add_symbol(
+                ObjSymbol {
+                    name: format!("{}{}", sled.name_start, i),
+                    address: addr.address,
+                    section: Some(addr.section),
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    ..Default::default()
+                },
+                false,
+            )?);
+        }
+    }
     // then add any references
     let mut tracker = Tracker::new(obj);
     tracker.process_function(obj, &obj.symbols[sym_idx])?;

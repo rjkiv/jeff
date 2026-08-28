@@ -28,6 +28,16 @@ pub struct FunctionLabel {
     pub size: Option<u32>,
 }
 
+// Sleds of labels to add so you don't have to manually write them all out in FunctionLabels
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Sled {
+    pub name_start: String,
+    pub offset: u32,
+    pub start: u32,
+    pub end: u32,
+    pub step: u32,
+}
+
 // A function or data reference that our FunctionSignature may call.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OutReference {
@@ -66,6 +76,9 @@ pub struct FunctionSignature {
     #[serde(default)]
     // any additional functions/labels to add for this signature (useful for reg intrinsics, fpctrl, chkstk, etc)
     pub labels: Vec<FunctionLabel>,
+    #[serde(default)]
+    // label sleds to add (useful for reg intrinsics)
+    pub sleds: Vec<Sled>,
     #[serde(default)]
     // the function calls and data references this signature has
     pub references: Vec<OutReference>,

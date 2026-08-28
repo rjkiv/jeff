@@ -4,165 +4,43 @@
     - size: 0x50
       signature: +cH/aP/////54f9w//////oB/3j/////+iH/gP/////6Qf+I//////ph/5D/////+oH/mP/////6of+g//////rB/6j/////+uH/sP/////7Af+4//////sh/8D/////+0H/yP/////7Yf/Q//////uB/9j/////+6H/4P/////7wf/o//////vh//D/////kYH/+P////9OgAAg/////w==
   labels:
-    - name: __savegprlr_14
-      offset: 0x0
-    - name: __savegprlr_15
-      offset: 0x4
-    - name: __savegprlr_16
-      offset: 0x8
-    - name: __savegprlr_17
-      offset: 0xC
-    - name: __savegprlr_18
-      offset: 0x10
-    - name: __savegprlr_19
-      offset: 0x14
-    - name: __savegprlr_20
-      offset: 0x18
-    - name: __savegprlr_21
-      offset: 0x1C
-    - name: __savegprlr_22
-      offset: 0x20
-    - name: __savegprlr_23
-      offset: 0x24
-    - name: __savegprlr_24
-      offset: 0x28
-    - name: __savegprlr_25
-      offset: 0x2C
-    - name: __savegprlr_26
-      offset: 0x30
-    - name: __savegprlr_27
-      offset: 0x34
-    - name: __savegprlr_28
-      offset: 0x38
-    - name: __savegprlr_29
-      offset: 0x3C
-    - name: __savegprlr_30
-      offset: 0x40
-    - name: __savegprlr_31
-      offset: 0x44
     - name: __restgprlr
       offset: 0x50
       size: 0x54
-    - name: __restgprlr_14
-      offset: 0x50
-    - name: __restgprlr_15
-      offset: 0x54
-    - name: __restgprlr_16
-      offset: 0x58
-    - name: __restgprlr_17
-      offset: 0x5C
-    - name: __restgprlr_18
-      offset: 0x60
-    - name: __restgprlr_19
-      offset: 0x64
-    - name: __restgprlr_20
-      offset: 0x68
-    - name: __restgprlr_21
-      offset: 0x6C
-    - name: __restgprlr_22
-      offset: 0x70
-    - name: __restgprlr_23
-      offset: 0x74
-    - name: __restgprlr_24
-      offset: 0x78
-    - name: __restgprlr_25
-      offset: 0x7C
-    - name: __restgprlr_26
-      offset: 0x80
-    - name: __restgprlr_27
-      offset: 0x84
-    - name: __restgprlr_28
-      offset: 0x88
-    - name: __restgprlr_29
-      offset: 0x8C
-    - name: __restgprlr_30
-      offset: 0x90
-    - name: __restgprlr_31
-      offset: 0x94
       # technically this is supposed to be a label, and there's no actual function at this spot
       # but if i don't mark it, CFA is gonna come across it, soooo whatever /shrug
     - name: __C_ExecuteExceptionFilter
       offset: 0xA4
       size: 0xC
+  sleds:
+    - name_start: __savegprlr_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 4
+    - name_start: __restgprlr_
+      offset: 0x50
+      start: 14
+      end: 32
+      step: 4
 - name: __savefpr
   num_handlers: 0
   possible_signatures:
     - size: 0x4C
       signature: 2cz/cP/////Z7P94/////9oM/4D/////2iz/iP/////aTP+Q/////9ps/5j/////2oz/oP/////arP+o/////9rM/7D/////2uz/uP/////bDP/A/////9ss/8j/////20z/0P/////bbP/Y/////9uM/+D/////26z/6P/////bzP/w/////9vs//j/////ToAAIP////8=
   labels:
-    - name: __savefpr_14
-      offset: 0x0
-    - name: __savefpr_15
-      offset: 0x4
-    - name: __savefpr_16
-      offset: 0x8
-    - name: __savefpr_17
-      offset: 0xC
-    - name: __savefpr_18
-      offset: 0x10
-    - name: __savefpr_19
-      offset: 0x14
-    - name: __savefpr_20
-      offset: 0x18
-    - name: __savefpr_21
-      offset: 0x1C
-    - name: __savefpr_22
-      offset: 0x20
-    - name: __savefpr_23
-      offset: 0x24
-    - name: __savefpr_24
-      offset: 0x28
-    - name: __savefpr_25
-      offset: 0x2C
-    - name: __savefpr_26
-      offset: 0x30
-    - name: __savefpr_27
-      offset: 0x34
-    - name: __savefpr_28
-      offset: 0x38
-    - name: __savefpr_29
-      offset: 0x3C
-    - name: __savefpr_30
-      offset: 0x40
-    - name: __savefpr_31
-      offset: 0x44
     - name: __restfpr
       offset: 0x4C
       size: 0x4C
-    - name: __restfpr_14
+  sleds:
+    - name_start: __savefpr_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 4
+    - name_start: __restfpr_
       offset: 0x4C
-    - name: __restfpr_15
-      offset: 0x50
-    - name: __restfpr_16
-      offset: 0x54
-    - name: __restfpr_17
-      offset: 0x58
-    - name: __restfpr_18
-      offset: 0x5C
-    - name: __restfpr_19
-      offset: 0x60
-    - name: __restfpr_20
-      offset: 0x64
-    - name: __restfpr_21
-      offset: 0x68
-    - name: __restfpr_22
-      offset: 0x6C
-    - name: __restfpr_23
-      offset: 0x70
-    - name: __restfpr_24
-      offset: 0x74
-    - name: __restfpr_25
-      offset: 0x78
-    - name: __restfpr_26
-      offset: 0x7C
-    - name: __restfpr_27
-      offset: 0x80
-    - name: __restfpr_28
-      offset: 0x84
-    - name: __restfpr_29
-      offset: 0x88
-    - name: __restfpr_30
-      offset: 0x8C
-    - name: __restfpr_31
-      offset: 0x90
+      start: 14
+      end: 32
+      step: 4
   required: true
