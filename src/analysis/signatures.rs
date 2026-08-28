@@ -1,13 +1,13 @@
-use crate::obj::ObjSymbolKind;
 use crate::{
     analysis::RelocationTarget,
     analysis::cfa::SectionAddress,
     analysis::tracker::{Relocation, Tracker},
-    obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, SymbolIndex},
+    obj::{ObjInfo, ObjSymbol, ObjSymbolFlagSet, ObjSymbolFlags, ObjSymbolKind, SymbolIndex},
     util::signatures::{FunctionSignature, OutReference, SignatureCandidate},
 };
 use anyhow::{Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use std::collections::BTreeSet;
 
 // fn apply_signature_for_symbol(obj: &mut ObjInfo, name: &str, sig_str: &str) -> Result<()> {
 //     Ok(())
@@ -75,11 +75,18 @@ fn check_signature(bytes: &[u8], sig: &SignatureCandidate) -> Result<bool> {
 }
 
 // add_to_obj - covers labels and references
-fn add_to_obj(obj: &mut ObjInfo, sym_idx: SymbolIndex, sig: &FunctionSignature) -> Result<()> {
+// returns a set of the SymbolIndexes that were applied/added as a result of this signature
+fn add_to_obj(
+    obj: &mut ObjInfo,
+    sym_idx: SymbolIndex,
+    sig: &FunctionSignature,
+) -> Result<BTreeSet<SymbolIndex>> {
+    let mut applied_symbols: BTreeSet<SymbolIndex> = BTreeSet::new();
     let symbol_addr = {
         let sym = &obj.symbols[sym_idx];
         SectionAddress::new(sym.section.unwrap(), sym.address)
     };
+    applied_symbols.insert(sym_idx);
     // add any additional labels
     for label in sig.labels.iter() {
         let this_sym_addr = symbol_addr + label.offset;
@@ -88,7 +95,7 @@ fn add_to_obj(obj: &mut ObjInfo, sym_idx: SymbolIndex, sig: &FunctionSignature) 
             label.name,
             this_sym_addr
         );
-        obj.add_symbol(
+        applied_symbols.insert(obj.add_symbol(
             ObjSymbol {
                 name: label.name.clone(),
                 address: this_sym_addr.address,
@@ -103,7 +110,7 @@ fn add_to_obj(obj: &mut ObjInfo, sym_idx: SymbolIndex, sig: &FunctionSignature) 
                 ..Default::default()
             },
             false,
-        )?;
+        )?);
     }
     // then add any references
     let mut tracker = Tracker::new(obj);
@@ -140,13 +147,20 @@ fn add_to_obj(obj: &mut ObjInfo, sym_idx: SymbolIndex, sig: &FunctionSignature) 
     );
     for i in 0..discovered_refs.len() {
         if !signature_refs[i].skip {
-            add_symbol_from_reference(obj, &discovered_refs[i], &signature_refs[i])?;
+            applied_symbols.insert(add_symbol_from_reference(
+                obj,
+                &discovered_refs[i],
+                &signature_refs[i],
+            )?);
         }
     }
-    Ok(())
+    Ok(applied_symbols)
 }
 
-pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<()> {
+// returns a set of the SymbolIndexes that were applied/added as a result of this signature
+// this way, when deducing splits, you can lookup symbols from this set instead of the entire obj
+pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<BTreeSet<SymbolIndex>> {
+    let mut applied_symbols: BTreeSet<SymbolIndex> = BTreeSet::new();
     let sigs: Vec<FunctionSignature> = serde_yaml::from_str(sig_str)?;
     for sig in sigs.iter() {
         log::debug!("Signature name: {}", sig.name);
@@ -166,7 +180,7 @@ pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<()> {
                 sec_addr
             );
             // then call add_to_obj
-            add_to_obj(obj, func_sym_idx, sig)?;
+            applied_symbols.extend(add_to_obj(obj, func_sym_idx, sig)?);
         } else {
             // if we have a size but no concrete address, we'll have to filter pdata to find possible candidates for this function
             // at this point, we'll need a signature from the yml - we have to rely on our possible signatures
@@ -209,7 +223,7 @@ pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<()> {
                             }, false)?;
 
                             // add any additional functions/labels, and any references
-                            add_to_obj(obj, sym_idx, sig)?;
+                            applied_symbols.extend(add_to_obj(obj, sym_idx, sig)?);
                             break;
                         }
                     }
@@ -224,8 +238,7 @@ pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<()> {
             }
         }
     }
-
-    Ok(())
+    Ok(applied_symbols)
 }
 
 // defer splitting, have our yml focus solely on function signatures
