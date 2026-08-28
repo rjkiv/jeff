@@ -7,8 +7,8 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use memchr::memmem;
 use std::collections::BTreeSet;
-
 // fn apply_signature_for_symbol(obj: &mut ObjInfo, name: &str, sig_str: &str) -> Result<()> {
 //     Ok(())
 // }
@@ -103,9 +103,10 @@ fn add_to_obj(
                 size: label.size.unwrap_or(0),
                 size_known: label.size.is_some(),
                 flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
-                kind: match label.size {
-                    Some(_) => ObjSymbolKind::Function,
-                    None => ObjSymbolKind::Unknown,
+                kind: if label.size.is_some() {
+                    ObjSymbolKind::Function
+                } else {
+                    ObjSymbolKind::Unknown
                 },
                 ..Default::default()
             },
@@ -255,8 +256,58 @@ pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<BTreeSet<Symb
                         panic!("Couldn't find required func {}!", sig.name);
                     }
                 } else {
-                    // brute force memmem find
-                    log::debug!("need to brute force memmem find to identify {}!", sig.name);
+                    // no pdata info, need to brute force memmem find
+                    let mut found = false;
+                    // pre-compute the desired section index
+                    let (sec_idx, sec) = obj
+                        .sections
+                        .by_name(&sig.section)?
+                        .expect("Couldn't find section!");
+                    let Some(subsig) = &sig_candidate.subsignature else {
+                        panic!("Need an exact byte snippet to find this func!");
+                    };
+                    // traverse this section's data for every matching instance of the exact byte sub-snippet
+                    let mut data_idx = 0;
+                    while let Some(pos) = memmem::find(
+                        &sec.data[data_idx..],
+                        &STANDARD.decode(&subsig.exact_bytes)?,
+                    ) {
+                        let found_idx = data_idx + pos - subsig.offset as usize;
+                        // if we found a potential match, verify using the main signature pattern
+                        if check_signature(&sec.data[found_idx..], sig_candidate)? {
+                            let addr = SectionAddress::new(sec_idx, sec.address + found_idx as u32);
+                            log::debug!(
+                                "Found func {} at {:08X}, size 0x{:X}",
+                                sig.name,
+                                addr,
+                                sig_candidate.size
+                            );
+                            found = true;
+                            // add the main symbol here
+                            let sym_idx = obj.add_symbol(
+                                ObjSymbol {
+                                    name: sig.name.clone(),
+                                    address: addr.address,
+                                    section: Some(addr.section),
+                                    size: sig_candidate.size,
+                                    size_known: true,
+                                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                                    kind: ObjSymbolKind::Function,
+                                    ..Default::default()
+                                },
+                                false,
+                            )?;
+                            // add any additional functions/labels, and any references
+                            applied_symbols.extend(add_to_obj(obj, sym_idx, sig)?);
+                            break;
+                        }
+
+                        data_idx = found_idx + 1;
+                    }
+                    // if we haven't found it by this point, and required is true, fail
+                    if !found && sig.required {
+                        panic!("Couldn't find required func {}!", sig.name);
+                    }
                 }
             }
         }
@@ -275,6 +326,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
         obj,
         include_str!("../../assets/signatures/reg_intrinsics.yml"),
     )?;
+    apply_signature(obj, include_str!("../../assets/signatures/chkstk.yml"))?;
     if obj.entry.is_some() {
         apply_signature(obj, include_str!("../../assets/signatures/entry.yml"))?;
     }

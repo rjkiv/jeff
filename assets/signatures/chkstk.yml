@@ -1,0 +1,11 @@
+- name: _RtlCheckStack
+  possible_signatures:
+    - size: 0x28
+      signature: fYMA0P////99bADQ/////zgLD///////fABmcf////9MgQAg/////3wrC3j/////fAkDpv////+EC/AA/////0IA//z/////ToAAIP////8=
+      subsignature:
+        exact_bytes: fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==
+        offset: 0x0
+  labels:
+    - name: _RtlCheckStack12
+      offset: 0x4
+  required: true

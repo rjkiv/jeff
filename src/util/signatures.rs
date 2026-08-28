@@ -1,6 +1,14 @@
 use crate::obj::ObjSymbolKind;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SubSignature {
+    // a snippet of exact bytes within this signature to help narrow down the field to search in
+    pub exact_bytes: String,
+    // the offset within the function where this snippet occurs
+    pub offset: u32,
+}
+
 // the possible signature a function can have.
 // we need this struct because signatures can vary in size across xexes (for example, some may save/rest regs, some may not)
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -10,10 +18,8 @@ pub struct SignatureCandidate {
     // this signature's byte pattern
     pub signature: String,
     #[serde(default)]
-    // String: a snippet of exact bytes within this signature to help narrow down the field to search in
-    // u32: the offset within the function where this snippet occurs
-    // if this is None, this function is exact byte matching
-    pub subsignature: Option<(String, u32)>,
+    // a subsignature of exact bytes to help narrow down the search for our main signature
+    pub subsignature: Option<SubSignature>,
 }
 
 // the functions and labels to mark for this FunctionSignature.
