@@ -97,6 +97,20 @@ pub fn process_seh(obj: &mut ObjInfo) -> Result<()> {
             let cur_func_except_handler: SectionAddress;
             let cur_func_except_record: SectionAddress;
 
+            obj.symbols.add(
+                ObjSymbol {
+                    name: format!("except_data_{:08X}", func_start_addr.address - 8),
+                    address: func_start_addr.address - 8,
+                    section: Some(func_start_addr.section),
+                    size: 8,
+                    size_known: true,
+                    flags: ObjSymbolFlagSet(ObjSymbolFlags::Global.into()),
+                    kind: ObjSymbolKind::Object,
+                    ..Default::default()
+                },
+                false,
+            )?;
+
             // word 1: the address of the function's exception handler
             if let Some(except_func) =
                 read_u32(obj.sections.at_address(start_addr - 8)?.1, start_addr - 8)

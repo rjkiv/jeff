@@ -147,14 +147,10 @@ pub struct AnalyzerState {
     pub functions: BTreeMap<SectionAddress, FunctionInfo>,
     pub jump_tables: BTreeMap<SectionAddress, u32>,
     pub known_symbols: BTreeMap<SectionAddress, Vec<ObjSymbol>>,
-    pub known_sections: BTreeMap<SectionIndex, String>,
 }
 
 impl AnalyzerState {
     pub fn apply(&self, obj: &mut ObjInfo) -> Result<()> {
-        for (&section_index, section_name) in &self.known_sections {
-            obj.sections[section_index].rename(section_name.clone())?;
-        }
         for (&start, FunctionInfo { end, .. }) in self.functions.iter() {
             let Some(end) = end else { continue };
             let section = &obj.sections[start.section];
