@@ -1,0 +1,79 @@
+- name: __savegprlr
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x50
+      signature: +cH/aP/////54f9w//////oB/3j/////+iH/gP/////6Qf+I//////ph/5D/////+oH/mP/////6of+g//////rB/6j/////+uH/sP/////7Af+4//////sh/8D/////+0H/yP/////7Yf/Q//////uB/9j/////+6H/4P/////7wf/o//////vh//D/////kYH/+P////9OgAAg/////w==
+  labels:
+    - name: __restgprlr
+      offset: 0x50
+      size: 0x54
+      # technically this is supposed to be a label, and there's no actual function at this spot
+      # but if i don't mark it, CFA is gonna come across it, soooo whatever /shrug
+    - name: __C_ExecuteExceptionFilter
+      offset: 0xA4
+      size: 0xC
+  sleds:
+    - name_start: __savegprlr_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 4
+    - name_start: __restgprlr_
+      offset: 0x50
+      start: 14
+      end: 32
+      step: 4
+- name: __savefpr
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x4C
+      signature: 2cz/cP/////Z7P94/////9oM/4D/////2iz/iP/////aTP+Q/////9ps/5j/////2oz/oP/////arP+o/////9rM/7D/////2uz/uP/////bDP/A/////9ss/8j/////20z/0P/////bbP/Y/////9uM/+D/////26z/6P/////bzP/w/////9vs//j/////ToAAIP////8=
+  labels:
+    - name: __restfpr
+      offset: 0x4C
+      size: 0x4C
+  sleds:
+    - name_start: __savefpr_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 4
+    - name_start: __restfpr_
+      offset: 0x4C
+      start: 14
+      end: 32
+      step: 4
+  required: true
+- name: __savevmx
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x298
+      # if it turns out i need to include the full 0x298 byte signature here, do that
+      # but for now up to __savevmx_31 should do
+      signature: OWD+4P////99y2HO/////zlg/vD/////fethzv////85YP8A/////34LYc7/////OWD/EP////9+K2HO/////zlg/yD/////fkthzv////85YP8w/////35rYc7/////OWD/QP////9+i2HO/////zlg/1D/////fqthzv////85YP9g/////37LYc7/////OWD/cP////9+62HO/////zlg/4D/////fwthzv////85YP+Q/////38rYc7/////OWD/oP////9/S2HO/////zlg/7D/////f2thzv////85YP/A/////3+LYc7/////OWD/0P////9/q2HO/////zlg/+D/////f8thzv////85YP/w/////3/rYc7/////ToAAIP////8=
+  labels:
+    - name: __restvmx
+      offset: 0x298
+      size: 0x298
+  sleds:
+    - name_start: __savevmx_
+      offset: 0x0
+      start: 14
+      end: 32
+      step: 8
+    - name_start: __savevmx_
+      offset: 0x94
+      start: 64
+      end: 128
+      step: 8
+    - name_start: __restvmx_
+      offset: 0x298
+      start: 14
+      end: 32
+      step: 8
+    - name_start: __restvmx_
+      offset: 0x32C
+      start: 64
+      end: 128
+      step: 8
+  required: true

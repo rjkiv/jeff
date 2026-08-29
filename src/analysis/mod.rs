@@ -11,11 +11,11 @@ use crate::{
 
 pub mod cfa;
 pub mod executor;
-pub mod libcmt;
 pub mod objects;
 pub mod pass;
 pub mod rtti;
 pub mod seh;
+pub mod signatures;
 pub mod slices;
 pub mod tracker;
 pub mod vm;

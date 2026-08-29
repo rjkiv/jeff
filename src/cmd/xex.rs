@@ -19,10 +19,10 @@ use tracing::{debug, info};
 use typed_path::{Utf8NativePath, Utf8NativePathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
+use crate::analysis::signatures::apply_signatures;
 use crate::{
     analysis::{
         cfa::AnalyzerState,
-        libcmt::parse_libcmt,
         objects::{detect_objects, detect_strings},
         tracker::Tracker,
     },
@@ -457,11 +457,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
     apply_block_relocations(&mut obj, &config.base.block_relocations)?;
 
     if !config.symbols_known {
-        // add signatures/auto-deduce splits here
-        // we do this here because then we can take into account split cache
-        parse_libcmt(&mut obj)?;
-        // apply signatures here
-
+        apply_signatures(&mut obj)?;
         if !config.quick_analysis {
             let mut state = AnalyzerState::default();
             debug!("Detecting function boundaries");
@@ -471,6 +467,7 @@ fn load_analyze_xex(config: &ProjectConfig) -> Result<ExeAnalyzeResult> {
         }
 
         // apply signatures post would go here
+        // applying splits from our signatures would go here
     }
 
     // Apply additional relocations from config

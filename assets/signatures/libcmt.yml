@@ -1,0 +1,423 @@
+# Signatures for a bunch of common funcs you'd find throughout LIBCMT
+- name: _RtlCheckStack
+  possible_signatures:
+    - size: 0x28
+      signature: fYMA0P////99bADQ/////zgLD///////fABmcf////9MgQAg/////3wrC3j/////fAkDpv////+EC/AA/////0IA//z/////ToAAIP////8=
+      subsignature:
+        exact_bytes: fYMA0H1sANA4Cw//fABmcUyBACB8Kwt4fAkDpoQL8ABCAP/8ToAAIA==
+        offset: 0x0
+  labels:
+    - name: _RtlCheckStack12
+      offset: 0x4
+  required: true
+- name: _CallSettingFrame
+  possible_signatures:
+    - size: 0x5C
+      signature: fOgCpv/////7wf/w//////vh//j/////kOH/qP////+UIf+g/////3y/K3j/////fN4zeP////9IAAAB/AAAA3yMI3j/////k8EABP////98aAOm/////06AACH/////f+X7eP////8oHwEA/////0CCAAj/////OKAAAv////9IAAAB/AAAA4DhAAj/////fOgDpv/////rwQBQ/////+vhAFj/////OCEAYP////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fOgCpvvB//D74f/4kOH/qJQh/6B8vyt4fN4zeA==
+        offset: 0x0
+  labels:
+    - name: __NLG_Return
+      offset: 0x30
+  references:
+    - name: _NLG_Notify
+      kind: Function
+      size: 0x18
+    - name: _NLG_Notify
+      kind: Function
+      skip: true
+- name: _NLG_Notify
+  labels:
+    - name: __NLG_Dispatch
+      offset: 0x14
+  references:
+    - name: idunnolol # maybe this is static uint32_t __NLG_Destination?
+      kind: Object
+      skip: true
+# this should've been found from earlier SEH parsing
+- name: _CallCatchBlock
+  references:
+    - name: CallCatchBlock
+      kind: Function
+# this also should've been found from earlier SEH parsing
+- name: _SkipUnwoundFrames
+  references:
+    - name: SkipUnwoundFrames
+      kind: Function
+      size: 0x3C
+- name: _ctrlfp
+  possible_signatures:
+    - size: 0x30
+      signature: /AAEjv/////YAf/4/////2hlAPj/////gGH//P////98pSA4/////3xmIHj/////fKYzeP////+Qwf/8/////8gB//j/////aGMA+P/////9/gWO/////06AACD/////
+      subsignature:
+        exact_bytes: /AAEjtgB//hoZQD4gGH//HylIDh8ZiB4fKYzeJDB//zIAf/4aGMA+P3+BY5OgAAg
+        offset: 0x0
+  labels:
+    - name: _statfp
+      offset: 0x30
+      size: 0x10
+    - name: _FPreset
+      offset: 0x40
+      size: 0x24
+    - name: _set_statfp
+      offset: 0x64
+      size: 0x20
+    - name: _set_fsr
+      offset: 0x84
+      size: 0x10
+    - name: _get_fsr
+      offset: 0x94
+      size: 0x10
+  required: true
+- name: __u64tod
+  possible_signatures:
+    - size: 0x28
+      signature: fGUAdP////98Yyg2/////ywjAAD/////QYIAEP////8gpQQ+/////3hjqwL/////eKOgTv/////4Yf/4/////8gh//j/////ToAAIP////8=
+      subsignature:
+        exact_bytes: fGUAdHxjKDYsIwAAQYIAECClBD54Y6sCeKOgTvhh//jIIf/4ToAAIA==
+        offset: 0x0
+- name: memcmp
+  possible_signatures:
+    - size: 0x90
+      signature: KAUACP////9BgABU/////zgAAAf/////VKfo/v////98oAA4/////3zpA6b/////6MQAAP/////oowAA/////0gAAAz/////6MQACf/////oowAJ/////3wlMAD/////QQL/9P////9BggAY/////zhg////////fCUwQP////9NgAAg/////zhgAAH/////ToAAIP////98BQN4/////zhjAAj/////OIQACP////8sBQAA/////3ypA6b/////QYIAKP////+IxAAA/////4ijAAD/////SAAADP////+MxAAB/////4yjAAH/////fAUwAP////9BAv/0/////3xmKFD/////ToAAIP////84YAAA/////06AACD/////
+      subsignature:
+        exact_bytes: KAUACEGAAFQ4AAAHVKfo/nygADh86QOm6MQAAOijAABIAAAM6MQACeijAAl8JTAAQQL/9EGCABg4YP//fCUwQE2AACA4YAABToAAIHwFA3g4YwAIOIQACCwFAAB8qQOmQYIAKIjEAACIowAASAAADIzEAAGMowABfAUwAEEC//R8ZihQToAAIDhgAABOgAAg
+        offset: 0x0
+- name: memchr
+  possible_signatures:
+    - size: 0x3C
+      signature: L4UAAP////8shQAB/////0GeACz/////iMMAAP////9/BiAA/////zil////////QZoAIP////9BhgAY/////3ypA6b/////jMMAAf////98BiAA/////0AC//j/////QYIACP////84YAAA/////06AACD/////
+      subsignature:
+        exact_bytes: L4UAACyFAAFBngAsiMMAAH8GIAA4pf//QZoAIEGGABh8qQOmjMMAAXwGIABAAv/4QYIACDhgAABOgAAg
+        offset: 0x0
+- name: _blkmov
+  possible_signatures:
+    - size: 0xA8
+      signature: OAUAAf////9gZgAA/////3wJA6b/////SAAAGP////84pf///////4gEAAD/////OIQAAf////+YBgAA/////zjGAAH/////cMAAA/////9AAv/o/////1Sg8L//////QcIAJP////98CQOm/////3CAAAP/////QMIAPP////+A5AAA/////ziEAAT/////kOYAAP////84xgAE/////0Mg//D/////cKAAA/////98CQOm/////03iACD/////iAQAAP////84hAAB/////5gGAAD/////OMYAAf////9DIP/w/////06AACD/////iOQAA/////+JBAAC/////1EHRC7/////iSQAAf////9RJ4Ie/////4lEAAD/////UUfADv////84hAAE/////5DmAAD/////OMYABP////9CAP/Y/////0v//7D/////
+      subsignature:
+        exact_bytes: OAUAAWBmAAB8CQOmSAAAGDil//+IBAAAOIQAAZgGAAA4xgABcMAAA0AC/+hUoPC/QcIAJHwJA6ZwgAADQMIAPIDkAAA4hAAEkOYAADjGAARDIP/wcKAAA3wJA6ZN4gAgiAQAADiEAAGYBgAAOMYAAUMg//BOgAAgiOQAA4kEAAJRB0QuiSQAAVEngh6JRAAAUUfADjiEAASQ5gAAOMYABEIA/9hL//+w
+        offset: 0x0
+- name: _CxxThrowException
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x84
+      signature: fYgCpv////+Rgf/4//////vB/+j/////++H/8P////+UIf9w/////z1gAAD//wAAfH4beP////98nyN4/////zgAAAD8AAAAOAAAAPwAAAA4oAAg/////0gAAAH8AAADk8EAaP////+T4QBs/////ysfAAD/////QZoAHP////+BfwAA/////1VrBzn/////QYIAEP////89YAGZ/////2FrQAD/////kWEAZP////84wQBk/////4ChAGD/////gIEAVP////+AYQBQ/////0gAAAH8AAADOCEAkP////+Bgf/4/////32IA6b/////68H/6P/////r4f/w/////06AACD/////
+  references:
+    - name: ExceptionTemplate
+      kind: Object
+      size: 0x20
+    - name: memcpy
+      kind: Function
+    - name: RaiseException
+      kind: Function
+- name: _purecall
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x4C
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////PWAAAP//AACBawAA//8AACgLAAD/////QYIADP////99aQOm/////06ABCH/////OGAAGf////9IAAAB/AAAAziAAAH/////OGAAAP////9IAAAB/AAAA0gAAAH8AAADOCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+  references:
+    - name: __pPurecall
+      kind: Object
+      size: 4
+    - name: _NMSG_WRITE
+      kind: Function
+    - name: _set_abort_behavior
+      kind: Function
+    - name: abort
+      kind: Function
+- name: __CxxFrameHandler
+  references:
+    - name: __InternalCxxFrameHandler
+      kind: Function
+- name: __InternalCxxFrameHandler
+  references:
+    - name: __savegprlr_27
+      skip: true
+    - name: _GetUnwindContext
+      kind: Function
+    - name: _getptd
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _MoveContext
+      kind: Function
+      size: 0x8
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _GetUnwindContext
+      kind: Function
+      skip: true
+    - name: _MoveContext
+      kind: Function
+      skip: true
+    - name: ?__FrameUnwindToEmptyState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: _FindAndUnlinkFrame
+      kind: Function
+    - name: _IsExceptionObjectToBeDestroyed
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+    - name: ?FindHandler@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@EH1@Z
+      kind: Function
+    - name: __restgprlr_27
+      skip: true
+- name: _getptd
+  references:
+    - name: _getptd_noexit
+      kind: Function
+    - name: _amsg_exit
+      kind: Function
+- name: _amsg_exit
+  references:
+    - name: _FF_MSGBANNER
+      kind: Function
+    - name: _NMSG_WRITE
+      kind: Function
+      skip: true
+    - name: doexit
+      kind: Function
+      skip: true
+- name: ?_inconsistency@@YAXXZ
+  references:
+    - name: __pInconsistency
+      kind: Object
+      size: 0x4
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+- name: ?__FrameUnwindToEmptyState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+  references:
+    - name: __savegprlr_29
+      skip: true
+    - name: ?__StateFromControlPc@@YAHPBU_s_FuncInfo@@K@Z
+      kind: Function
+    - name: __FrameUnwindToState
+      kind: Function
+    - name: __restgprlr_29
+      skip: true
+- name: ?FindHandler@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@EH1@Z
+  references:
+    - name: __savegprlr_18
+      skip: true
+    - name: ?GetCurrentState@@YAHPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: ?_ValidateExecute@@YAHP6AHXZ@Z
+      kind: Function
+      size: 0x14
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_GetRangeOfTrysToCheck@@YAPBU_s_TryBlockMapEntry@@PAKPBU_s_FuncInfo@@HPAI2PAU_xDISPATCHER_CONTEXT@@@Z
+      kind: Function
+    - name: __TypeMatch
+      kind: Function
+    - name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+      kind: Function
+    - name: __restgprlr_18
+      skip: true
+    - name: ?FindHandlerForForeignException@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@HH1@Z
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+- name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+  references:
+    - name: __savegprlr_21
+      skip: true
+    - name: ?_GetEstablisherFrame@@YAPAKPAKPBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: ?_ExecutionInCatch@@YAHPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: __BuildCatchObject
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CreateFrameInfo
+      kind: Function
+    - name: _UnwindNestedFrames
+      kind: Function
+    - name: __FrameUnwindToState
+      kind: Function
+      skip: true
+    - name: ?SetState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@H@Z
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CallCatchBlock
+      kind: Function
+      skip: true
+    - name: _JumpToContinuation
+      kind: Function
+    - name: __restgprlr_21
+      skip: true
+- name: ?FindHandlerForForeignException@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@HH1@Z
+  references:
+    - name: __savegprlr_24
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CallSETranslator
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_GetRangeOfTrysToCheck@@YAPBU_s_TryBlockMapEntry@@PAKPBU_s_FuncInfo@@HPAI2PAU_xDISPATCHER_CONTEXT@@@Z
+      kind: Function
+      skip: true
+    - name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+      kind: Function
+      skip: true
+    - name: __restgprlr_24
+      skip: true
+- name: __BuildCatchObject
+  references:
+    - name: __savegprlr_28
+      skip: true
+    - name: __BuildCatchObjectHelper
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+    - name: __restgprlr_28
+      skip: true
+- name: _UnwindNestedFrames
+  references:
+    - name: memcpy
+      kind: Function
+      skip: true
+    - name: RtlCaptureContext
+      kind: Function
+      skip: true
+    - name: unknown
+      kind: Object
+      skip: true
+    - name: _SaveUnwindContext
+      kind: Function
+    - name: unknown
+      kind: Object
+      skip: true
+    - name: RtlUnwind
+      kind: Function
+      skip: true
+    - name: memcpy
+      kind: Function
+      skip: true
+    - name: _SaveUnwindContext
+      kind: Function
+      skip: true
+- name: atexit
+  possible_signatures:
+    # the "new" implementation, games around 2010-later use this version
+    - size: 0x28
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAMxY////////3xrWRD/////OCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+      subsignature:
+        exact_bytes: MWP//3xrWRA4IQBggYH/+H2IA6ZOgAAg
+        offset: 0x10
+    # the "old" implementation, games earlier than 2008 use this version
+    - size: 0x2C
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAN8awA0/////1Vr3/7/////fGsA0P////84IQBg/////4GB//j/////fYgDpv////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fGsANFVr3/58awDQOCEAYIGB//h9iAOmToAAIA==
+        offset: 0x10
+  references:
+    - name: _onexit
+      kind: Function
+- name: _onexit
+  num_handlers: 1
+  references:
+    - name: __savegprlr_23
+      skip: true
+    - name: _lockexit
+      kind: Function
+      size: 0x8
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: _msize
+      kind: Function
+    - name: realloc
+      kind: Function
+    - name: realloc
+      kind: Function
+      skip: true
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: the_exception_handler_lol
+      kind: Function
+      skip: true
+    - name: __restgprlr_23
+      skip: true
+    - name: _unlockexit
+      kind: Function
+      size: 0x8
+- name: _lockexit
+  references:
+    - name: _lock
+      kind: Function
+- name: _unlockexit
+  references:
+    - name: _unlock
+      kind: Function
+- name: _errno
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x38
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAMoAwAA/////0CCABD/////PWAAAP//AAA4awAA//8AAEgAAAj/////OGMACP////84IQBg/////4GB//j/////fYgDpv////9OgAAg/////w==
+  references:
+    - name: _getptd_noexit
+      kind: Function
+      skip: true
+    - name: unknown
+      kind: Object
+      skip: true
+- name: _invalid_parameter_noinfo
+  possible_signatures:
+    - size: 0x34
+      signature: PWAAAP//AACBawAA//8AACgLAAD/////QYIAIP////844AAA/////31pA6b/////OMAAAP////84oAAA/////ziAAAD/////OGAAAP////9OgAQg/////w/gABb/////ToAAIP////8=
+      subsignature:
+        exact_bytes: KAsAAEGCACA44AAAfWkDpjjAAAA4oAAAOIAAADhgAABOgAQgD+AAFk6AACA=
+        offset: 0x8
+  references:
+    - name: __pInvalidArgHandler
+      kind: Object
+      size: 0x4
