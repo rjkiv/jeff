@@ -231,14 +231,3 @@
   references:
     - name: _unlock
       kind: Function
-- name: isalpha
-  possible_signatures:
-    - size: 0x1C
-      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjAQP/////ToAAIP////8=
-      subsignature:
-        exact_bytes: gWsAyH1qWi5xYwEDToAAIA==
-        offset: 0xC
-  references:
-    - name: idunnolol
-      kind: Object
-      skip: true

@@ -1,0 +1,122 @@
+# Funcs that largely involve strings
+- name: isalpha
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjAQP/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5xYwEDToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isupper
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjB/7/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwf+ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: islower
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjB7z/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwe8ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isdigit
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjB3r/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwd6ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isxdigit
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjBjD/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwYwToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isspace
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjBzj/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwc4ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isalnum
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjAQf/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5xYwEHToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isprint
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjAVf/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5xYwFXToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: isgraph
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjARf/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5xYwEXToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: ispunct
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjBvb/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwb2ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true
+- name: iscntrl
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////1VjBrT/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5VYwa0ToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true

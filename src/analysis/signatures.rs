@@ -327,6 +327,7 @@ pub fn apply_signatures(obj: &mut ObjInfo) -> Result<()> {
         include_str!("../../assets/signatures/reg_intrinsics.yml"),
     )?;
     apply_signature(obj, include_str!("../../assets/signatures/libcmt.yml"))?;
+    apply_signature(obj, include_str!("../../assets/signatures/strings.yml"))?;
     if obj.entry.is_some() {
         apply_signature(obj, include_str!("../../assets/signatures/entry.yml"))?;
     }
