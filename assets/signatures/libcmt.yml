@@ -171,3 +171,74 @@
       kind: Function
     - name: __restgprlr_29
       skip: true
+- name: atexit
+  possible_signatures:
+    # the "new" implementation, games around 2010-later use this version
+    - size: 0x28
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAMxY////////3xrWRD/////OCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+      subsignature:
+        exact_bytes: MWP//3xrWRA4IQBggYH/+H2IA6ZOgAAg
+        offset: 0x10
+    # the "old" implementation, games earlier than 2008 use this version
+    - size: 0x2C
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAN8awA0/////1Vr3/7/////fGsA0P////84IQBg/////4GB//j/////fYgDpv////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fGsANFVr3/58awDQOCEAYIGB//h9iAOmToAAIA==
+        offset: 0x10
+  references:
+    - name: _onexit
+      kind: Function
+- name: _onexit
+  num_handlers: 1
+  references:
+    - name: __savegprlr_23
+      skip: true
+    - name: _lockexit
+      kind: Function
+      size: 0x8
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: _msize
+      kind: Function
+    - name: realloc
+      kind: Function
+    - name: realloc
+      kind: Function
+      skip: true
+    - name: __onexitbegin
+      kind: Object
+      skip: true
+    - name: __onexitend
+      kind: Object
+      skip: true
+    - name: the_exception_handler_lol
+      kind: Function
+      skip: true
+    - name: __restgprlr_23
+      skip: true
+    - name: _unlockexit
+      kind: Function
+      size: 0x8
+- name: _lockexit
+  references:
+    - name: _lock
+      kind: Function
+- name: _unlockexit
+  references:
+    - name: _unlock
+      kind: Function
+- name: isalpha
+  possible_signatures:
+    - size: 0x1C
+      signature: PWAAAP//AABUagg8/////zlrAAD//wAAgWsAyP////99alou/////3FjAQP/////ToAAIP////8=
+      subsignature:
+        exact_bytes: gWsAyH1qWi5xYwEDToAAIA==
+        offset: 0xC
+  references:
+    - name: idunnolol
+      kind: Object
+      skip: true

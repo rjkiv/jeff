@@ -302,7 +302,7 @@ pub fn apply_signature(obj: &mut ObjInfo, sig_str: &str) -> Result<BTreeSet<Symb
                             break;
                         }
 
-                        data_idx = found_idx + 1;
+                        data_idx += pos + 4;
                     }
                     // if we haven't found it by this point, and required is true, fail
                     if !found && sig.required {
