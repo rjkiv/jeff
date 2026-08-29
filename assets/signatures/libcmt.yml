@@ -84,13 +84,90 @@
     - name: __pPurecall
       kind: Object
       size: 4
-      optional: false
     - name: _NMSG_WRITE
       kind: Function
-      optional: false
     - name: _set_abort_behavior
       kind: Function
-      optional: false
     - name: abort
       kind: Function
-      optional: false
+- name: __CxxFrameHandler
+  references:
+    - name: __InternalCxxFrameHandler
+      kind: Function
+- name: __InternalCxxFrameHandler
+  references:
+    - name: __savegprlr_27
+      skip: true
+    - name: _GetUnwindContext
+      kind: Function
+    - name: _getptd
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _MoveContext
+      kind: Function
+      size: 0x8
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _GetUnwindContext
+      kind: Function
+      skip: true
+    - name: _MoveContext
+      kind: Function
+      skip: true
+    - name: ?__FrameUnwindToEmptyState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: _FindAndUnlinkFrame
+      kind: Function
+    - name: _IsExceptionObjectToBeDestroyed
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+    - name: ?FindHandler@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@EH1@Z
+      kind: Function
+    - name: __restgprlr_27
+      skip: true
+- name: _getptd
+  references:
+    - name: _getptd_noexit
+      kind: Function
+    - name: _amsg_exit
+      kind: Function
+- name: _amsg_exit
+  references:
+    - name: _FF_MSGBANNER
+      kind: Function
+    - name: _NMSG_WRITE
+      kind: Function
+      skip: true
+    - name: doexit
+      kind: Function
+      skip: true
+- name: ?_inconsistency@@YAXXZ
+  references:
+    - name: __pInconsistency
+      kind: Object
+      size: 0x4
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+- name: ?__FrameUnwindToEmptyState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+  references:
+    - name: __savegprlr_29
+      skip: true
+    - name: ?__StateFromControlPc@@YAHPBU_s_FuncInfo@@K@Z
+      kind: Function
+    - name: __FrameUnwindToState
+      kind: Function
+    - name: __restgprlr_29
+      skip: true
