@@ -35,6 +35,17 @@
     - name: idunnolol # maybe this is static uint32_t __NLG_Destination?
       kind: Object
       skip: true
+# this should've been found from earlier SEH parsing
+- name: _CallCatchBlock
+  references:
+    - name: CallCatchBlock
+      kind: Function
+# this also should've been found from earlier SEH parsing
+- name: _SkipUnwoundFrames
+  references:
+    - name: SkipUnwoundFrames
+      kind: Function
+      size: 0x3C
 - name: _ctrlfp
   possible_signatures:
     - size: 0x30
@@ -195,6 +206,137 @@
     - name: __FrameUnwindToState
       kind: Function
     - name: __restgprlr_29
+      skip: true
+- name: ?FindHandler@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@EH1@Z
+  references:
+    - name: __savegprlr_18
+      skip: true
+    - name: ?GetCurrentState@@YAHPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: ?_ValidateExecute@@YAHP6AHXZ@Z
+      kind: Function
+      size: 0x14
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_GetRangeOfTrysToCheck@@YAPBU_s_TryBlockMapEntry@@PAKPBU_s_FuncInfo@@HPAI2PAU_xDISPATCHER_CONTEXT@@@Z
+      kind: Function
+    - name: __TypeMatch
+      kind: Function
+    - name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+      kind: Function
+    - name: __restgprlr_18
+      skip: true
+    - name: ?FindHandlerForForeignException@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@HH1@Z
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+- name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+  references:
+    - name: __savegprlr_21
+      skip: true
+    - name: ?_GetEstablisherFrame@@YAPAKPAKPBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: ?_ExecutionInCatch@@YAHPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@@Z
+      kind: Function
+    - name: __BuildCatchObject
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CreateFrameInfo
+      kind: Function
+    - name: _UnwindNestedFrames
+      kind: Function
+    - name: __FrameUnwindToState
+      kind: Function
+      skip: true
+    - name: ?SetState@@YAXPAKPAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@H@Z
+      kind: Function
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CallCatchBlock
+      kind: Function
+      skip: true
+    - name: _JumpToContinuation
+      kind: Function
+    - name: __restgprlr_21
+      skip: true
+- name: ?FindHandlerForForeignException@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@HH1@Z
+  references:
+    - name: __savegprlr_24
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _getptd
+      kind: Function
+      skip: true
+    - name: _CallSETranslator
+      kind: Function
+    - name: ?_inconsistency@@YAXXZ
+      kind: Function
+      skip: true
+    - name: ?_GetRangeOfTrysToCheck@@YAPBU_s_TryBlockMapEntry@@PAKPBU_s_FuncInfo@@HPAI2PAU_xDISPATCHER_CONTEXT@@@Z
+      kind: Function
+      skip: true
+    - name: ?CatchIt@@YAXPAUEHExceptionRecord@@PAKPAU_CONTEXT@@PAU_xDISPATCHER_CONTEXT@@PBU_s_FuncInfo@@PBU_s_HandlerType@@PBU_s_CatchableType@@PBU_s_TryBlockMapEntry@@H1E@Z
+      kind: Function
+      skip: true
+    - name: __restgprlr_24
+      skip: true
+- name: __BuildCatchObject
+  references:
+    - name: __savegprlr_28
+      skip: true
+    - name: __BuildCatchObjectHelper
+      kind: Function
+    - name: ?terminate@@YAXXZ
+      kind: Function
+      skip: true
+    - name: __restgprlr_28
+      skip: true
+- name: _UnwindNestedFrames
+  references:
+    - name: memcpy
+      kind: Function
+      skip: true
+    - name: RtlCaptureContext
+      kind: Function
+      skip: true
+    - name: unknown
+      kind: Object
+      skip: true
+    - name: _SaveUnwindContext
+      kind: Function
+    - name: unknown
+      kind: Object
+      skip: true
+    - name: RtlUnwind
+      kind: Function
+      skip: true
+    - name: memcpy
+      kind: Function
+      skip: true
+    - name: _SaveUnwindContext
+      kind: Function
       skip: true
 - name: atexit
   possible_signatures:
