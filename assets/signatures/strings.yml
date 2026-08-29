@@ -120,3 +120,112 @@
     - name: idunnolol
       kind: Object
       skip: true
+- name: tolower
+  possible_signatures:
+    - size: 0x18
+      signature: LwMAQf////9NmAAg/////y8DAFr/////TZkAIP////84YwAg/////06AACD/////
+      subsignature:
+        exact_bytes: LwMAQU2YACAvAwBaTZkAIDhjACBOgAAg
+        offset: 0x0
+- name: toupper
+  possible_signatures:
+    - size: 0x18
+      signature: LwMAYf////9NmAAg/////y8DAHr/////TZkAIP////84Y//g/////06AACD/////
+      subsignature:
+        exact_bytes: LwMAYU2YACAvAwB6TZkAIDhj/+BOgAAg
+        offset: 0x0
+- name: strstr
+  possible_signatures:
+    - size: 0x78
+      signature: iWQAAP////8oCwAA/////02CACD/////iWMAAP////99agd1/////0GCAFz/////fSQYUP////98iyN4/////y8KAAD/////QZoAMP////+JSwAA/////31KB3X/////QYIAJP////99CViu/////30IB3T/////fUpAUf////9AggAU/////zlrAAH/////fUlYrv////8oCgAA/////0CC/9j/////iWsAAP////8oCwAA/////02CACD/////jWMAAf////85KQAB/////31qB3X/////QIL/sP////84YAAA/////06AACD/////
+      subsignature:
+        exact_bytes: iWQAACgLAABNggAgiWMAAH1qB3VBggBcfSQYUHyLI3gvCgAAQZoAMIlLAAB9Sgd1QYIAJH0JWK59CAd0fUpAUUCCABQ5awABfUlYrigKAABAgv/YiWsAACgLAABNggAgjWMAATkpAAF9agd1QIL/sDhgAABOgAAg
+        offset: 0x0
+- name: strncpy
+  possible_signatures:
+    - size: 0x5C
+      signature: fGsbeP////8rBQAA/////02aACD/////fUMgUP////99Kliu/////ygJAAD/////mSsAAP////85awAB/////0GCAAz/////NKX///////9Agv/o/////ysFAAD/////TZoAIP////81Rf///////02CACD/////OWv///////85IAAA/////ygKAAD/////TYIAIP////99SQOm/////50rAAH/////QgD//P////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fGsbeCsFAABNmgAgfUMgUH0qWK4oCQAAmSsAADlrAAFBggAMNKX//0CC/+grBQAATZoAIDVF//9NggAgOWv//zkgAAAoCgAATYIAIH1JA6adKwABQgD//E6AACA=
+        offset: 0x0
+- name: strncmp
+  possible_signatures:
+    - size: 0x4C
+      signature: fKAref////98qQOm/////0CBADz/////iQMAAP////+I5AAA/////3xqG3j/////LIgAAP////98Z0AR/////0AGAAj/////ToAAIP////9MggAg/////40KAAH/////jOQAAf////8siAAA/////3xnQBH/////QAb/7P////9OgAAg/////zhgAAD/////ToAAIP////8=
+      subsignature:
+        exact_bytes: fKAreXypA6ZAgQA8iQMAAIjkAAB8aht4LIgAAHxnQBFABgAIToAAIEyCACCNCgABjOQAASyIAAB8Z0ARQAb/7E6AACA4YAAAToAAIA==
+        offset: 0x0
+- name: strchr
+  possible_signatures:
+    - size: 0x3C
+      signature: iMMAAP////8sBAAA/////0GCABz/////LIYAAP////98BiAA/////0GGACD/////QYIAIP////+MwwAB/////0v//+z/////LAYAAP////9BggAQ/////4zDAAH/////S///9P////84YAAA/////06AACD/////
+      subsignature:
+        exact_bytes: iMMAACwEAABBggAcLIYAAHwGIABBhgAgQYIAIIzDAAFL///sLAYAAEGCABCMwwABS///9DhgAABOgAAg
+        offset: 0x0
+- name: strrchr
+  possible_signatures:
+    - size: 0x58
+      signature: iKMAAP////98aRt4/////y8EAAD/////fAUgAP////9BmgA0/////zhgAAD/////QYIAGP////8vBQAA/////0GaADT/////jKkAAf////98BCgA/////0CC//D/////fSNLeP////+MqQAB/////3wEKAD/////QYL/9P////9L///c/////0GCABD/////jKMAAf////8sBQAA/////0v///T/////ToAAIP////8=
+      subsignature:
+        exact_bytes: iKMAAHxpG3gvBAAAfAUgAEGaADQ4YAAAQYIAGC8FAABBmgA0jKkAAXwEKABAgv/wfSNLeIypAAF8BCgAQYL/9Ev//9xBggAQjKMAASwFAABL///0ToAAIA==
+        offset: 0x0
+- name: strncat
+  possible_signatures:
+    - size: 0x50
+      signature: fGsbeP////+JSwAA/////zlrAAH/////KAoAAP////9Agv/0/////zlr////////KwUAAP////9BmgAo/////zkk////////jUkAAf////84pf///////ygKAAD/////mUsAAP////85awAB/////02CACD/////KwUAAP////9Amv/k/////zlAAAD/////mUsAAP////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fGsbeIlLAAA5awABKAoAAECC//Q5a///KwUAAEGaACg5JP//jUkAATil//8oCgAAmUsAADlrAAFNggAgKwUAAECa/+Q5QAAAmUsAAE6AACA=
+        offset: 0x0
+- name: strcspn
+  possible_signatures:
+    - size: 0x74
+      signature: OWAAIP////85Qf/f/////3yII3j/////OSAAAP////99aQOm/////50qAAH/////QgD//P////+JZAAA/////zjAAAH/////KAsAAP////9BggAw/////1Vp6P7/////jOgAAf////85Qf/g/////1VlB37/////fOs7ef////98xygw/////3ypUK7/////fOcreP////9U5wY+/////3zpUa7/////QIL/2P////+JQf/g/////zkh/+D/////iQMAAP////85YAAA/////2FKAAH/////VQfo/v////+ZQf/g/////1UIB37/////fMpAMP////99J0iu/////31KSDn/////QIIAKP////85awAB/////zlB/+D/////fSsYrv////9VKOj+/////1UpB37/////fMlIMP////99SFCu/////30qUDn/////QYL/4P////99Y1t4/////06AACD/////
+      subsignature:
+        exact_bytes: OWAAIDlB/998iCN4OSAAAH1pA6adKgABQgD//IlkAAA4wAABKAsAAEGCADBVaej+jOgAATlB/+BVZQd+fOs7eXzHKDB8qVCufOcreFTnBj586VGuQIL/2IlB/+A5If/giQMAADlgAABhSgABVQfo/plB/+BVCAd+fMpAMH0nSK59Skg5QIIAKDlrAAE5Qf/gfSsYrlUo6P5VKQd+fMlIMH1IUK59KlA5QYL/4H1jW3hOgAAg
+        offset: 0x0
+- name: strspn
+  possible_signatures:
+    - size: 0xB8
+      signature: OWAAIP////85Qf/f/////3yII3j/////OSAAAP////99aQOm/////50qAAH/////QgD//P////+JZAAA/////zjAAAH/////KAsAAP////9BggAw/////1Vq6P7/////jOgAAf////85If/g/////1VlB37/////fOs7ef////98xygw/////3yqSK7/////fOcreP////9U5wY+/////3zqSa7/////QIL/2P////+JYwAA/////ygLAAD/////QYIAUP////9Vauj+/////zkh/+D/////VWgHfv////85YAAA/////3zIQDD/////fUpIrv////99ClA5/////0GCACj/////OWsAAf////85Qf/g/////30rGK7/////VSjo/v////9VKQd+/////3zJSDD/////fUhQrv////99KlA5/////0CC/+D/////fWNbeP////9OgAAg/////zhgAAD/////ToAAIP////8=
+      subsignature:
+        exact_bytes: OWAAIDlB/998iCN4OSAAAH1pA6adKgABQgD//IlkAAA4wAABKAsAAEGCADBVauj+jOgAATkh/+BVZQd+fOs7eXzHKDB8qkiufOcreFTnBj586kmuQIL/2IljAAAoCwAAQYIAUFVq6P45If/gVWgHfjlgAAB8yEAwfUpIrn0KUDlBggAoOWsAATlB/+B9KxiuVSjo/lUpB358yUgwfUhQrn0qUDlAgv/gfWNbeE6AACA4YAAAToAAIA==
+        offset: 0x0
+- name: strpbrk
+  possible_signatures:
+    - size: 0x90
+      signature: OWAAIP////85Qf/f/////3yII3j/////OSAAAP////99aQOm/////50qAAH/////QgD//P////+JZAAA/////zjAAAH/////KAsAAP////9BggAw/////1Vq6P7/////jOgAAf////85If/g/////1VlB37/////fOs7ef////98xygw/////3yqSK7/////fOcreP////9U5wY+/////3zqSa7/////QIL/2P////+JYwAA/////0gAACT/////VWro/v////85If/g/////1VrB37/////fMtYMP////99Skiu/////31rUDn/////TIIAIP////+NYwAB/////ygLAAD/////QIL/3P////84YAAA/////06AACD/////
+      subsignature:
+        exact_bytes: OWAAIDlB/998iCN4OSAAAH1pA6adKgABQgD//IlkAAA4wAABKAsAAEGCADBVauj+jOgAATkh/+BVZQd+fOs7eXzHKDB8qkiufOcreFTnBj586kmuQIL/2IljAABIAAAkVWro/jkh/+BVawd+fMtYMH1KSK59a1A5TIIAII1jAAEoCwAAQIL/3DhgAABOgAAg
+        offset: 0x0
+- name: stricmp
+  possible_signatures:
+    - size: 0x54
+      signature: OSP///////84hP///////4zEAAH/////jKkAAf////8vhgAA/////3xmKFH/////QZ4AOP////9Bgv/s/////y6GAEH/////LwYAWv////9BlAAM/////0GZAAj/////YMYAIP////8sBQBB/////yyFAFr/////QYAADP////9BhQAI/////2ClACD/////fGYoUf////9Bgv+8/////06AACD/////
+      subsignature:
+        exact_bytes: OSP//ziE//+MxAABjKkAAS+GAAB8ZihRQZ4AOEGC/+wuhgBBLwYAWkGUAAxBmQAIYMYAICwFAEEshQBaQYAADEGFAAhgpQAgfGYoUUGC/7xOgAAg
+        offset: 0x0
+- name: _stricmp_l
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x4C
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////KwMAAP////9AmgAg/////0gAAAH8AAADOWAAFv////+RYwAA/////0gAAAH8AAADPGB///////9gY////////0gAABD/////KwQAAP////9Bmv/g/////0gAAAH8AAADOCEAYP////+Bgf/4/////32IA6b/////ToAAIP////8=
+      subsignature:
+        exact_bytes: PGB//2Bj//9IAAAQKwQAAEGa/+A=
+        offset: 0x24
+  references:
+    - name: _errno
+      kind: Function
+      skip: true
+    - name: _invalid_parameter_noinfo
+      kind: Function
+      skip: true
+    - name: __ascii_stricmp
+      kind: Function
+      size: 0x50
+- name: __ascii_stricmp
+  possible_signatures:
+    - size: 0x50
+      signature: OQP///////85JP///////41IAAH/////LwoAQf////9BmAAQ/////y8KAFr/////QZkACP////85SgAg/////41pAAH/////LwsAQf////9BmAAQ/////y8LAFr/////QZkACP////85awAg/////y8KAAD/////QZoADP////9/ClgA/////0Ga/8T/////fGtQUP////9OgAAg/////w==
+      subsignature:
+        exact_bytes: OQP//zkk//+NSAABLwoAQUGYABAvCgBaQZkACDlKACCNaQABLwsAQUGYABAvCwBaQZkACDlrACAvCgAAQZoADH8KWABBmv/EfGtQUE6AACA=
+        offset: 0x0

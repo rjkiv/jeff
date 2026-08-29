@@ -10,6 +10,31 @@
     - name: _RtlCheckStack12
       offset: 0x4
   required: true
+- name: _CallSettingFrame
+  possible_signatures:
+    - size: 0x5C
+      signature: fOgCpv/////7wf/w//////vh//j/////kOH/qP////+UIf+g/////3y/K3j/////fN4zeP////9IAAAB/AAAA3yMI3j/////k8EABP////98aAOm/////06AACH/////f+X7eP////8oHwEA/////0CCAAj/////OKAAAv////9IAAAB/AAAA4DhAAj/////fOgDpv/////rwQBQ/////+vhAFj/////OCEAYP////9OgAAg/////w==
+      subsignature:
+        exact_bytes: fOgCpvvB//D74f/4kOH/qJQh/6B8vyt4fN4zeA==
+        offset: 0x0
+  labels:
+    - name: __NLG_Return
+      offset: 0x30
+  references:
+    - name: _NLG_Notify
+      kind: Function
+      size: 0x18
+    - name: _NLG_Notify
+      kind: Function
+      skip: true
+- name: _NLG_Notify
+  labels:
+    - name: __NLG_Dispatch
+      offset: 0x14
+  references:
+    - name: idunnolol # maybe this is static uint32_t __NLG_Destination?
+      kind: Object
+      skip: true
 - name: _ctrlfp
   possible_signatures:
     - size: 0x30
@@ -231,3 +256,26 @@
   references:
     - name: _unlock
       kind: Function
+- name: _errno
+  num_handlers: 0
+  possible_signatures:
+    - size: 0x38
+      signature: fYgCpv////+Rgf/4/////5Qh/6D/////SAAAAfwAAAMoAwAA/////0CCABD/////PWAAAP//AAA4awAA//8AAEgAAAj/////OGMACP////84IQBg/////4GB//j/////fYgDpv////9OgAAg/////w==
+  references:
+    - name: _getptd_noexit
+      kind: Function
+      skip: true
+    - name: unknown
+      kind: Object
+      skip: true
+- name: _invalid_parameter_noinfo
+  possible_signatures:
+    - size: 0x34
+      signature: PWAAAP//AACBawAA//8AACgLAAD/////QYIAIP////844AAA/////31pA6b/////OMAAAP////84oAAA/////ziAAAD/////OGAAAP////9OgAQg/////w/gABb/////ToAAIP////8=
+      subsignature:
+        exact_bytes: KAsAAEGCACA44AAAfWkDpjjAAAA4oAAAOIAAADhgAABOgAQgD+AAFk6AACA=
+        offset: 0x8
+  references:
+    - name: __pInvalidArgHandler
+      kind: Object
+      size: 0x4
