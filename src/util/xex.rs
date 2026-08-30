@@ -205,12 +205,21 @@ impl XexInfo {
             bail!("Could not deduce exe type!");
         }
 
+        let image_base = xex_optional_headers.iter().find_map(|h| match h {
+            XexOptionalHeader::ImageBaseAddress { image_base } => Some(*image_base),
+            _ => None,
+        });
+
         let import_libs = xex_optional_headers.iter_mut().find_map(|h| match h {
             XexOptionalHeader::ImportLibraries { libraries } => Some(libraries),
             _ => None,
         });
 
-        let pe_file_finalized = XexInfo::finalize_exe(&exe_bytes, import_libs);
+        let pe_file_finalized = XexInfo::finalize_exe(
+            &exe_bytes,
+            import_libs,
+            image_base.expect("Image base address for xex not found!"),
+        );
 
         Ok(Self {
             header: xex_header,
@@ -356,7 +365,11 @@ impl XexInfo {
     //     Ok(patched_xex_bytes)
     // }
 
-    fn finalize_exe(exe_bytes: &Vec<u8>, import_libs: Option<&mut Vec<ImportLibrary>>) -> Vec<u8> {
+    fn finalize_exe(
+        exe_bytes: &Vec<u8>,
+        import_libs: Option<&mut Vec<ImportLibrary>>,
+        image_base: u32,
+    ) -> Vec<u8> {
         let pe_file = PeFile32::parse(exe_bytes.as_slice())
             .expect("Failed to parse newly pulled out exe file");
         let mut pe_file_adjusted: Vec<u8> = vec![];
@@ -387,6 +400,18 @@ impl XexInfo {
                 }
             }
         }
+
+        // replace the exe's image base with the one we found in the xex
+        let pe_offset = u32::from_le_bytes(pe_file_adjusted[0x3C..0x40].try_into().unwrap());
+        let pe_magic = u32::from_be_bytes(
+            pe_file_adjusted[pe_offset as usize..pe_offset as usize + 4]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(pe_magic, 0x50450000, "Bad PE magic!");
+        let image_base_offset = pe_offset + 0x34;
+        pe_file_adjusted[image_base_offset as usize..image_base_offset as usize + 4]
+            .copy_from_slice(&image_base.to_le_bytes());
 
         let pe_file = PeFile32::parse(pe_file_adjusted.as_slice())
             .expect("Failed to parse adjusted exe file");
