@@ -205,6 +205,12 @@ pub fn is_auto_jump_table(symbol: &ObjSymbol) -> bool {
     symbol.name.starts_with("jumptable_")
 }
 
+pub fn is_exception_info(symbol: &ObjSymbol) -> bool {
+    symbol.name.starts_with("__ehfuncinfo$")
+        || symbol.name.starts_with("__unwindtable$")
+        || symbol.name.starts_with("__iptostatemap$")
+}
+
 fn write_if_unchanged<Cb>(
     path: &Utf8NativePath,
     cb: Cb,

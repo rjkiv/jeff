@@ -14,7 +14,7 @@ use crate::{
     analysis::cfa::SectionAddress,
     obj::{ObjKind, ObjRelocKind, ObjSections, sections::SectionIndex},
     util::{
-        config::{is_auto_jump_table, is_auto_label, is_auto_symbol, parse_u32},
+        config::{is_auto_jump_table, is_auto_label, is_auto_symbol, is_exception_info, parse_u32},
         nested::NestedVec,
     },
 };
@@ -293,7 +293,9 @@ impl ObjSymbols {
                 // Replace auto symbols with known symbols
                 || (is_auto_symbol(existing) && !is_auto_symbol(&in_symbol))
                 // Replace lbl_ with jumptable_
-                || (is_auto_label(existing) && is_auto_jump_table(&in_symbol));
+                || (is_auto_label(existing) && is_auto_jump_table(&in_symbol))
+                // Always rename auto-generated exception info symbols
+                || (is_exception_info(existing) && is_exception_info(&in_symbol));
             let size =
                 if existing.size_known && in_symbol.size_known && existing.size != in_symbol.size {
                     // TODO fix this and restore to warning
